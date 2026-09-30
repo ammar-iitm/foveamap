@@ -126,12 +126,12 @@ These were measured with the Colab notebook on a T4 GPU. The model was fine-tune
 | Map memory / saving vs uniform 5 cm | 5.12 MB / 50× | ≤ 8 MB / ≥ 30× | pass |
 | Points lost at tier edges | 0 | 0 | pass |
 | Drivable IoU on grid, 0–10 m | 94.0% | ≥ 90% | pass |
-| Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 44.8% / 43.5% / 30.8% / 15.5% | ≥ 70% near | fail |
+| Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 44.8% / 43.5% / 30.8% / 15.4% | ≥ 70% near | fail |
 | Moving-object IoU | 37.5% | reported | — |
 | p50 / p95 latency, features + grid engine on the GPU | 30 / 31 ms | ≤ 50 ms p95 | pass |
 | Throughput, same run | 33.4 FPS | ≥ 20 FPS | pass |
 
-The latency rows come from a later T4 run that benchmarked the engines on the same scene. The other rows, and the files in [`results/nuscenes/`](results/nuscenes/), are from the earlier NumPy-engine run. Drivable IoU (94.0%) and points lost (0) were identical with every engine.
+All rows come from the run with features and grid engine on the GPU. [`results/nuscenes/`](results/nuscenes/) has its metrics and per-frame log (`scene-0103_metrics.json`, `benchmark_scene-0103.log`), next to the NumPy and concurrent-export runs from the same session (`*_numpy*`, `*_torch_async*`). The NumPy engine gives the same accuracy apart from the 50–100 m band (15.5% point mIoU), where rare tie pixels in the GPU range image change a few points.
 
 Latency is the map pipeline: sweep in, fused map snapshot on the host out. The dashboard PNGs (map and ground-truth tiles) are a benchmark artifact, so the benchmark encodes them after the timed loop by default (`--export after`) and reports that time separately. Encoding them concurrently on the same 2 vCPUs (`--export async`) starves the pipeline thread and raises p95 to 87 ms.
 

@@ -1,0 +1,150 @@
+frame   0  total   459.9 ms  preprocess 7  inference 389  projection 17  fusion 45  publish 1
+frame   1  total   126.5 ms  preprocess 18  inference 6  projection 34  fusion 67  publish 2
+frame   2  total   151.9 ms  preprocess 23  inference 12  projection 30  fusion 84  publish 3
+frame   3  total   190.6 ms  preprocess 32  inference 12  projection 46  fusion 97  publish 4
+frame   4  total   241.9 ms  preprocess 32  inference 12  projection 46  fusion 148  publish 4
+frame   5  total   241.3 ms  preprocess 32  inference 11  projection 42  fusion 154  publish 2
+frame   6  total   188.3 ms  preprocess 43  inference 14  projection 50  fusion 80  publish 1
+frame   7  total   249.4 ms  preprocess 35  inference 9  projection 50  fusion 152  publish 4
+frame   8  total   254.8 ms  preprocess 32  inference 11  projection 48  fusion 161  publish 3
+frame   9  total   199.2 ms  preprocess 31  inference 9  projection 51  fusion 107  publish 2
+frame  10  total   272.0 ms  preprocess 38  inference 13  projection 53  fusion 167  publish 2
+frame  11  total   208.0 ms  preprocess 36  inference 10  projection 51  fusion 107  publish 4
+frame  12  total   220.9 ms  preprocess 37  inference 11  projection 46  fusion 126  publish 2
+frame  13  total   213.4 ms  preprocess 44  inference 13  projection 56  fusion 99  publish 2
+frame  14  total   132.1 ms  preprocess 21  inference 5  projection 26  fusion 78  publish 2
+frame  15  total   126.5 ms  preprocess 21  inference 5  projection 26  fusion 73  publish 1
+frame  16  total   133.2 ms  preprocess 21  inference 6  projection 26  fusion 79  publish 2
+frame  17  total   138.3 ms  preprocess 20  inference 10  projection 26  fusion 81  publish 1
+frame  18  total   135.1 ms  preprocess 19  inference 6  projection 29  fusion 80  publish 2
+frame  19  total   153.7 ms  preprocess 19  inference 5  projection 28  fusion 100  publish 2
+frame  20  total   137.0 ms  preprocess 18  inference 5  projection 26  fusion 85  publish 2
+frame  21  total   139.2 ms  preprocess 20  inference 5  projection 27  fusion 86  publish 2
+frame  22  total   131.7 ms  preprocess 19  inference 5  projection 25  fusion 80  publish 2
+frame  23  total   127.2 ms  preprocess 19  inference 5  projection 26  fusion 76  publish 1
+frame  24  total   141.8 ms  preprocess 23  inference 6  projection 27  fusion 84  publish 1
+frame  25  total   162.8 ms  preprocess 18  inference 5  projection 33  fusion 106  publish 1
+frame  26  total   136.0 ms  preprocess 18  inference 5  projection 29  fusion 82  publish 2
+frame  27  total   130.9 ms  preprocess 18  inference 5  projection 24  fusion 82  publish 1
+frame  28  total   125.5 ms  preprocess 18  inference 5  projection 25  fusion 75  publish 2
+frame  29  total   125.0 ms  preprocess 19  inference 5  projection 24  fusion 76  publish 1
+frame  30  total   128.4 ms  preprocess 19  inference 5  projection 25  fusion 77  publish 1
+frame  31  total   136.0 ms  preprocess 24  inference 6  projection 25  fusion 79  publish 2
+frame  32  total   138.2 ms  preprocess 23  inference 7  projection 29  fusion 78  publish 1
+frame  33  total   133.8 ms  preprocess 18  inference 7  projection 29  fusion 79  publish 1
+frame  34  total   133.3 ms  preprocess 18  inference 5  projection 28  fusion 81  publish 2
+frame  35  total   130.4 ms  preprocess 18  inference 5  projection 25  fusion 81  publish 1
+frame  36  total   126.6 ms  preprocess 18  inference 5  projection 29  fusion 73  publish 2
+frame  37  total   129.6 ms  preprocess 18  inference 5  projection 25  fusion 81  publish 2
+frame  38  total   126.5 ms  preprocess 21  inference 5  projection 25  fusion 74  publish 2
+frame  39  total   118.3 ms  preprocess 18  inference 5  projection 24  fusion 70  publish 2
+{
+  "dataset": "nuscenes",
+  "source": "nuScenes scene-0103 \u00b7 32-beam Lidar \u00b7 labelled keyframes at 2 Hz",
+  "sensor_rows": 32,
+  "hz": 2.0,
+  "profile": "spec",
+  "hardware": "Tesla T4 GPU (FP16 inference) + CPU grid engine",
+  "grid_engine": "numpy",
+  "features_engine": "numpy",
+  "export_mode": "async",
+  "frames": 40,
+  "latency_ms": {
+    "p50": 136.505,
+    "p95": 250.2085,
+    "p99": 265.63860000000005,
+    "mean": 160.77078947368426
+  },
+  "fps": 6.220035388727657,
+  "grid_only_ms": 127.2363157894737,
+  "uniform5_grid_ms": 4105.308019333279,
+  "stages_ms": {
+    "preprocess": 24.260526315789473,
+    "inference": 7.438421052631578,
+    "projection": 33.09842105263157,
+    "fusion": 94.13789473684211,
+    "publish": 1.8355263157894737
+  },
+  "export_ms": 208.17184210526315,
+  "memory_bytes": {
+    "foveated_spec": 5120000,
+    "foveated_graded": 9120000,
+    "uniform_50cm_2.5d": 2560000,
+    "uniform_5cm_2.5d": 256000000,
+    "occupancy_2d_5cm": 16000000,
+    "dense_voxel_5cm": 5120000000,
+    "sparse_voxel_5cm_one_sweep": 219850,
+    "raw_sweep": 414368
+  },
+  "memory_saving_vs_uniform5": 50.0,
+  "cells": {
+    "foveated_spec": 320000,
+    "uniform_5cm": 16000000
+  },
+  "tiers": [
+    {
+      "cell": 0.05,
+      "half": 10.0,
+      "n": 400
+    },
+    {
+      "cell": 0.5,
+      "half": 100.0,
+      "n": 400
+    }
+  ],
+  "classes": [
+    "drivable surface",
+    "sidewalk / other flat",
+    "(unused)",
+    "terrain",
+    "vegetation",
+    "manmade / static",
+    "barrier / cone",
+    "vehicle",
+    "person"
+  ],
+  "active_classes": [
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "bands": [
+    "0\u201310 m",
+    "10\u201325 m",
+    "25\u201350 m",
+    "50\u2013100 m"
+  ],
+  "point_miou_by_band": [
+    0.44844497853387105,
+    0.43540927650717803,
+    0.30812087271459554,
+    0.15486424659874787
+  ],
+  "grid_miou_by_band": [
+    0.45119089895398223,
+    0.4253954732339432,
+    0.29060016227165264,
+    0.15356959143544485
+  ],
+  "point_miou": 0.44482566431065756,
+  "drivable_iou_grid_0_10": 0.9403386600958886,
+  "drivable_iou_points_0_10": 0.9504898625824636,
+  "moving_iou_by_band": [
+    0.4658144870534251,
+    0.32802547770700635,
+    0.14247669773635152,
+    0.11253196930946291
+  ],
+  "moving_iou": 0.37481576417814805,
+  "curb_recall_10m": null,
+  "pothole_recall_10m": null,
+  "points_lost": 0,
+  "nesting_ok": true
+}
