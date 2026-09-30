@@ -6,8 +6,10 @@
 *.pkl
 # local dashboard wrapper (scripts/make_local_view.py)
 dashboard/view.html
-# nuScenes fine-tuned weights come from the Colab notebook
+# fine-tuned weights come from the Colab notebooks
 checkpoints/range_unet_nuscenes*
+checkpoints/range_unet_semantickitti*
+checkpoints/recipe_*
 __pycache__/
 *.pyc
 .pytest_cache/

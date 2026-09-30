@@ -4,6 +4,7 @@
     python scripts/run_benchmark.py --grid torch                      # grid engine in PyTorch (GPU if present)
     python scripts/run_benchmark.py --dataset nuscenes --scene scene-0103 \
         --ckpt checkpoints/range_unet_nuscenes.pt --out dashboard/data
+    python scripts/run_benchmark.py --dataset semantickitti --scene 08 --max-frames 100 --grid torch
 """
 import argparse
 import json
@@ -18,10 +19,12 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="sim", choices=["sim", "nuscenes"])
+    ap.add_argument("--dataset", default="sim", choices=["sim", "nuscenes", "semantickitti"])
     ap.add_argument("--seq", default=os.path.join(ROOT, "data", "demo.npz"), help="simulated sequence (.npz)")
-    ap.add_argument("--cache", default=os.path.join(ROOT, "cache", "nuscenes"))
-    ap.add_argument("--scene", default="scene-0103", help="nuScenes scene name")
+    ap.add_argument("--cache", default=None, help="frame cache (default: cache/<dataset>)")
+    ap.add_argument("--scene", default=None,
+                    help="nuScenes scene (default scene-0103) or SemanticKITTI sequence (default 08)")
+    ap.add_argument("--max-frames", type=int, default=None, help="use only the first n frames")
     ap.add_argument("--ckpt", default=None)
     ap.add_argument("--out", default=os.path.join(ROOT, "dashboard", "data"))
     ap.add_argument("--profile", default="spec")
@@ -39,12 +42,27 @@ if __name__ == "__main__":
         frames, truth = sim_frames(args.seq)
         info = SIM_INFO
         ckpt = args.ckpt or os.path.join(ROOT, "checkpoints", "range_unet.pt")
-    else:
+    elif args.dataset == "nuscenes":
         from foveamap.nuscenes import load_scene, cached_info
-        frames, truth = load_scene(args.cache, args.scene), None
-        info = cached_info(args.cache)
+        cache = args.cache or os.path.join(ROOT, "cache", "nuscenes")
+        args.scene = args.scene or "scene-0103"
+        frames, truth = load_scene(cache, args.scene), None
+        info = cached_info(cache)
         info.source = f"nuScenes {args.scene} · {info.n_rows}-beam Lidar · labelled keyframes at 2 Hz"
         ckpt = args.ckpt or os.path.join(ROOT, "checkpoints", "range_unet_nuscenes.pt")
+    else:
+        from foveamap.semantickitti import load_scene, cached_info
+        cache = args.cache or os.path.join(ROOT, "cache", "semantickitti")
+        args.scene = args.scene or "08"
+        frames, truth = load_scene(cache, args.scene), None
+        info = cached_info(cache)
+        with open(os.path.join(cache, "index.json")) as fh:
+            stride = json.load(fh)["stride"]
+        info.source = f"SemanticKITTI sequence {args.scene} · 64-beam Lidar · every {stride}th scan"
+        info.hz = 10.0 / stride
+        ckpt = args.ckpt or os.path.join(ROOT, "checkpoints", "range_unet_semantickitti.pt")
+    if args.max_frames:
+        frames = frames[:args.max_frames]
 
     summary, _ = run_benchmark(frames, info, ckpt, args.out, truth=truth, profile=args.profile, device=args.device,
                                grid=args.grid, features=args.features, export=args.export)

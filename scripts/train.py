@@ -7,6 +7,9 @@
     python scripts/train.py --dataset nuscenes --cache cache/nuscenes \
         --init checkpoints/range_unet.pt --out checkpoints/range_unet_nuscenes.pt --epochs 60
     # recipe options: --reset-head (fresh class layer), --balance (rare-class frames), --aug
+
+    # SemanticKITTI (cache from scripts/prepare_semantickitti.py), fine-tune from the simulator
+    python scripts/train.py --dataset semantickitti --init checkpoints/range_unet.pt --epochs 30
 """
 import argparse
 import glob
@@ -29,15 +32,20 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 
 
 def load_frames(args, split):
+    """(frames, info, n). SemanticKITTI frames are a generator (one sequence in memory at a time)."""
     if args.dataset == "sim":
         pat = "train_*.npz" if split == "train" else "val_*.npz"
         frames = []
         for p in sorted(glob.glob(os.path.join(ROOT, "data", pat))):
             frames += sim_frames(p)[0]
-        return frames, SIM_INFO
-    from foveamap.nuscenes import load_cached, cached_info
+        return frames, SIM_INFO, len(frames)
     sp = {"train": args.train_split, "val": args.val_split}[split]
-    return load_cached(args.cache, sp), cached_info(args.cache)
+    if args.dataset == "semantickitti":
+        from foveamap.semantickitti import iter_cached, count_cached, cached_info
+        return iter_cached(args.cache, sp), cached_info(args.cache), count_cached(args.cache, sp)
+    from foveamap.nuscenes import load_cached, cached_info
+    frames = load_cached(args.cache, sp)
+    return frames, cached_info(args.cache), len(frames)
 
 
 def evaluate(model, frames, info):
@@ -101,10 +109,10 @@ def top_confusions(cm, names, active, k=2):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="sim", choices=["sim", "nuscenes"])
-    ap.add_argument("--cache", default=os.path.join(ROOT, "cache", "nuscenes"))
-    ap.add_argument("--train-split", default="mini_train")
-    ap.add_argument("--val-split", default="mini_val")
+    ap.add_argument("--dataset", default="sim", choices=["sim", "nuscenes", "semantickitti"])
+    ap.add_argument("--cache", default=None, help="frame cache (default: cache/<dataset>)")
+    ap.add_argument("--train-split", default=None, help="default: mini_train (nuScenes), train (SemanticKITTI)")
+    ap.add_argument("--val-split", default=None, help="default: mini_val (nuScenes), val (SemanticKITTI)")
     ap.add_argument("--init", default=None, help="checkpoint to fine-tune from")
     ap.add_argument("--out", default=None)
     ap.add_argument("--budget", type=float, default=float(os.environ.get("TRAIN_BUDGET_S", 900)), help="seconds")
@@ -118,15 +126,21 @@ def main():
     ap.add_argument("--aug", action="store_true", help="random scale (+/-5%%) and intensity jitter")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
-    out = args.out or os.path.join(ROOT, "checkpoints", "range_unet.pt" if args.dataset == "sim" else "range_unet_nuscenes.pt")
+    args.cache = args.cache or os.path.join(ROOT, "cache", args.dataset)
+    kitti = args.dataset == "semantickitti"
+    args.train_split = args.train_split or ("train" if kitti else "mini_train")
+    args.val_split = args.val_split or ("val" if kitti else "mini_val")
+    out = args.out or os.path.join(ROOT, "checkpoints", "range_unet.pt" if args.dataset == "sim"
+                                   else f"range_unet_{args.dataset}.pt")
 
     dev = pick_device(args.device)
     if dev.type == "cpu":
         torch.set_num_threads(max(1, os.cpu_count() or 1))
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
-    frames, info = load_frames(args, "train")
-    X, Y, M, R = frames_to_training_arrays(frames, info)
+    frames, info, n_frames = load_frames(args, "train")
+    X, Y, M, R = frames_to_training_arrays(frames, info, n_frames)
+    del frames
     print(f"{args.dataset}: {len(X)} training frames, range image {info.n_rows} x {info.n_cols}, device {dev}", flush=True)
 
     valid = Y >= 0
@@ -204,7 +218,7 @@ def main():
     model.to(dev).eval()
     print("saved", out, f"({step} steps, {time.time() - t0:.0f}s)")
 
-    vframes, _ = load_frames(args, "val")
+    vframes, _, _ = load_frames(args, "val")
     res = evaluate(model, vframes, info)
     print(f"val mIoU {res['miou']:.3f}  moving IoU {res['moving_iou']}")
     for n, v in zip(BAND_NAMES, res["miou_by_band"]):

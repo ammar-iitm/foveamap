@@ -190,9 +190,10 @@ def sim_frames(path_or_seq):
     return frames, truth
 
 
-def frames_to_training_arrays(frames, info: DatasetInfo):
-    """Features + per-pixel targets for a list of frames (used by training)."""
-    F = len(frames)
+def frames_to_training_arrays(frames, info: DatasetInfo, n=None):
+    """Features + per-pixel targets for a list of frames (used by training).
+    frames may be any iterable when n (the number of frames) is given."""
+    F = len(frames) if n is None else n
     X = np.zeros((F, IN_CH, info.n_rows, info.n_cols), np.float16)
     Y = np.full((F, info.n_rows, info.n_cols), -1, np.int8)
     M = np.zeros((F, info.n_rows, info.n_cols), bool)
