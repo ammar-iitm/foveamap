@@ -187,11 +187,12 @@ def _export_frame(snap, dyn, gstats, tiers, path):
 
 
 def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile="spec",
-                  export="async", n_uniform=3, device=None, grid="numpy", features=None):
+                  export="after", n_uniform=3, device=None, grid="numpy", features=None):
     """Run frames through the pipeline; write metrics.json, frames/*.png and
     points.b64.txt for the dashboard. truth: simulator-only curb/pothole geometry.
-    export: 'async' (background thread during run), 'after' (encode after timed loop),
-    or 'none' / False.
+    export: 'after' (default: keep each frame's map snapshot, ~5 MB, and encode the PNGs
+    after the timed loop), 'async' (encode on a background thread during the run; on a
+    small machine it competes with the pipeline), or 'none' / False.
     grid / features: "numpy" or "torch" (on the model's device); features follows grid by default."""
     if export is True:
         export_mode = "async"

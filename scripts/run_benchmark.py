@@ -30,9 +30,9 @@ if __name__ == "__main__":
                     help="grid engine: NumPy on the CPU, or PyTorch on the model's device")
     ap.add_argument("--features", default=None, choices=["numpy", "torch"],
                     help="range-image features engine (default: same as --grid)")
-    ap.add_argument("--export", default="async", choices=["async", "after", "none"],
-                    help="dashboard PNG export: 'async' (background thread during run), "
-                         "'after' (encode after timed loop), or 'none'")
+    ap.add_argument("--export", default="after", choices=["after", "async", "none"],
+                    help="dashboard PNG export: 'after' (encode after the timed loop, default), "
+                         "'async' (background thread during the run), or 'none'")
     args = ap.parse_args()
 
     if args.dataset == "sim":
