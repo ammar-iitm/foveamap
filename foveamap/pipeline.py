@@ -10,6 +10,7 @@ import io
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
@@ -19,30 +20,60 @@ from .sim import NUM_CLASSES, ROAD, PARKING, VEHICLE, PERSON
 from .model import load_model, predict, pick_device
 from .frames import DatasetInfo, make_features, prev_in_ego, transform
 from .grid import (FoveatedGrid, UNKNOWN, F_DYNAMIC, F_OVERHANG, F_STEP, F_DEPRESSION)
+from .grid_torch import TorchFoveatedGrid
 
 BANDS = [(0, 10), (10, 25), (25, 50), (50, 100)]
 BAND_NAMES = ["0–10 m", "10–25 m", "25–50 m", "50–100 m"]
 
 
-def hardware_label(device):
+def hardware_label(device, grid="numpy"):
     if device.type == "cuda":
-        return f"{torch.cuda.get_device_name(device)} GPU (FP16 inference) + CPU grid engine"
-    return f"{os.cpu_count()} vCPU, no GPU (CPU PyTorch)"
+        where = "GPU" if grid == "torch" else "CPU"
+        return f"{torch.cuda.get_device_name(device)} GPU (FP16 inference) + {where} grid engine"
+    engine = "PyTorch" if grid == "torch" else "NumPy"
+    return f"{os.cpu_count()} vCPU, no GPU (CPU PyTorch, {engine} grid engine)"
+
+
+def _sync(device):
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    elif device.type == "mps":
+        torch.mps.synchronize()
+
+
+def to_host(x):
+    """Tensors (also inside dicts / lists) -> NumPy arrays."""
+    if torch.is_tensor(x):
+        return x.cpu().numpy()
+    if isinstance(x, dict):
+        return {k: to_host(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return type(x)(to_host(v) for v in x)
+    return x
 
 
 class FoveaMapPipeline:
     """sweep -> features -> network -> foveated grid, with per-stage timing."""
 
-    def __init__(self, ckpt, info: DatasetInfo, profile="spec", fuse=True, device=None):
+    def __init__(self, ckpt, info: DatasetInfo, profile="spec", fuse=True, device=None, grid="numpy"):
         if not torch.cuda.is_available():
             torch.set_num_threads(max(1, os.cpu_count() or 1))
         self.device = pick_device(device)
         self.model = load_model(ckpt, self.device)
         self.info = info
-        self.grid = FoveatedGrid(profile, fuse=fuse)
+        self.grid_engine = grid
+        if grid == "torch":
+            self.grid = TorchFoveatedGrid(profile, fuse=fuse, device=self.device)
+        elif grid == "numpy":
+            self.grid = FoveatedGrid(profile, fuse=fuse)
+        else:
+            raise ValueError(f"unknown grid engine {grid!r}")
         self.history = []          # last 2 sweeps as (pts_world, ring), newest last
 
     def step(self, frame):
+        """One sweep. With the torch engine, predictions stay on the device through
+        binning and fusion, and the per-point / per-cell outputs are tensors (see to_host)."""
+        on_dev = self.grid_engine == "torch"
         T = {}
         t0 = time.perf_counter()
         hist = [self.history[-k] if len(self.history) >= k else None for k in (1, 2)]
@@ -50,21 +81,26 @@ class FoveaMapPipeline:
         T["preprocess"] = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        probs, pmove = predict(self.model, feats, self.info.active)
+        probs, pmove = predict(self.model, feats, self.info.active, to_host=not on_dev)
+        _sync(self.device)
         T["inference"] = time.perf_counter() - t0
 
         t0 = time.perf_counter()
+        if on_dev:
+            row, col = (torch.from_numpy(np.asarray(a)).to(self.device) for a in (row, col))
         P = probs[row, col]                                   # every point takes its pixel's prediction
         cls = P.argmax(1)
-        moving = (pmove[row, col] > 0.5) & np.isin(cls, (VEHICLE, PERSON))
+        moving = (pmove[row, col] > 0.5) & ((cls == VEHICLE) | (cls == PERSON))
         pw = transform(frame["pose"], frame["pts"].astype(np.float64))
         ego_xy = frame["pose"][:2, 3]
         origins = self.grid.window_origins(ego_xy)
         stats = self.grid.bin_points(pw[:, :2], pw[:, 2], P, moving, origins)
+        _sync(self.device)
         T["projection"] = time.perf_counter() - t0
 
         t0 = time.perf_counter()
         dyn = self.grid.fuse_stats(stats, origins)
+        _sync(self.device)
         T["fusion"] = time.perf_counter() - t0
 
         self.history.append((pw, frame["ring"]))
@@ -121,12 +157,29 @@ def ious_from(cm):
     return np.where(den > 0, tp / np.maximum(den, 1), np.nan)
 
 
+def _export_frame(snap, dyn, gstats, tiers, path):
+    """Background job: encode the map tiles, the publish PNG and the dashboard frame.
+    Runs off the critical path; its time is reported as export_ms, not latency."""
+    t0 = time.perf_counter()
+    tiles = [encode_tier(s, d, tr.n) for s, d, tr in zip(snap, dyn, tiers)]
+    pub_buf = io.BytesIO()
+    Image.fromarray(np.concatenate(tiles, 1)).save(pub_buf, format="PNG", compress_level=1)
+    gt_tiles = [encode_gt(gs, s.conf, tr.n) for gs, s, tr in zip(gstats, snap, tiers)]
+    buf = io.BytesIO()
+    Image.fromarray(np.concatenate(tiles + gt_tiles, 1)).save(buf, format="PNG", optimize=False, compress_level=6)
+    if path is not None:
+        with open(path, "wb") as fh:
+            fh.write(buf.getvalue())
+    return (time.perf_counter() - t0) * 1000, len(buf.getvalue())
+
+
 def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile="spec",
-                  export=True, n_uniform=3, device=None):
+                  export=True, n_uniform=3, device=None, grid="numpy"):
     """Run frames through the pipeline; write metrics.json, frames/*.png and
-    points.b64.txt for the dashboard. truth: simulator-only curb/pothole geometry."""
+    points.b64.txt for the dashboard. truth: simulator-only curb/pothole geometry.
+    grid: "numpy" or "torch" (on the model's device)."""
     T = len(frames)
-    pipe = FoveaMapPipeline(ckpt, info, profile, device=device)
+    pipe = FoveaMapPipeline(ckpt, info, profile, device=device, grid=grid)
     gt_grid = FoveatedGrid(profile, fuse=False)
     frames_dir = os.path.join(out_dir, "frames")
     os.makedirs(frames_dir, exist_ok=True)
@@ -140,30 +193,28 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
     per_frame, pts_blob, pts_index = [], [], []
     rng = np.random.default_rng(0)
     from scipy.ndimage import binary_dilation
+    exporter = ThreadPoolExecutor(max_workers=1)
+    exports = []
 
     for t, fr in enumerate(frames):
         r = pipe.step(fr)
         ego = r["ego_xy"]
 
-        # ---- serialise (the "publish" stage) -----------------------------------
+        # ---- publish: host snapshot of the map; tile/PNG encoding runs in the background
         t0 = time.perf_counter()
-        tiles = [encode_tier(s, d, tr.n) for s, d, tr in zip(pipe.grid.state, r["dyn"], pipe.grid.tiers)]
-        pub_buf = io.BytesIO()
-        Image.fromarray(np.concatenate(tiles, 1)).save(pub_buf, format="PNG", compress_level=1)
+        snap = pipe.grid.snapshot()
+        dyn = to_host(r["dyn"])
         r["timing"]["publish"] = time.perf_counter() - t0
+        for k in ("cls_pts", "moving_pts", "stats"):          # benchmark bookkeeping, not timed
+            r[k] = to_host(r[k])
 
         # ground truth grid for the same frame (benchmark only, not timed)
         lab = fr["label"].astype(np.int64)
         has = lab >= 0
         gm = fr["moving"]
         gstats = gt_grid.bin_points(r["pw"][has, :2], r["pw"][has, 2], np.eye(C)[lab[has]], gm[has], pipe.grid.origins)
-        gt_tiles = [encode_gt(gs, s.conf, tr.n) for gs, s, tr in zip(gstats, pipe.grid.state, pipe.grid.tiers)]
-        img = np.concatenate(tiles + gt_tiles, 1)
-        buf = io.BytesIO()
-        Image.fromarray(img).save(buf, format="PNG", optimize=False, compress_level=6)
-        if export:
-            with open(os.path.join(frames_dir, f"f{t:03d}.png"), "wb") as fh:
-                fh.write(buf.getvalue())
+        exports.append(exporter.submit(_export_frame, snap, dyn, gstats, pipe.grid.tiers,
+                                       os.path.join(frames_dir, f"f{t:03d}.png") if export else None))
 
         # ---- point accuracy by distance band (ego-frame horizontal distance) ----
         d = np.hypot(r["pts"][:, 0], r["pts"][:, 1])
@@ -186,7 +237,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
 
         # ---- curb + pothole detection (simulator only: needs exact geometry) ----
         if truth is not None:
-            s0, tr0 = pipe.grid.state[0], pipe.grid.tiers[0]
+            s0, tr0 = snap[0], pipe.grid.tiers[0]
             cen = pipe.grid.cell_centres(0)
             near = np.hypot(cen[..., 0] - ego[0], cen[..., 1] - ego[1]) < 10
             obs = s0.age == 0
@@ -225,10 +276,14 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
             timing_ms=timing_ms, total_ms=round(sum(timing_ms.values()), 2),
             points=n_pts, binned=n_in, in_window=in_window, nest_ok=bool(nest_ok),
             cells_updated=int(sum(len(s["key"]) for s in r["stats"])),
-            png_bytes=len(buf.getvalue()),
         ))
         print(f"frame {t:3d}  total {per_frame[-1]['total_ms']:7.1f} ms  "
               + "  ".join(f"{k} {v:.0f}" for k, v in timing_ms.items()), flush=True)
+
+    exporter.shutdown(wait=True)
+    for f, job in zip(per_frame, exports):
+        f["export_ms"], f["png_bytes"] = job.result()
+        f["export_ms"] = round(f["export_ms"], 2)
 
     # ------------------------------------------------------------------ summary
     warm = per_frame[2:] if T > 3 else per_frame
@@ -263,7 +318,8 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
     summary = dict(
         dataset=info.name, source=info.source, sensor_rows=info.n_rows, hz=info.hz,
         profile=profile,
-        hardware=hardware_label(pipe.device),
+        hardware=hardware_label(pipe.device, grid),
+        grid_engine=grid,
         frames=T,
         latency_ms=dict(p50=float(np.percentile(totals, 50)), p95=float(np.percentile(totals, 95)),
                         p99=float(np.percentile(totals, 99)), mean=float(totals.mean())),
@@ -271,6 +327,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         grid_only_ms=float(np.mean([f["timing_ms"]["projection"] + f["timing_ms"]["fusion"] for f in warm])),
         uniform5_grid_ms=float(np.mean(u_times)),
         stages_ms=stages,
+        export_ms=float(np.mean([f["export_ms"] for f in warm])),     # background thread, not in latency
         memory_bytes=mem,
         memory_saving_vs_uniform5=mem["uniform_5cm_2.5d"] / mem["foveated_spec"],
         cells=dict(foveated_spec=pipe.grid.n_cells, uniform_5cm=16_000_000),

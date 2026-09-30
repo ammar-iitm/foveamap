@@ -1,6 +1,7 @@
 """Run a drive through the full pipeline, print the benchmark, export dashboard data.
 
     python scripts/run_benchmark.py                                   # simulated demo drive
+    python scripts/run_benchmark.py --grid torch                      # grid engine in PyTorch (GPU if present)
     python scripts/run_benchmark.py --dataset nuscenes --scene scene-0103 \
         --ckpt checkpoints/range_unet_nuscenes.pt --out dashboard/data
 """
@@ -25,6 +26,8 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=os.path.join(ROOT, "dashboard", "data"))
     ap.add_argument("--profile", default="spec")
     ap.add_argument("--device", default=None)
+    ap.add_argument("--grid", default="numpy", choices=["numpy", "torch"],
+                    help="grid engine: NumPy on the CPU, or PyTorch on the model's device")
     args = ap.parse_args()
 
     if args.dataset == "sim":
@@ -38,6 +41,7 @@ if __name__ == "__main__":
         info.source = f"nuScenes {args.scene} · {info.n_rows}-beam Lidar · labelled keyframes at 2 Hz"
         ckpt = args.ckpt or os.path.join(ROOT, "checkpoints", "range_unet_nuscenes.pt")
 
-    summary, _ = run_benchmark(frames, info, ckpt, args.out, truth=truth, profile=args.profile, device=args.device)
+    summary, _ = run_benchmark(frames, info, ckpt, args.out, truth=truth, profile=args.profile, device=args.device,
+                               grid=args.grid)
     s = {k: v for k, v in summary.items() if not k.endswith("_index") and "by_class" not in k}
     print(json.dumps(s, indent=2))

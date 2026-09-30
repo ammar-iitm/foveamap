@@ -88,6 +88,14 @@ class TierLayers:
     def nbytes(self):
         return sum(getattr(self, f).nbytes for f in self.FIELDS)
 
+    def copy(self):
+        out = TierLayers(self.n)
+        for f in self.FIELDS:
+            getattr(out, f)[:] = getattr(self, f)
+        if hasattr(self, "eff_cls"):
+            out.eff_cls = self.eff_cls.copy()
+        return out
+
     def shifted(self, d):
         """Copy of this state moved by d = (di, dj) cells (window scroll)."""
         out = TierLayers(self.n)
@@ -202,6 +210,10 @@ class FoveatedGrid:
 
     def _new_layers(self, n):
         return TierLayers(n)
+
+    def snapshot(self):
+        """Host copy of every tier's state, safe to read while the grid keeps updating."""
+        return [s.copy() for s in self.state]
 
     def fuse_stats(self, stats, origins):
         """Scroll the state to `origins` and fuse one frame's binned stats. Returns the dynamic cells per tier."""

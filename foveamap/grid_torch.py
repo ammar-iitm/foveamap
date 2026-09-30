@@ -174,6 +174,9 @@ class TorchFoveatedGrid(FoveatedGrid):
     def _new_layers(self, n):
         return TorchTierLayers(n, self.device)
 
+    def snapshot(self):
+        return [s.to_numpy() for s in self.state]
+
     def _fuse_tier(self, t, s: TorchTierLayers, st):
         n, fdt = t.n, self.dtype
         key = st["key"]

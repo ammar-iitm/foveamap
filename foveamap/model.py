@@ -63,9 +63,10 @@ def load_model(ckpt, device=None):
 
 
 @torch.no_grad()
-def predict(model, feats, active=None, fp16=True):
+def predict(model, feats, active=None, fp16=True, to_host=True):
     """feats: (8, H, W) numpy -> probs (H, W, C) numpy, p_move (H, W) numpy.
-    active: boolean class mask; inactive classes are never predicted."""
+    active: boolean class mask; inactive classes are never predicted.
+    to_host=False returns device tensors instead (no sync, no copy)."""
     dev = next(model.parameters()).device
     x = torch.from_numpy(np.asarray(feats, np.float32))[None].to(dev)
     with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(fp16 and dev.type == "cuda")):
@@ -75,6 +76,8 @@ def predict(model, feats, active=None, fp16=True):
         sem[:, torch.from_numpy(~np.asarray(active, bool)).to(dev)] = -1e4
     probs = torch.softmax(sem[0], 0).permute(1, 2, 0)
     pm = torch.sigmoid(mot[0].float())
+    if not to_host:
+        return probs, pm
     if dev.type == "cuda":
         torch.cuda.synchronize()
     return probs.cpu().numpy(), pm.cpu().numpy()
