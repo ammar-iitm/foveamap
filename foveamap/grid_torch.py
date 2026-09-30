@@ -103,7 +103,7 @@ class TorchFoveatedGrid(FoveatedGrid):
         self._drivable = torch.as_tensor(DRIVABLE, device=dev)
         self._overhang = torch.as_tensor(OVERHANG_LUT, device=dev)
         self._pass_under = torch.as_tensor(PASS_UNDER_LUT, device=dev)
-        self.state = [TorchTierLayers(t.n, dev) for t in self.tiers]
+        self.state = [self._new_layers(t.n) for t in self.tiers]
 
     # ------------------------------------------------------------------ utils
     def _t(self, a, dtype):
@@ -171,20 +171,8 @@ class TorchFoveatedGrid(FoveatedGrid):
 
 
     # --------------------------------------------------------------- update
-    def update(self, xy_world, z, probs, moving, ego_xy):
-        """Process one frame. Returns (dynamic cells per tier, frame stats per tier), as tensors."""
-        origins = self.window_origins(ego_xy)
-        stats = self.bin_points(xy_world, z, probs, moving, origins)
-        if self.origins is not None and self.fuse:
-            self.state = [s.shifted(o - oo) for s, o, oo in zip(self.state, origins, self.origins)]
-        elif not self.fuse:
-            self.state = [TorchTierLayers(t.n, self.device) for t in self.tiers]
-        self.origins = origins
-        dyn = []
-        for t, s, st in zip(self.tiers, self.state, stats):
-            dyn.append(self._fuse_tier(t, s, st))
-            self._derive(t, s)
-        return dyn, stats
+    def _new_layers(self, n):
+        return TorchTierLayers(n, self.device)
 
     def _fuse_tier(self, t, s: TorchTierLayers, st):
         n, fdt = t.n, self.dtype

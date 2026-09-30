@@ -198,16 +198,23 @@ class FoveatedGrid:
         """Process one frame. Returns (map_layers_per_tier, frame_stats_per_tier)."""
         origins = self.window_origins(ego_xy)
         stats = self.bin_points(xy_world, z, probs, moving, origins)
+        return self.fuse_stats(stats, origins), stats
+
+    def _new_layers(self, n):
+        return TierLayers(n)
+
+    def fuse_stats(self, stats, origins):
+        """Scroll the state to `origins` and fuse one frame's binned stats. Returns the dynamic cells per tier."""
         if self.origins is not None and self.fuse:
             self.state = [s.shifted(o - oo) for s, o, oo in zip(self.state, origins, self.origins)]
         elif not self.fuse:
-            self.state = [TierLayers(t.n) for t in self.tiers]
+            self.state = [self._new_layers(t.n) for t in self.tiers]
         self.origins = origins
         dyn = []
         for t, s, st in zip(self.tiers, self.state, stats):
             dyn.append(self._fuse_tier(t, s, st))
             self._derive(t, s)
-        return dyn, stats
+        return dyn
 
     def _fuse_tier(self, t, s: TierLayers, st):
         n = t.n

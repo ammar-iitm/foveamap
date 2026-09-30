@@ -64,14 +64,7 @@ class FoveaMapPipeline:
         T["projection"] = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        g = self.grid
-        if g.origins is not None and g.fuse:
-            g.state = [s.shifted(o - oo) for s, o, oo in zip(g.state, origins, g.origins)]
-        g.origins = origins
-        dyn = []
-        for t, s, st in zip(g.tiers, g.state, stats):
-            dyn.append(g._fuse_tier(t, s, st))
-            g._derive(t, s)
+        dyn = self.grid.fuse_stats(stats, origins)
         T["fusion"] = time.perf_counter() - t0
 
         self.history.append((pw, frame["ring"]))
