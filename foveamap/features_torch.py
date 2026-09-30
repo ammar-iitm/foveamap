@@ -1,0 +1,108 @@
+"""PyTorch port of `frames.make_features` (range image + 8-channel features on any device).
+
+Same channels and conventions as the NumPy version, which stays the
+reference (`tests/test_features_torch.py` checks parity):
+
+* "Nearest point wins" per pixel is a per-pixel `amin` of range, then the
+  point index among the points at that range (`amax` on exact ties, where the
+  NumPy argsort order is arbitrary anyway).
+* `np.interp` (row elevations, re-assigning older sweeps to rows) becomes a
+  `searchsorted`-based linear interpolation with the same end clamping.
+"""
+from __future__ import annotations
+
+import numpy as np
+import torch
+
+from .frames import DatasetInfo
+
+
+def _t(a, device, dtype=None):
+    return torch.as_tensor(np.asarray(a) if not torch.is_tensor(a) else a).to(device, dtype)
+
+
+def interp(x, xp, fp):
+    """np.interp for 1-D tensors: xp ascending, values outside clamp to the end points."""
+    n = xp.numel()
+    i = torch.searchsorted(xp, x, right=True).clamp(1, n - 1)
+    x0, x1, f0, f1 = xp[i - 1], xp[i], fp[i - 1], fp[i]
+    dx = x1 - x0
+    y = f0 + (x - x0) / torch.where(dx == 0, 1, dx) * (f1 - f0)
+    y = torch.where(x <= xp[0], fp[0], y)
+    return torch.where(x >= xp[-1], fp[-1], y)
+
+
+def _elev(d):
+    return torch.rad2deg(torch.atan2(d[:, 2], torch.hypot(d[:, 0], d[:, 1])))
+
+
+def range_image(pts, ring, sensor, n_rows, n_cols):
+    """Device version of `frames.range_image`: (range img, index img, row, col)."""
+    d = pts - sensor
+    az = torch.rad2deg(torch.atan2(d[:, 1], d[:, 0]))
+    col = torch.round((180.0 - az) / 360.0 * n_cols).long() % n_cols      # round half to even, like np.rint
+    rng = torch.linalg.vector_norm(d, dim=1)
+    row = ring.long()
+    ok = (row >= 0) & (row < n_rows) & (rng > 0.5)
+    flat = row * n_cols + col
+    HW = n_rows * n_cols
+    f_ok = flat[ok]
+    best = torch.full((HW,), float("inf"), dtype=rng.dtype, device=pts.device)
+    best.scatter_reduce_(0, f_ok, rng[ok], "amin")
+    win = ok.clone()
+    win[ok] = rng[ok] == best[f_ok]
+    idx = torch.full((HW,), -1, dtype=torch.long, device=pts.device)
+    idx.scatter_reduce_(0, flat[win], win.nonzero().squeeze(1), "amax")
+    img = torch.where(idx >= 0, rng[idx.clamp(min=0)], 0.0)
+    return img.view(n_rows, n_cols), idx.view(n_rows, n_cols), row, col
+
+
+def row_elevations(pts, row, sensor, n_rows):
+    elev = _elev(pts - sensor)
+    keep = row < n_rows
+    r = row[keep]
+    cnt = torch.zeros(n_rows, dtype=elev.dtype, device=pts.device).index_add_(0, r, torch.ones_like(elev[keep]))
+    mean = torch.zeros(n_rows, dtype=elev.dtype, device=pts.device).index_add_(0, r, elev[keep]) / cnt.clamp(min=1)
+    have = cnt > 0
+    if int(have.sum()) >= 2:                    # fill empty rows by interpolation
+        idx = torch.arange(n_rows, device=pts.device, dtype=elev.dtype)
+        mean = interp(idx, idx[have], mean[have])
+    return mean
+
+
+def rows_from_elevation(pts, sensor, elev_of_row):
+    elev = _elev(pts - sensor)
+    asc = elev_of_row.flip(0)
+    n = elev_of_row.numel()
+    rows_desc = torch.arange(n - 1, -1, -1, device=pts.device, dtype=elev.dtype)
+    r = torch.round(interp(elev, asc, rows_desc)).long()
+    spacing = (asc[-1] - asc[0]).abs() / max(n - 1, 1)
+    return torch.where((elev > asc[-1] + spacing / 2) | (elev < asc[0] - spacing / 2), -1, r)
+
+
+def make_features(frame, info: DatasetInfo, prev_ego=None, device="cpu"):
+    """Device version of `frames.make_features`. Returns feats (8, H, W) float32 and
+    idx (H, W), row, col, all as tensors on `device`."""
+    dev = torch.device(device)
+    H, W = info.n_rows, info.n_cols
+    pts = _t(frame["pts"], dev, torch.float32)
+    sensor = _t(frame["sensor"], dev, torch.float32)
+    rimg, idx, row, col = range_image(pts, _t(frame["ring"], dev), sensor, H, W)
+    valid = idx >= 0
+    sel = idx.clamp(min=0)
+    xyz = torch.where(valid[..., None], pts[sel], 0.0)
+    inten = torch.where(valid, _t(frame["inten"], dev, torch.float32)[sel], 0.0)
+    feats = [rimg / 50.0, xyz[..., 0] / 50.0, xyz[..., 1] / 50.0, xyz[..., 2] / 3.0, inten, valid.float()]
+    elev_of_row = row_elevations(pts, row, sensor, H)
+    for p in (prev_ego or [None, None])[:2]:
+        if p is None or len(p[0]) == 0:
+            feats.append(torch.zeros((H, W), device=dev))
+            continue
+        # older sweeps were taken from another position: re-assign rows by elevation seen from here
+        ppts = _t(p[0], dev, torch.float32)
+        prow = rows_from_elevation(ppts, sensor, elev_of_row)
+        pr, _, _, _ = range_image(ppts, prow, sensor, H, W)
+        both = valid & (pr > 0)
+        res = torch.where(both, (rimg - pr).abs() / rimg.clamp(min=1e-3), 0.0)
+        feats.append((res * 5).clamp(0, 1))
+    return torch.stack(feats), idx, row, col

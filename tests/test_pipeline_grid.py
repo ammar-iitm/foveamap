@@ -6,19 +6,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from foveamap.frames import SIM_INFO, sim_frames  # noqa: E402
+from foveamap.frames import SIM_INFO  # noqa: E402
 from foveamap.pipeline import FoveaMapPipeline, run_benchmark, to_host  # noqa: E402
-from foveamap.sim import simulate_sequence, save_sequence  # noqa: E402
 from test_grid_torch import _state_mismatch  # noqa: E402
 
 CKPT = os.path.join(os.path.dirname(__file__), "..", "checkpoints", "range_unet.pt")
-
-
-@pytest.fixture(scope="module")
-def drive(tmp_path_factory):
-    path = str(tmp_path_factory.mktemp("sim") / "drive.npz")
-    save_sequence(path, simulate_sequence(seed=7, n_frames=4))
-    return sim_frames(path)
 
 
 def test_pipeline_engines_agree(drive):
