@@ -1,0 +1,122 @@
+# FoveaMap prototype
+
+A working prototype of the FoveaMap design (see the PRD, Architecture Vision and
+Visual Design Document). It turns Lidar sweeps into a **variable-resolution 2.5D
+semantic grid**: 5 cm cells within ±10 m and 50 cm cells out to ±100 m. The grid
+uses 50× less memory than a uniform 5 cm grid, and no point is lost where the
+tiers meet.
+
+It runs on two data sources through the same code:
+- **Simulated Lidar**: built in, no download needed, exact labels.
+- **Real Lidar from nuScenes-mini**: through the Colab notebook, on a free GPU.
+
+```
+sweep ──► features ──► range-image U-Net ──► foveated grid engine ──► fusion + cost ──► dashboard frames
+          (8 ch)       (9 classes + moving)   (tier select, scatter-     (EMA, overhang,     + metrics.json
+                                               reduce, mip-up)           steps, potholes)
+```
+
+## Design documents
+
+| Document | What it covers |
+| --- | --- |
+| [`docs/FoveaMap_PRD.pdf`](docs/FoveaMap_PRD.pdf) | Product requirements: goals, user stories, functional and non-functional requirements, acceptance criteria, roadmap |
+| [`docs/FoveaMap_Architecture_Vision.pdf`](docs/FoveaMap_Architecture_Vision.pdf) | Pipeline, perception model, tiered grid design, projection and fusion rules, latency and memory budget, key decisions |
+| [`docs/FoveaMap_Visual_Design.pdf`](docs/FoveaMap_Visual_Design.pdf) | Dashboard layout, colour system, map rendering, components, interaction, accessibility |
+
+## Real data: nuScenes-mini on Colab (no Lidar hardware needed)
+
+1. Open `notebooks/foveamap_nuscenes_colab.ipynb` in [Google Colab](https://colab.research.google.com/). Use *File → Upload notebook*.
+2. Set *Runtime → Change runtime type → T4 GPU*, then *Runtime → Run all*.
+3. Upload `foveamap_prototype_v2.zip` when the notebook asks for it.
+
+The notebook downloads nuScenes-mini and its lidarseg labels (about 4 GB) and checks the loader on one frame. It then scores the simulator-trained model on real data, fine-tunes on the 8 `mini_train` scenes, benchmarks a `mini_val` scene, shows the dashboard inline, and zips the results. It takes about 15–25 minutes in total.
+
+If you have the data locally:
+
+```bash
+python scripts/prepare_nuscenes.py --dataroot /path/to/nuscenes --out cache/nuscenes
+python scripts/train.py --dataset nuscenes --cache cache/nuscenes --init checkpoints/range_unet.pt --epochs 120
+python scripts/run_benchmark.py --dataset nuscenes --cache cache/nuscenes --scene scene-0103 \
+    --ckpt checkpoints/range_unet_nuscenes.pt --out dashboard/data
+```
+
+How the loader maps nuScenes onto FoveaMap:
+
+- **No devkit needed.** It reads the JSON tables directly.
+- **Laser rows.** Laser ids are sorted top to bottom by elevation to make range-image rows.
+- **Motion cue.** It uses the sweeps 0.1 s and 0.2 s before each keyframe (nuScenes records sweeps at 20 Hz).
+- **Moving flags.** They come from annotation boxes whose attribute is moving, or whose speed is above 0.5 m/s.
+- **Classes.** The 32 lidarseg classes map to FoveaMap's. nuScenes has no parking or pole/sign class, so the "pole" slot holds barriers and cones and parking is masked out.
+
+## What's in the box
+
+| Path | What it does |
+| --- | --- |
+| `foveamap/sim.py` | Procedural streets and a vectorised 64 × 1024 Lidar ray caster, with exact per-point labels and moving flags. Scenes have 15 cm curbs, potholes, parking lots, buildings, walls, poles and signs, trees with overhanging canopies, an overhead gantry, parked and moving cars, and walking or crossing pedestrians. |
+| `foveamap/frames.py` | Turns any Lidar source into one frame format: ego-frame points, laser row, ego→world pose (with heading), and the earlier sweeps. It also builds the 8-channel range-image features, which use the earlier sweeps as a motion cue. |
+| `foveamap/nuscenes.py` | The nuScenes and nuScenes-lidarseg loader, splits, class map, moving flags and frame cache. |
+| `foveamap/model.py` | The range-image U-Net, with a 9-class head and a moving/static head. It runs on GPU with FP16 or on CPU, and can mask out classes a dataset doesn't have. |
+| `foveamap/grid.py` | **The foveated grid engine.** It uses integer fine indices with floor-division per tier, so tiers nest exactly. Windows snap to the coarse lattice and scroll with the vehicle. Each cell is a 16-byte structure-of-arrays record. The engine also does fused class, ground height, roughness, overhang clearance, curb-step and pothole flags, and traversability cost. |
+| `foveamap/pipeline.py` | The pipeline and benchmark harness. It records per-stage latency, measured memory against uniform baselines, and accuracy by distance band (points and grid cells). It also measures moving IoU, curb and pothole recall (simulator only), and a per-frame integrity check, and exports the dashboard data. |
+| `scripts/` | `gen_data.py` (simulated drives), `prepare_nuscenes.py` (frame cache), `train.py` (sim, or nuScenes fine-tune), `run_benchmark.py`, `make_local_view.py`. |
+| `notebooks/foveamap_nuscenes_colab.ipynb` | The Colab notebook. `build_notebook.py` generates it. |
+| `dashboard/index.html` | The replay dashboard. It rotates the world-aligned grid so the vehicle's heading is always up. |
+| `tests/` | Grid invariants (no point lost, exact nesting, world alignment after scrolling, 16 B per cell). There is also a nuScenes loader test on a mock dataset written in nuScenes' exact file layout. The mock uses a rotated world, a rotated sensor mount, shuffled laser ids, lidarseg ids and annotation boxes. |
+
+## Run the simulator version
+
+```bash
+pip install -r requirements.txt
+python scripts/gen_data.py                            # ~8 min on 2 CPU cores
+python scripts/train.py --dataset sim --budget 1000   # ~17 min on CPU
+python scripts/run_benchmark.py                       # writes dashboard/data/
+python -m pytest -q tests
+python scripts/make_local_view.py && cd dashboard && python -m http.server 8000   # open http://localhost:8000/view.html
+```
+
+Dashboard keys:
+
+| Key | Action |
+| --- | --- |
+| `Space` | Play / pause |
+| `←` / `→` | Step one frame (`Shift` steps 10) |
+| `1`–`4` | Layer: semantic, elevation, traversability, ground truth |
+| `C` | Split compare: foveated vs uniform 50 cm |
+| `V` | 5 cm tier on/off |
+| `E` | Curb and pothole edges |
+| `D` | Moving outlines |
+| `K` | Confidence fade |
+| `G` | Cell grid |
+| `P` | Raw points |
+| `0` | Reset view |
+
+## Results, simulated drive
+
+Demo drive: 60 frames of a world the model never saw in training. Validation mIoU on a separate drive was 92.1%.
+
+| Check | Result | Target (PRD) | Status |
+| --- | --- | --- | --- |
+| Map memory, 2-tier foveated (measured bytes) | 5.12 MB | ≤ 8 MB | pass |
+| Saving vs uniform 5 cm 2.5D grid (256 MB) | 50× | ≥ 30× | pass |
+| Points lost at tier boundaries (60 frames) | 0 | 0 | pass |
+| Exact tier nesting, every frame | yes | yes | pass |
+| Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 96.9% / 94.2% / 86.8% / 74.2% | ≥ 70% near | pass |
+| Grid-cell mIoU, same bands | 95.4% / 94.1% / 86.3% / 74.2% | ≥ 70% near | pass |
+| Drivable IoU on grid, 0–10 m | 99.7% | ≥ 90% | pass |
+| Moving-object IoU (points) | 89.7% | reported | — |
+| Curb (15 cm) recall within 10 m | 98.9% | ≥ 90% | pass |
+| Pothole recall within 10 m | 100.0% | — | — |
+| End-to-end latency p50 / p95 (2 vCPU, no GPU) | 318 / 371 ms | ≤ 50 ms on GPU | CPU only |
+| Throughput | 3.1 FPS | ≥ 20 FPS on GPU | CPU only |
+| Grid engine only vs same engine on uniform 5 cm grid | 119 ms vs 4,041 ms | — | 34× faster |
+
+Stage means (ms): preprocess 38, inference 127, projection 51, fusion 68, publish 39.
+
+Simulated data is easier than real Lidar, so treat these numbers as a check that the pipeline works, not as benchmark claims. The nuScenes notebook produces the real-data numbers.
+
+## How the prototype differs from the full design
+
+- **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use.
+- **Grid engine on CPU.** The grid engine is NumPy on the CPU. On a GPU machine the network becomes a few milliseconds and the grid engine dominates. Porting its scatter-reduce to PyTorch or CUDA is the next step toward ≤ 50 ms.
+- **Not built yet:** 3D view, velocity arrows (no tracker), free-space ray clearing, ROS 2 node, TensorRT export, and a SemanticKITTI loader (it would fill the same frame format as `nuscenes.py`).
