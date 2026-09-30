@@ -24,12 +24,12 @@ md("""
 nuScenes-mini has only 8 training scenes, far too few to learn real-world classes. SemanticKITTI has 19,130 labelled training scans from a 64-beam HDL-64E, the sensor the simulator models, and its classes map onto all 9 FoveaMap classes (including poles, parking and moving cars and people).
 
 This notebook:
-1. Fetches every 10th scan of the training sequences (00–07, 09, 10) and of the validation sequence 08, plus the two scans before each (the motion cue). It pulls only those scans out of the 85 GB KITTI zip, about 14 GB in total, into your Google Drive, so later sessions skip the download.
+1. Fetches every 10th scan of the training sequences (00–07, 09, 10) and of the validation sequence 08, plus the two scans before each (the motion cue). It pulls only those scans out of the 85 GB KITTI zip, about 14 GB in total, and builds the frame cache from them. The cache is saved to your Google Drive, so later sessions copy it back instead of downloading and rebuilding.
 2. Measures the **simulator-trained** model on sequence 08 before fine-tuning.
 3. **Fine-tunes** it on the training sequences.
 4. Scores sequence 08 again (mIoU by distance band and per class), and runs the pipeline benchmark on it.
 
-**Before you start:** use *Runtime → Change runtime type → T4 GPU*. The whole notebook takes roughly 40–60 minutes; data preparation is about half of it.
+**Before you start:** use *Runtime → Change runtime type → T4 GPU*. The first run takes roughly 40–60 minutes, about half of it data preparation; later runs copy the prepared data from Drive in about 5 minutes.
 
 **Terms:** KITTI is licensed [CC BY-NC-SA 3.0](http://www.cvlibs.net/datasets/kitti/) and SemanticKITTI [CC BY-NC-SA 4.0](http://www.semantic-kitti.org/) (non-commercial). Register at [cvlibs.net](http://www.cvlibs.net/datasets/kitti/user_register.php) and accept the KITTI terms before downloading.
 """)
@@ -39,9 +39,11 @@ code("""
 !nvidia-smi --query-gpu=name,memory.total --format=csv || echo "No GPU: Runtime > Change runtime type > T4 GPU"
 """)
 md("""
-The KITTI files are kept in your **Google Drive** (`MyDrive/foveamap_data/kitti`), so they are downloaded once and reused by later sessions. Colab asks for permission to access your Drive. Set `USE_DRIVE = False` to keep them in this runtime only.
+The finished frame cache is kept in your **Google Drive** (`MyDrive/foveamap_data/`), so it is built once and copied back by later sessions. Colab asks for permission to access your Drive. Set `USE_DRIVE = False` to build everything in this runtime only.
 
-This cell also clones the latest `main` from [GitHub](https://github.com/ammar-iitm/foveamap), replacing any older copy of the code. The frame cache (`/content/cache`) is rebuilt from the KITTI files in each new runtime (a few minutes).
+The raw KITTI files go to this runtime's local disk, which is much faster than Drive for thousands of small files, and are not kept.
+
+This cell also clones the latest `main` from [GitHub](https://github.com/ammar-iitm/foveamap), replacing any older copy of the code.
 """)
 code("""
 import os, sys, shutil, importlib
@@ -50,10 +52,8 @@ USE_DRIVE = True
 if USE_DRIVE:
     from google.colab import drive
     drive.mount('/content/drive')
-    KITTI = '/content/drive/MyDrive/foveamap_data/kitti'   # scans, labels, poses, calibration (kept in Drive)
-else:
-    KITTI = '/content/kitti'
-CACHE = '/content/cache/semantickitti'                     # frames built from them (this runtime only)
+KITTI = '/content/kitti'                    # raw scans, labels, poses, calibration (local disk, not kept)
+CACHE = '/content/cache/semantickitti'      # frames built from them
 
 %cd /content
 shutil.rmtree('/content/foveamap', ignore_errors=True)
@@ -69,19 +69,27 @@ importlib.invalidate_caches()
 """)
 
 md("""
-## 2. Fetch the data and build the frame cache (first time about 20–30 minutes)
+## 2. Get the frame cache
 
-Downloads the SemanticKITTI labels (179 MB, includes poses) and the KITTI calibration, then fetches only the scans that are used from the KITTI velodyne zip with HTTP range requests. Files already in Drive are skipped, so after the first session this step only rebuilds the frame cache.
+**If the cache for this `STRIDE` is already in Drive** (from an earlier session), it is copied into this runtime, about 5 minutes.
 
-**Drive space:** `STRIDE = 10` needs about 15 GB in Drive; `STRIDE = 20` about 8 GB (a free Google account has 15 GB in total). Before downloading, the script compares the exact size with your Drive's free space and stops if it doesn't fit.
+**Otherwise** (first time, about 20–30 minutes): downloads the SemanticKITTI labels (179 MB, includes poses) and the KITTI calibration, fetches only the scans that are used from the KITTI velodyne zip (progress every 30 s), builds the frame cache, then saves it to Drive (about 14 GB) for next time.
 """)
 code("""
-STRIDE = 10     # every 10th scan: ~1,900 training and ~400 validation frames; 20 halves data and space
-!df -h {KITTI if not USE_DRIVE else '/content/drive'} | tail -1
-!python scripts/prepare_semantickitti.py --root $KITTI --out $CACHE --stride $STRIDE
+STRIDE = 10     # every 10th scan: ~1,900 training and ~400 validation frames
+DRIVE_CACHE = f'/content/drive/MyDrive/foveamap_data/semantickitti_cache_stride{STRIDE}'
 if USE_DRIVE:
-    drive.flush_and_unmount()          # make sure every file has reached Drive before moving on
-    print('Drive synced. The KITTI files are in MyDrive/foveamap_data/kitti.')
+    drive.mount('/content/drive')
+if USE_DRIVE and os.path.exists(f'{DRIVE_CACHE}/index.json'):          # index.json is saved last: its presence means complete
+    print('Frame cache found in Drive; copying it into this runtime')
+    !mkdir -p $CACHE && cp "$DRIVE_CACHE"/*.pkl "$DRIVE_CACHE"/index.json $CACHE/
+else:
+    !python scripts/prepare_semantickitti.py --root $KITTI --out $CACHE --stride $STRIDE
+    if USE_DRIVE:
+        print('Saving the frame cache to Drive for later sessions')
+        !mkdir -p "$DRIVE_CACHE" && cp $CACHE/*.pkl "$DRIVE_CACHE"/ && cp $CACHE/index.json "$DRIVE_CACHE"/
+        drive.flush_and_unmount()                                      # wait until everything has reached Drive
+        print(f'Saved to {DRIVE_CACHE}')
 !du -sh $CACHE
 """)
 
