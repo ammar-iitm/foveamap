@@ -128,25 +128,26 @@ These were measured with the Colab notebook on a T4 GPU. The model was fine-tune
 | Drivable IoU on grid, 0–10 m | 94.0% | ≥ 90% | pass |
 | Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 44.8% / 43.5% / 30.8% / 15.5% | ≥ 70% near | fail |
 | Moving-object IoU | 37.5% | reported | — |
-| p95 latency / throughput, PyTorch grid engine on the GPU | 61 ms / 18.7 FPS | ≤ 50 ms / ≥ 20 FPS | fail (close) |
+| p50 / p95 latency, features + grid engine on the GPU | 43 / 63 ms | ≤ 50 ms p95 | fail (p50 passes) |
+| Throughput, same run | 22.7 FPS | ≥ 20 FPS | pass |
 
-The latency row comes from a later T4 run that benchmarked both grid engines on the same scene. The other rows, and the files in [`results/nuscenes/`](results/nuscenes/), are from the earlier NumPy-engine run. Drivable IoU (94.0%) and points lost (0) were identical with both engines.
+The latency rows come from a later T4 run that benchmarked both engines on the same scene. The other rows, and the files in [`results/nuscenes/`](results/nuscenes/), are from the earlier NumPy-engine run. Drivable IoU (94.0%) and points lost (0) were identical with both engines.
 
-| Stage means, T4 (ms) | NumPy grid (CPU) | PyTorch grid (GPU) |
-| --- | --- | --- |
-| Preprocess | 19.9 | 19.6 |
-| Network | 5.6 | 4.9 |
-| Projection | 26.9 | 7.9 |
-| Fusion + cost | 83.0 | 16.3 |
-| Publish (map snapshot to host) | 1.7 | 4.7 |
-| **p50 / p95 end to end** | **136 / 149** | **53 / 61** |
-| Background PNG export (not in latency) | 186 | 165 |
+| Stage means, T4 (ms) | NumPy (CPU) | PyTorch grid, CPU features | PyTorch grid + features (GPU) |
+| --- | --- | --- | --- |
+| Preprocess | 19.9 | 19.6 | 10.7 |
+| Network | 5.6 | 4.9 | 4.5 |
+| Projection | 26.9 | 7.9 | 8.1 |
+| Fusion + cost | 83.0 | 16.3 | 16.6 |
+| Publish (map snapshot to host) | 1.7 | 4.7 | 4.3 |
+| **p50 / p95 end to end** | **136 / 149** | **53 / 61** | **43 / 63** |
+| Background PNG export (not in latency) | 186 | 165 | 151 |
 
-The GPU grid engine is 4.5× faster than the NumPy one (24 vs 110 ms for projection + fusion). The biggest remaining stage is preprocessing, which builds the range image on the CPU.
+The NumPy column and the middle column come from the same run. The last column is a later run, whose own NumPy baseline measured 142 / 272 ms on a noisier runtime. The GPU grid engine is 4.5× faster than the NumPy one (about 25 vs 110 ms for projection + fusion). With features also on the GPU the median meets the target, but p95 is set by the two or three slowest of the 38 timed frames.
 
 - **Structure holds up.** Memory, point conservation and drivable surface hold up on real data.
 - **Accuracy is limited by data.** 8 training scenes are far too few, and the weakest classes are terrain, barriers and cones, pedestrians and sidewalk.
-- **Speed: 61 ms p95, close to the 50 ms target.** With the grid engine on the GPU, CPU preprocessing is the biggest stage (about 20 ms). Background PNG export takes about 170 ms per frame, which is longer than a frame, so on Colab's 2 vCPUs it competes with the main thread.
+- **Speed: 43 ms p50 and 63 ms p95, against a 50 ms target.** Median frames meet the target and throughput is 22.7 FPS, but a few slow frames push p95 over. Background PNG export takes about 150 ms per frame, longer than a frame, so on Colab's 2 vCPUs it competes with the main thread.
 - **Potholes.** The pothole heuristic was tuned on flat simulated roads and flags false potholes on real, cambered ones.
 
 ## How the prototype differs from the full design
