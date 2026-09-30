@@ -128,30 +128,33 @@ These were measured with the Colab notebook on a T4 GPU. The model was fine-tune
 | Drivable IoU on grid, 0–10 m | 94.0% | ≥ 90% | pass |
 | Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 44.8% / 43.5% / 30.8% / 15.5% | ≥ 70% near | fail |
 | Moving-object IoU | 37.5% | reported | — |
-| p50 / p95 latency, features + grid engine on the GPU | 43 / 63 ms | ≤ 50 ms p95 | fail (p50 passes) |
-| Throughput, same run | 22.7 FPS | ≥ 20 FPS | pass |
+| p50 / p95 latency, features + grid engine on the GPU | 30 / 31 ms | ≤ 50 ms p95 | pass |
+| Throughput, same run | 33.4 FPS | ≥ 20 FPS | pass |
 
-The latency rows come from a later T4 run that benchmarked both engines on the same scene. The other rows, and the files in [`results/nuscenes/`](results/nuscenes/), are from the earlier NumPy-engine run. Drivable IoU (94.0%) and points lost (0) were identical with both engines.
+The latency rows come from a later T4 run that benchmarked the engines on the same scene. The other rows, and the files in [`results/nuscenes/`](results/nuscenes/), are from the earlier NumPy-engine run. Drivable IoU (94.0%) and points lost (0) were identical with every engine.
 
-| Stage means, T4 (ms) | NumPy (CPU) | PyTorch grid, CPU features | PyTorch grid + features (GPU) |
+Latency is the map pipeline: sweep in, fused map snapshot on the host out. The dashboard PNGs (map and ground-truth tiles) are a benchmark artifact, so the benchmark encodes them after the timed loop by default (`--export after`) and reports that time separately. Encoding them concurrently on the same 2 vCPUs (`--export async`) starves the pipeline thread and raises p95 to 87 ms.
+
+| Stage means, T4 (ms) | NumPy (CPU) | GPU, PNG export concurrent | GPU, PNG export after the loop |
 | --- | --- | --- | --- |
-| Preprocess | 19.9 | 19.6 | 10.7 |
-| Network | 5.6 | 4.9 | 4.5 |
-| Projection | 26.9 | 7.9 | 8.1 |
-| Fusion + cost | 83.0 | 16.3 | 16.6 |
-| Publish (map snapshot to host) | 1.7 | 4.7 | 4.3 |
-| **p50 / p95 end to end** | **136 / 149** | **53 / 61** | **43 / 63** |
-| Background PNG export (not in latency) | 186 | 165 | 151 |
+| Preprocess | 24.3 | 14.5 | 6.8 |
+| Network | 7.4 | 6.2 | 3.0 |
+| Projection | 33.1 | 10.3 | 5.3 |
+| Fusion + cost | 94.1 | 22.7 | 10.8 |
+| Publish (map snapshot to host) | 1.8 | 4.8 | 4.0 |
+| **p50 / p95 end to end** | **137 / 250** | **56 / 87** | **30 / 31** |
+| Throughput (FPS) | 6.2 | 17.1 | 33.4 |
+| PNG export per frame (not in latency) | 208 | 173 | 141 |
 
-The NumPy column and the middle column come from the same run. The last column is a later run, whose own NumPy baseline measured 142 / 272 ms on a noisier runtime. The GPU grid engine is 4.5× faster than the NumPy one (about 25 vs 110 ms for projection + fusion). With features also on the GPU the median meets the target, but p95 is set by the two or three slowest of the 38 timed frames.
+All three columns come from one Colab session. The NumPy column exports concurrently, as it did before `--export` existed. With PNG export after the loop, 37 of the 38 timed frames take 28.6–31.1 ms and the slowest takes 41.7 ms. Earlier runs, before the snapshot copy was packed and with export concurrent, measured 53 / 61 ms (GPU grid, CPU features) and 43 / 63 ms (GPU grid and features).
 
 - **Structure holds up.** Memory, point conservation and drivable surface hold up on real data.
 - **Accuracy is limited by data.** 8 training scenes are far too few, and the weakest classes are terrain, barriers and cones, pedestrians and sidewalk.
-- **Speed: 43 ms p50 and 63 ms p95, against a 50 ms target.** Median frames meet the target and throughput is 22.7 FPS, but a few slow frames push p95 over. Background PNG export takes about 150 ms per frame, longer than a frame, so on Colab's 2 vCPUs it competes with the main thread.
+- **Speed: 31 ms p95 at 33 FPS on a T4.** This is with the features and grid engine on the GPU, 4.5× faster at p50 than NumPy. It excludes the dashboard's PNG encoding (about 140 ms per frame). Encoding concurrently on Colab's 2 vCPUs pushes p95 to 87 ms.
 - **Potholes.** The pothole heuristic was tuned on flat simulated roads and flags false potholes on real, cambered ones.
 
 ## How the prototype differs from the full design
 
 - **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use.
-- **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. With `--grid torch`, the range-image features are also built on the GPU (`foveamap/features_torch.py`, also parity-tested; override with `--features numpy`). Dashboard PNG export runs on a background thread, reported as `export_ms` and not counted in latency.
+- **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. With `--grid torch`, the range-image features are also built on the GPU (`foveamap/features_torch.py`, also parity-tested; override with `--features numpy`). Dashboard PNG export is encoded after the timed loop by default and reported as `export_ms`, not counted in latency (`--export async` encodes on a background thread during the run instead, and `none` skips it).
 - **Not built yet:** 3D view, velocity arrows (no tracker), free-space ray clearing, ROS 2 node, TensorRT export, and a SemanticKITTI loader (it would fill the same frame format as `nuscenes.py`).
