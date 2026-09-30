@@ -24,7 +24,7 @@ md("""
 nuScenes-mini has only 8 training scenes, far too few to learn real-world classes. SemanticKITTI has 19,130 labelled training scans from a 64-beam HDL-64E, the sensor the simulator models, and its classes map onto all 9 FoveaMap classes (including poles, parking and moving cars and people).
 
 This notebook:
-1. Fetches every 10th scan of the training sequences (00–07, 09, 10) and of the validation sequence 08, plus the two scans before each (the motion cue). It pulls only those scans out of the 85 GB KITTI zip, about 14 GB in total.
+1. Fetches every 10th scan of the training sequences (00–07, 09, 10) and of the validation sequence 08, plus the two scans before each (the motion cue). It pulls only those scans out of the 85 GB KITTI zip, about 14 GB in total, into your Google Drive, so later sessions skip the download.
 2. Measures the **simulator-trained** model on sequence 08 before fine-tuning.
 3. **Fine-tunes** it on the training sequences.
 4. Scores sequence 08 again (mIoU by distance band and per class), and runs the pipeline benchmark on it.
@@ -39,13 +39,21 @@ code("""
 !nvidia-smi --query-gpu=name,memory.total --format=csv || echo "No GPU: Runtime > Change runtime type > T4 GPU"
 """)
 md("""
-This cell clones the latest `main` from [GitHub](https://github.com/ammar-iitm/foveamap), replacing any older copy of the code. The KITTI data and the frame cache live outside it (`/content/kitti`, `/content/cache`), so rerunning setup keeps them.
+The KITTI files are kept in your **Google Drive** (`MyDrive/foveamap_data/kitti`), so they are downloaded once and reused by later sessions. Colab asks for permission to access your Drive. Set `USE_DRIVE = False` to keep them in this runtime only.
+
+This cell also clones the latest `main` from [GitHub](https://github.com/ammar-iitm/foveamap), replacing any older copy of the code. The frame cache (`/content/cache`) is rebuilt from the KITTI files in each new runtime (a few minutes).
 """)
 code("""
 import os, sys, shutil, importlib
 REPO = 'https://github.com/ammar-iitm/foveamap.git'
-KITTI = '/content/kitti'                    # downloaded scans, labels, poses, calibration
-CACHE = '/content/cache/semantickitti'      # frames built from them
+USE_DRIVE = True
+if USE_DRIVE:
+    from google.colab import drive
+    drive.mount('/content/drive')
+    KITTI = '/content/drive/MyDrive/foveamap_data/kitti'   # scans, labels, poses, calibration (kept in Drive)
+else:
+    KITTI = '/content/kitti'
+CACHE = '/content/cache/semantickitti'                     # frames built from them (this runtime only)
 
 %cd /content
 shutil.rmtree('/content/foveamap', ignore_errors=True)
@@ -61,14 +69,20 @@ importlib.invalidate_caches()
 """)
 
 md("""
-## 2. Fetch the data and build the frame cache (about 20–30 minutes)
+## 2. Fetch the data and build the frame cache (first time about 20–30 minutes)
 
-Downloads the SemanticKITTI labels (179 MB, includes poses) and the KITTI calibration, then fetches only the scans that are used from the KITTI velodyne zip with HTTP range requests. Rerunning skips files that are already there.
+Downloads the SemanticKITTI labels (179 MB, includes poses) and the KITTI calibration, then fetches only the scans that are used from the KITTI velodyne zip with HTTP range requests. Files already in Drive are skipped, so after the first session this step only rebuilds the frame cache.
+
+**Drive space:** `STRIDE = 10` needs about 15 GB in Drive; `STRIDE = 20` about 8 GB (a free Google account has 15 GB in total). Before downloading, the script compares the exact size with your Drive's free space and stops if it doesn't fit.
 """)
 code("""
-STRIDE = 10     # every 10th scan: ~1,900 training and ~400 validation frames
+STRIDE = 10     # every 10th scan: ~1,900 training and ~400 validation frames; 20 halves data and space
+!df -h {KITTI if not USE_DRIVE else '/content/drive'} | tail -1
 !python scripts/prepare_semantickitti.py --root $KITTI --out $CACHE --stride $STRIDE
-!du -sh $KITTI $CACHE; df -h /content | tail -1
+if USE_DRIVE:
+    drive.flush_and_unmount()          # make sure every file has reached Drive before moving on
+    print('Drive synced. The KITTI files are in MyDrive/foveamap_data/kitti.')
+!du -sh $CACHE
 """)
 
 md("""
