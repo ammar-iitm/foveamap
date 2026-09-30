@@ -212,8 +212,17 @@ def load_scene(out_dir, seq):
 # ----------------------------------------------------------------------------
 # Fetching only the scans that are used (the velodyne zip is ~85 GB)
 # ----------------------------------------------------------------------------
-def fetch_scans(root, wanted, url=VELODYNE_URL, workers=16, log=print):
-    """Extract {sequence: [scan ids]} from the remote velodyne zip into <root>, skipping existing files."""
+class NotEnoughSpace(OSError):
+    pass
+
+
+def fetch_scans(root, wanted, url=VELODYNE_URL, workers=16, log=print, reserve=1 << 30):
+    """Extract {sequence: [scan ids]} from the remote velodyne zip into <root>, skipping existing files.
+
+    Checks first that the scans (sizes from the zip's index) plus `reserve` bytes fit in the free
+    space at <root> (on a mounted Google Drive, the Drive's remaining quota) and raises
+    NotEnoughSpace before downloading anything if they don't."""
+    import shutil
     from .remote_zip import open_remote_zip
 
     todo = [(s, i) for s, ids in wanted.items() for i in ids
@@ -221,6 +230,14 @@ def fetch_scans(root, wanted, url=VELODYNE_URL, workers=16, log=print):
     log(f"fetching {len(todo)} scans ({sum(len(v) for v in wanted.values()) - len(todo)} already present)")
     if not todo:
         return 0
+    z = open_remote_zip(url)
+    need = sum(z.getinfo(f"dataset/sequences/{s}/velodyne/{i:06d}.bin").file_size for s, i in todo)
+    os.makedirs(root, exist_ok=True)
+    free = shutil.disk_usage(root).free
+    log(f"{need / 1e9:.1f} GB to download, {free / 1e9:.1f} GB free at {root}")
+    if need + reserve > free:
+        raise NotEnoughSpace(f"the scans need {need / 1e9:.1f} GB (+{reserve / 1e9:.0f} GB headroom) but only "
+                             f"{free / 1e9:.1f} GB is free at {root}; use a larger stride or free up space")
     chunks = [todo[k::workers] for k in range(workers)]
 
     def work(chunk):

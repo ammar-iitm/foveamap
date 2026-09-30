@@ -88,3 +88,11 @@ def test_fetch_scans_from_zip(kitti, tmp_path, monkeypatch):
     assert got == ["000000.bin", "000002.bin"]
     assert SK.fetch_scans(out, {"08": [0, 2]}, url="unused", workers=2, log=lambda *a: None) == 0   # already there
 
+    # not enough room (e.g. a nearly full Google Drive): stop before downloading anything
+    import shutil
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: shutil._ntuple_diskusage(10 ** 12, 10 ** 12, 10 ** 6))
+    small = str(tmp_path / "full")
+    with pytest.raises(SK.NotEnoughSpace, match="larger stride"):
+        SK.fetch_scans(small, {"08": [1, 3]}, url="unused", workers=2, log=lambda *a: None, reserve=0)
+    assert not os.path.exists(os.path.join(small, "dataset"))
+
