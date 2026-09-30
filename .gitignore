@@ -1,0 +1,15 @@
+# generated data (recreate with scripts/gen_data.py / prepare_nuscenes.py)
+data/
+cache/
+nuscenes/
+*.npz
+*.pkl
+# local dashboard wrapper (scripts/make_local_view.py)
+dashboard/view.html
+# nuScenes fine-tuned weights come from the Colab notebook
+checkpoints/range_unet_nuscenes*
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
