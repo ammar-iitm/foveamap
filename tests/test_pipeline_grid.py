@@ -1,0 +1,47 @@
+"""The pipeline gives the same map with either grid engine."""
+import os
+
+import numpy as np
+import pytest
+
+torch = pytest.importorskip("torch")
+
+from foveamap.frames import SIM_INFO, sim_frames  # noqa: E402
+from foveamap.pipeline import FoveaMapPipeline, run_benchmark, to_host  # noqa: E402
+from foveamap.sim import simulate_sequence, save_sequence  # noqa: E402
+from test_grid_torch import _state_mismatch  # noqa: E402
+
+CKPT = os.path.join(os.path.dirname(__file__), "..", "checkpoints", "range_unet.pt")
+
+
+@pytest.fixture(scope="module")
+def drive(tmp_path_factory):
+    path = str(tmp_path_factory.mktemp("sim") / "drive.npz")
+    save_sequence(path, simulate_sequence(seed=7, n_frames=4))
+    return sim_frames(path)
+
+
+def test_pipeline_engines_agree(drive):
+    frames, _ = drive
+    ref = FoveaMapPipeline(CKPT, SIM_INFO, device="cpu", grid="numpy")
+    tor = FoveaMapPipeline(CKPT, SIM_INFO, device="cpu", grid="torch")
+    for fr in frames:
+        a, b = ref.step(fr), tor.step(fr)
+        np.testing.assert_array_equal(a["cls_pts"], to_host(b["cls_pts"]))
+        np.testing.assert_array_equal(a["moving_pts"], to_host(b["moving_pts"]))
+        for sa, sb in zip(a["stats"], to_host(b["stats"])):
+            np.testing.assert_array_equal(sa["key"], sb["key"])
+            np.testing.assert_array_equal(sa["n_pts"], sb["n_pts"])
+        for ra, rb in zip(ref.grid.snapshot(), tor.grid.snapshot()):
+            frac, _ = _state_mismatch(ra, rb, 2e-3)
+            assert frac <= 1e-4
+
+
+def test_benchmark_runs_with_torch_grid(drive, tmp_path):
+    frames, truth = drive
+    s, per_frame = run_benchmark(frames, SIM_INFO, CKPT, str(tmp_path), truth=truth, n_uniform=1,
+                                 device="cpu", grid="torch")
+    assert s["grid_engine"] == "torch" and s["points_lost"] == 0 and s["nesting_ok"]
+    assert all(f["png_bytes"] > 0 and f["export_ms"] > 0 for f in per_frame)
+    assert len(os.listdir(tmp_path / "frames")) == len(frames)
+    assert "export" not in per_frame[0]["timing_ms"]          # background export is not latency
