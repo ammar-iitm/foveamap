@@ -166,7 +166,7 @@ SCENE = 'scene-0103'   # or 'scene-0916'
 runs = [
     ('numpy', 'numpy', 'results/numpy', 'async'),
     ('torch_async', 'torch', 'results/torch_async', 'async'),
-    ('torch', 'dashboard/data', 'after'),
+    ('torch', 'torch', 'dashboard/data', 'after'),
 ]
 for tag, grid, out, exp in runs:
     !python scripts/run_benchmark.py --dataset nuscenes --cache cache/nuscenes --scene $SCENE \\
@@ -190,8 +190,10 @@ pd.DataFrame({
 }).T.rename(columns=cols)
 """)
 code("""
-p95 = R['torch']['latency_ms']['p95']
-print(f"GPU grid engine p95 = {p95:.0f} ms -> {'PASS' if p95 <= 50 else 'FAIL'} (target <= 50 ms)")
+for k in ('torch_async', 'torch'):
+    if k in R:
+        p95 = R[k]['latency_ms']['p95']
+        print(f"{cols[k]}: p95 = {p95:.0f} ms -> {'PASS' if p95 <= 50 else 'FAIL'} (target <= 50 ms)")
 """)
 code("""
 S = R['torch']
