@@ -8,6 +8,8 @@ reference (`tests/test_features_torch.py` checks parity):
   NumPy argsort order is arbitrary anyway).
 * `np.interp` (row elevations, re-assigning older sweeps to rows) becomes a
   `searchsorted`-based linear interpolation with the same end clamping.
+* No boolean-mask indexing: masked-out points scatter a neutral value
+  instead, so building the features never waits on the GPU (no nonzero sync).
 """
 from __future__ import annotations
 
@@ -44,30 +46,34 @@ def range_image(pts, ring, sensor, n_rows, n_cols):
     rng = torch.linalg.vector_norm(d, dim=1)
     row = ring.long()
     ok = (row >= 0) & (row < n_rows) & (rng > 0.5)
-    flat = row * n_cols + col
+    flat = torch.where(ok, row * n_cols + col, 0)      # masked points scatter neutral values into pixel 0
     HW = n_rows * n_cols
-    f_ok = flat[ok]
     best = torch.full((HW,), float("inf"), dtype=rng.dtype, device=pts.device)
-    best.scatter_reduce_(0, f_ok, rng[ok], "amin")
-    win = ok.clone()
-    win[ok] = rng[ok] == best[f_ok]
+    best.scatter_reduce_(0, flat, torch.where(ok, rng, float("inf")), "amin")
+    win = ok & (rng == best[flat])
+    pid = torch.arange(len(pts), device=pts.device)
     idx = torch.full((HW,), -1, dtype=torch.long, device=pts.device)
-    idx.scatter_reduce_(0, flat[win], win.nonzero().squeeze(1), "amax")
+    idx.scatter_reduce_(0, flat, torch.where(win, pid, -1), "amax")
     img = torch.where(idx >= 0, rng[idx.clamp(min=0)], 0.0)
     return img.view(n_rows, n_cols), idx.view(n_rows, n_cols), row, col
 
 
 def row_elevations(pts, row, sensor, n_rows):
     elev = _elev(pts - sensor)
-    keep = row < n_rows
-    r = row[keep]
-    cnt = torch.zeros(n_rows, dtype=elev.dtype, device=pts.device).index_add_(0, r, torch.ones_like(elev[keep]))
-    mean = torch.zeros(n_rows, dtype=elev.dtype, device=pts.device).index_add_(0, r, elev[keep]) / cnt.clamp(min=1)
+    dev = pts.device
+    r = row.clamp(0, n_rows)                    # rows past the image go to a spill bin
+    cnt = torch.zeros(n_rows + 1, dtype=elev.dtype, device=dev).index_add_(0, r, torch.ones_like(elev))[:n_rows]
+    mean = torch.zeros(n_rows + 1, dtype=elev.dtype, device=dev).index_add_(0, r, elev)[:n_rows] / cnt.clamp(min=1)
     have = cnt > 0
-    if int(have.sum()) >= 2:                    # fill empty rows by interpolation
-        idx = torch.arange(n_rows, device=pts.device, dtype=elev.dtype)
-        mean = interp(idx, idx[have], mean[have])
-    return mean
+    # fill empty rows by linear interpolation between the nearest rows with data (clamped at the ends)
+    ar = torch.arange(n_rows, device=dev)
+    lo = torch.cummax(torch.where(have, ar, -1), 0).values
+    hi = torch.cummin(torch.where(have, ar, n_rows).flip(0), 0).values.flip(0)
+    lo_c, hi_c = lo.clamp(0, n_rows - 1), hi.clamp(0, n_rows - 1)
+    t = (ar - lo_c) / (hi_c - lo_c).clamp(min=1)
+    m_lo, m_hi = mean[lo_c], mean[hi_c]
+    filled = torch.where((lo >= 0) & (hi < n_rows), m_lo + t * (m_hi - m_lo), torch.where(lo >= 0, m_lo, m_hi))
+    return torch.where(have.sum() >= 2, filled, mean)
 
 
 def rows_from_elevation(pts, sensor, elev_of_row):

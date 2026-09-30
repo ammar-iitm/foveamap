@@ -42,3 +42,14 @@ def test_features_parity(drive, device, n_rows):
         assert bad.mean() <= 2e-4, (t, bad.sum())
         if t >= 2:
             assert (a[6:] > 0).sum() > 1000       # the residual channels are really exercised
+
+
+@pytest.mark.parametrize("rows", [[3, 4, 9, 20, 21], [7], [0, 31]])
+def test_row_elevations_fill_matches_numpy(rows):
+    from foveamap.frames import row_elevations
+    r = np.random.default_rng(0)
+    pts = r.normal(size=(500, 3)).astype(np.float32)
+    row = r.choice(rows, 500)
+    sensor = np.zeros(3, np.float32)
+    got = FT.row_elevations(*(torch.from_numpy(v) for v in (pts, row, sensor)), 32).numpy()
+    np.testing.assert_allclose(got, row_elevations(pts, row, sensor, 32), atol=1e-5)
