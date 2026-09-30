@@ -6,6 +6,9 @@ semantic grid**: 5 cm cells within ±10 m and 50 cm cells out to ±100 m. The gr
 uses 50× less memory than a uniform 5 cm grid, and no point is lost where the
 tiers meet.
 
+**Live dashboard: [foveamap-teal.vercel.app](https://foveamap-teal.vercel.app)**, a replay of real
+Lidar (nuScenes scene-0103) run through the GPU pipeline on a T4.
+
 It runs on two data sources through the same code:
 - **Simulated Lidar**: built in, no download needed, exact labels.
 - **Real Lidar from nuScenes-mini**: through the Colab notebook, on a free GPU.
