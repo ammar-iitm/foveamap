@@ -58,6 +58,7 @@ How the loader maps nuScenes onto FoveaMap:
 | `foveamap/model.py` | The range-image U-Net, with a 9-class head and a moving/static head. It runs on GPU with FP16 or on CPU, and can mask out classes a dataset doesn't have. |
 | `foveamap/grid.py` | **The foveated grid engine.** It uses integer fine indices with floor-division per tier, so tiers nest exactly. Windows snap to the coarse lattice and scroll with the vehicle. Each cell is a 16-byte structure-of-arrays record. The engine also does fused class, ground height, roughness, overhang clearance, curb-step and pothole flags, and traversability cost. |
 | `foveamap/grid_torch.py` | The same grid engine in PyTorch, for any `torch.device` (CUDA, MPS or CPU). It keeps the 16-byte cell layout and exact integer nesting, and is checked for parity against `grid.py`. Select it with `--grid torch`. |
+| `foveamap/features_torch.py` | The range-image features in PyTorch, so `--grid torch` keeps the whole path from features to map on the GPU. |
 | `foveamap/pipeline.py` | The pipeline and benchmark harness. It records per-stage latency, measured memory against uniform baselines, and accuracy by distance band (points and grid cells). It also measures moving IoU, curb and pothole recall (simulator only), and a per-frame integrity check, and exports the dashboard data. |
 | `scripts/` | `gen_data.py` (simulated drives), `prepare_nuscenes.py` (frame cache), `train.py` (sim, or nuScenes fine-tune), `run_benchmark.py`, `make_local_view.py`. |
 | `notebooks/foveamap_nuscenes_colab.ipynb` | The Colab notebook. `build_notebook.py` generates it. |
@@ -151,5 +152,5 @@ The GPU grid engine is 4.5× faster than the NumPy one (24 vs 110 ms for project
 ## How the prototype differs from the full design
 
 - **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use.
-- **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. Dashboard PNG export runs on a background thread, reported as `export_ms` and not counted in latency. Feature building (the range image) is still NumPy on the CPU.
+- **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. With `--grid torch`, the range-image features are also built on the GPU (`foveamap/features_torch.py`, also parity-tested; override with `--features numpy`). Dashboard PNG export runs on a background thread, reported as `export_ms` and not counted in latency.
 - **Not built yet:** 3D view, velocity arrows (no tracker), free-space ray clearing, ROS 2 node, TensorRT export, and a SemanticKITTI loader (it would fill the same frame format as `nuscenes.py`).
