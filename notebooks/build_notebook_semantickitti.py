@@ -97,6 +97,7 @@ from foveamap.model import load_model
 
 info = cached_info(CACHE)
 zero_shot = evaluate(load_model('checkpoints/range_unet.pt'), iter_cached(CACHE, 'val'), info)
+json.dump(zero_shot, open('checkpoints/range_unet_sim_on_semantickitti_val.json', 'w'), indent=1)
 print(f"mIoU {100 * zero_shot['miou']:.1f}%  moving IoU {zero_shot['moving_iou']}")
 for n, v in zero_shot['iou_by_class'].items():
     print(f'  {n:12s} IoU {v}')
@@ -125,7 +126,8 @@ code("""
 !tail -n 3 benchmark_semantickitti.log
 """)
 code("""
-import pandas as pd
+import json, pandas as pd                 # reads files only, so it also works after a runtime restart
+zero_shot = json.load(open('checkpoints/range_unet_sim_on_semantickitti_val.json'))
 ft = json.load(open('checkpoints/range_unet_semantickitti_val.json'))
 S = json.load(open('results/semantickitti/metrics.json'))['summary']
 pct = lambda v: '—' if v is None else f'{100 * v:.1f}%'
@@ -143,7 +145,7 @@ md("""
 ## 6. Download the results
 """)
 code("""
-!zip -qr /content/foveamap_semantickitti_results.zip checkpoints/range_unet_semantickitti_val.json train_semantickitti.log benchmark_semantickitti.log results/semantickitti/metrics.json
+!zip -qr /content/foveamap_semantickitti_results.zip checkpoints/range_unet_semantickitti_val.json checkpoints/range_unet_sim_on_semantickitti_val.json train_semantickitti.log benchmark_semantickitti.log results/semantickitti/metrics.json
 from google.colab import files
 files.download('/content/foveamap_semantickitti_results.zip')
 """)
