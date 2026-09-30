@@ -1,7 +1,7 @@
 # generated data (recreate with scripts/gen_data.py / prepare_nuscenes.py)
-data/
-cache/
-nuscenes/
+/data/
+/cache/
+/nuscenes/
 *.npz
 *.pkl
 # local dashboard wrapper (scripts/make_local_view.py)
