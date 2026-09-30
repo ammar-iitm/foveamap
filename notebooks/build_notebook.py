@@ -157,6 +157,51 @@ code("""
 """)
 
 md("""
+## 6b. Compare training recipes (about 25 minutes on a T4)
+
+Five more fine-tunes, each changing one thing from the run above:
+- **reset head**: fresh class layer, since nuScenes reuses the simulator's *pole* class for barriers and cones.
+- **balanced sampling**: frames with rare classes are drawn more often.
+- **augmentation**: random scale and intensity jitter.
+- **all three**: the three options together.
+- **baseline, seed 1**: the same recipe as above with another random seed. Validation has only 2 scenes, so this run shows how much of any difference is noise.
+
+Section 7 still benchmarks the model from section 6. Set `RUN_RECIPES = False` to skip this section.
+""")
+code("""
+RUN_RECIPES = True
+RECIPES = {
+    'baseline, seed 1': '--seed 1',
+    'reset head': '--reset-head',
+    'balanced sampling': '--balance',
+    'augmentation': '--aug',
+    'all three': '--reset-head --balance --aug',
+}
+tag = lambda name: name.replace(',', '').replace(' ', '_')
+if RUN_RECIPES:
+    for name, flags in RECIPES.items():
+        t = tag(name)
+        print(f'--- {name} ({flags})')
+        !python scripts/train.py --dataset nuscenes --cache cache/nuscenes --init checkpoints/range_unet.pt \\
+            --out checkpoints/recipe_{t}.pt --epochs 120 {flags} > train_{t}.log
+        !grep -E '^val mIoU' train_{t}.log
+""")
+code("""
+import pandas as pd
+runs = {'baseline (section 6)': 'checkpoints/range_unet_nuscenes_val.json'}
+runs.update({n: f'checkpoints/recipe_{tag(n)}_val.json' for n in RECIPES})
+V = {n: json.load(open(p)) for n, p in runs.items() if os.path.exists(p)}
+pct = lambda v: '—' if v is None else f'{100*v:.1f}'
+rows = {'mIoU': {n: pct(v['miou']) for n, v in V.items()}}
+rows.update({f'mIoU {b}': {n: pct(v['miou_by_band'][i]) for n, v in V.items()}
+             for i, b in enumerate(['0-10 m', '10-25 m', '25-50 m', '50-100 m'])})
+rows.update({f'IoU {c}': {n: pct(v['iou_by_class'][c]) for n, v in V.items()} for c in next(iter(V.values()))['iou_by_class']})
+rows['moving IoU'] = {n: pct(v['moving_iou']) for n, v in V.items()}
+pd.set_option('display.max_columns', 20)
+pd.DataFrame(rows).T
+""")
+
+md("""
 ## 7. Full benchmark on a `mini_val` scene, and export the dashboard data
 
 On a T4 the network takes only a few milliseconds, so the grid engine decides the latency. The scene runs with both engines: NumPy on Colab's CPU, PyTorch on the GPU with async export (`--export async`), and PyTorch on the GPU with post-loop export (`--export after`). The post-loop export run goes to `dashboard/data` and avoids background PNG compression competing with the main thread on Colab's 2 vCPUs.
@@ -238,7 +283,7 @@ md("""
 Send the zip back and I can publish the real-data dashboard and update the docs with these numbers.
 """)
 code("""
-!zip -qr /content/foveamap_nuscenes_results.zip dashboard results checkpoints/range_unet_nuscenes.pt checkpoints/range_unet_nuscenes_val.json benchmark_*.log
+!zip -qr /content/foveamap_nuscenes_results.zip dashboard results checkpoints/range_unet_nuscenes.pt checkpoints/*_val.json benchmark_*.log train_*.log
 from google.colab import files
 files.download('/content/foveamap_nuscenes_results.zip')
 """)
