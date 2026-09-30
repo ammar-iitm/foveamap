@@ -174,8 +174,37 @@ class TorchFoveatedGrid(FoveatedGrid):
     def _new_layers(self, n):
         return TorchTierLayers(n, self.device)
 
+    TIER_FIELD_SPECS = (
+        ("count", "count16", np.uint16, 2),
+        ("z_min", "z_min", np.float16, 2),
+        ("z_max", "z_max", np.float16, 2),
+        ("ground", "ground", np.float16, 2),
+        ("rough", "rough", np.float16, 2),
+        ("cls", "cls", np.uint8, 1),
+        ("conf", "conf", np.uint8, 1),
+        ("flags", "flags", np.uint8, 1),
+        ("clear", "clear", np.uint8, 1),
+        ("cost", "cost", np.uint8, 1),
+        ("age", "age", np.uint8, 1),
+        ("eff_cls", "eff_cls", np.uint8, 1),
+    )
+
     def snapshot(self):
-        return [s.to_numpy() for s in self.state]
+        """Host copy of the grid state (single packed device-to-host copy)."""
+        parts = [getattr(s, attr).view(torch.uint8).reshape(-1)
+                 for s in self.state for _, attr, _, _ in self.TIER_FIELD_SPECS]
+        packed = torch.cat(parts).cpu().numpy()
+        out = []
+        offset = 0
+        for s in self.state:
+            tl = TierLayers(s.n)
+            n_cells = s.n * s.n
+            for name, _, dt, b in self.TIER_FIELD_SPECS:
+                sz = n_cells * b
+                setattr(tl, name, packed[offset:offset + sz].view(dt).reshape(s.n, s.n))
+                offset += sz
+            out.append(tl)
+        return out
 
     def _fuse_tier(self, t, s: TorchTierLayers, st):
         n, fdt = t.n, self.dtype
@@ -190,8 +219,10 @@ class TorchFoveatedGrid(FoveatedGrid):
         old_conf = s.conf[i, j].to(fdt) / 255.0
         a = t.alpha if self.fuse else 1.0
         q = a * p
-        rows = (old_c != UNKNOWN).nonzero().squeeze(1)
-        q[rows, old_c[rows]] += (1 - a) * old_conf[rows]
+        valid_old = old_c != UNKNOWN
+        safe_c = torch.where(valid_old, old_c, 0)
+        delta = torch.where(valid_old, (1 - a) * old_conf, 0.0)
+        q.scatter_add_(1, safe_c[:, None], delta[:, None])
         s.cls[i, j] = q.argmax(1).to(torch.uint8)
         s.conf[i, j] = (q.max(1).values / q.sum(1).clamp(min=1e-9) * 255).clamp(0, 255).to(torch.uint8)
         # ground class (argmax over ground classes only), kept in the flags high nibble
