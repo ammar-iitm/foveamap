@@ -159,28 +159,35 @@ code("""
 md("""
 ## 7. Full benchmark on a `mini_val` scene, and export the dashboard data
 
-On a T4 the network takes only a few milliseconds, so the grid engine decides the latency. The scene runs twice: once with the NumPy grid engine on Colab's CPU, and once with the PyTorch engine on the GPU (`--grid torch`, which also builds the range-image features on the GPU). The PyTorch run goes to `dashboard/data`. PNG export for the dashboard runs on a background thread and is reported separately (`export_ms`), not as latency.
+On a T4 the network takes only a few milliseconds, so the grid engine decides the latency. The scene runs with both engines: NumPy on Colab's CPU, PyTorch on the GPU with async export (`--export async`), and PyTorch on the GPU with post-loop export (`--export after`). The post-loop export run goes to `dashboard/data` and avoids background PNG compression competing with the main thread on Colab's 2 vCPUs.
 """)
 code("""
 SCENE = 'scene-0103'   # or 'scene-0916'
-for GRID, OUT in (('numpy', 'results/numpy'), ('torch', 'dashboard/data')):
+runs = [
+    ('numpy', 'numpy', 'results/numpy', 'async'),
+    ('torch_async', 'torch', 'results/torch_async', 'async'),
+    ('torch', 'dashboard/data', 'after'),
+]
+for tag, grid, out, exp in runs:
     !python scripts/run_benchmark.py --dataset nuscenes --cache cache/nuscenes --scene $SCENE \\
-        --ckpt checkpoints/range_unet_nuscenes.pt --grid $GRID --out $OUT > benchmark_{SCENE}_{GRID}.log
-    !tail -n 3 benchmark_{SCENE}_{GRID}.log
+        --ckpt checkpoints/range_unet_nuscenes.pt --grid $grid --export $exp --out $out > benchmark_{SCENE}_{tag}.log
+    !tail -n 3 benchmark_{SCENE}_{tag}.log
 """)
 code("""
 import pandas as pd
-R = {g: json.load(open(f'{d}/metrics.json'))['summary'] for g, d in (('numpy', 'results/numpy'), ('torch', 'dashboard/data'))}
+dirs = {'numpy': 'results/numpy', 'torch_async': 'results/torch_async', 'torch': 'dashboard/data'}
+R = {k: json.load(open(f'{d}/metrics.json'))['summary'] for k, d in dirs.items() if os.path.exists(f'{d}/metrics.json')}
 cmp = lambda f: {g: f(s) for g, s in R.items()}
+cols = {'numpy': 'NumPy (CPU)', 'torch_async': 'PyTorch GPU (async export)', 'torch': 'PyTorch GPU (post-loop export)'}
 pd.DataFrame({
     'p50 / p95 latency (ms)': cmp(lambda s: f"{s['latency_ms']['p50']:.0f} / {s['latency_ms']['p95']:.0f}"),
     'Throughput (FPS)': cmp(lambda s: f"{s['fps']:.1f}"),
     'Grid engine (projection + fusion, ms)': cmp(lambda s: f"{s['grid_only_ms']:.1f}"),
     **{f'{k} (ms)': cmp(lambda s, k=k: f"{s['stages_ms'][k]:.1f}") for k in R['torch']['stages_ms']},
-    'Background export (ms, not in latency)': cmp(lambda s: f"{s['export_ms']:.0f}"),
+    'Export (ms, not in latency)': cmp(lambda s: f"{s['export_ms']:.0f}"),
     'Points lost': cmp(lambda s: s['points_lost']),
     'Drivable IoU on grid, 0-10 m': cmp(lambda s: f"{100*s['drivable_iou_grid_0_10']:.1f}%"),
-}).T.rename(columns={'numpy': 'NumPy grid (CPU)', 'torch': 'PyTorch grid (GPU)'})
+}).T.rename(columns=cols)
 """)
 code("""
 p95 = R['torch']['latency_ms']['p95']
@@ -229,7 +236,7 @@ md("""
 Send the zip back and I can publish the real-data dashboard and update the docs with these numbers.
 """)
 code("""
-!zip -qr /content/foveamap_nuscenes_results.zip dashboard results/numpy/metrics.json checkpoints/range_unet_nuscenes.pt checkpoints/range_unet_nuscenes_val.json benchmark_*.log
+!zip -qr /content/foveamap_nuscenes_results.zip dashboard results checkpoints/range_unet_nuscenes.pt checkpoints/range_unet_nuscenes_val.json benchmark_*.log
 from google.colab import files
 files.download('/content/foveamap_nuscenes_results.zip')
 """)
