@@ -127,17 +127,29 @@ These were measured with the Colab notebook on a T4 GPU. The model was fine-tune
 | Drivable IoU on grid, 0–10 m | 94.0% | ≥ 90% | pass |
 | Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 44.8% / 43.5% / 30.8% / 15.5% | ≥ 70% near | fail |
 | Moving-object IoU | 37.5% | reported | — |
-| p95 latency / throughput | 181 ms / 7.2 FPS | ≤ 50 ms / ≥ 20 FPS | fail |
+| p95 latency / throughput, PyTorch grid engine on the GPU | 61 ms / 18.7 FPS | ≤ 50 ms / ≥ 20 FPS | fail (close) |
 
-Stage means (ms): preprocess 14, network 4.6, projection 19, fusion + cost 60, serialise 41. These were measured with the NumPy grid engine, and before PNG export moved to a background thread.
+The latency row comes from a later T4 run that benchmarked both grid engines on the same scene. The other rows, and the files in [`results/nuscenes/`](results/nuscenes/), are from the earlier NumPy-engine run. Drivable IoU (94.0%) and points lost (0) were identical with both engines.
+
+| Stage means, T4 (ms) | NumPy grid (CPU) | PyTorch grid (GPU) |
+| --- | --- | --- |
+| Preprocess | 19.9 | 19.6 |
+| Network | 5.6 | 4.9 |
+| Projection | 26.9 | 7.9 |
+| Fusion + cost | 83.0 | 16.3 |
+| Publish (map snapshot to host) | 1.7 | 4.7 |
+| **p50 / p95 end to end** | **136 / 149** | **53 / 61** |
+| Background PNG export (not in latency) | 186 | 165 |
+
+The GPU grid engine is 4.5× faster than the NumPy one (24 vs 110 ms for projection + fusion). The biggest remaining stage is preprocessing, which builds the range image on the CPU.
 
 - **Structure holds up.** Memory, point conservation and drivable surface hold up on real data.
 - **Accuracy is limited by data.** 8 training scenes are far too few, and the weakest classes are terrain, barriers and cones, pedestrians and sidewalk.
-- **Speed is limited by the CPU.** The GPU network is fast, but the grid engine still runs in NumPy on the CPU.
+- **Speed: 61 ms p95, close to the 50 ms target.** With the grid engine on the GPU, CPU preprocessing is the biggest stage (about 20 ms). Background PNG export takes about 170 ms per frame, which is longer than a frame, so on Colab's 2 vCPUs it competes with the main thread.
 - **Potholes.** The pothole heuristic was tuned on flat simulated roads and flags false potholes on real, cambered ones.
 
 ## How the prototype differs from the full design
 
 - **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use.
-- **Grid engine on the GPU: not yet measured.** The grid engine now also runs in PyTorch (`--grid torch`), and dashboard PNG export runs on a background thread, reported as `export_ms` and not counted in latency. The results above still come from the NumPy engine. The Colab notebook benchmarks both engines on a T4, and those numbers will replace the ones above.
+- **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. Dashboard PNG export runs on a background thread, reported as `export_ms` and not counted in latency. Feature building (the range image) is still NumPy on the CPU.
 - **Not built yet:** 3D view, velocity arrows (no tracker), free-space ray clearing, ROS 2 node, TensorRT export, and a SemanticKITTI loader (it would fill the same frame format as `nuscenes.py`).
