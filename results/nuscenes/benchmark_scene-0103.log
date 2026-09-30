@@ -1,0 +1,146 @@
+frame   0  total   632.4 ms  preprocess 6  inference 461  projection 29  fusion 78  publish 57
+frame   1  total   159.5 ms  preprocess 15  inference 5  projection 22  fusion 70  publish 47
+frame   2  total   169.0 ms  preprocess 15  inference 5  projection 22  fusion 72  publish 54
+frame   3  total   179.9 ms  preprocess 17  inference 5  projection 24  fusion 79  publish 55
+frame   4  total   176.2 ms  preprocess 17  inference 5  projection 22  fusion 76  publish 55
+frame   5  total   172.8 ms  preprocess 17  inference 5  projection 23  fusion 77  publish 51
+frame   6  total   186.3 ms  preprocess 18  inference 7  projection 27  fusion 79  publish 56
+frame   7  total   173.1 ms  preprocess 17  inference 5  projection 25  fusion 75  publish 50
+frame   8  total   195.0 ms  preprocess 19  inference 6  projection 28  fusion 86  publish 55
+frame   9  total   143.1 ms  preprocess 15  inference 6  projection 20  fusion 59  publish 43
+frame  10  total   111.5 ms  preprocess 13  inference 4  projection 17  fusion 46  publish 31
+frame  11  total   125.0 ms  preprocess 13  inference 4  projection 16  fusion 55  publish 36
+frame  12  total   120.4 ms  preprocess 14  inference 4  projection 17  fusion 51  publish 34
+frame  13  total   121.1 ms  preprocess 13  inference 4  projection 18  fusion 53  publish 33
+frame  14  total   142.3 ms  preprocess 13  inference 4  projection 18  fusion 69  publish 38
+frame  15  total   133.7 ms  preprocess 14  inference 6  projection 21  fusion 58  publish 35
+frame  16  total   130.3 ms  preprocess 13  inference 4  projection 17  fusion 59  publish 37
+frame  17  total   127.6 ms  preprocess 13  inference 4  projection 17  fusion 55  publish 38
+frame  18  total   128.5 ms  preprocess 14  inference 4  projection 17  fusion 55  publish 38
+frame  19  total   146.0 ms  preprocess 15  inference 6  projection 22  fusion 62  publish 41
+frame  20  total   131.5 ms  preprocess 13  inference 4  projection 17  fusion 56  publish 41
+frame  21  total   126.9 ms  preprocess 14  inference 4  projection 17  fusion 54  publish 37
+frame  22  total   128.1 ms  preprocess 13  inference 4  projection 17  fusion 55  publish 39
+frame  23  total   129.0 ms  preprocess 14  inference 4  projection 17  fusion 55  publish 38
+frame  24  total   128.3 ms  preprocess 13  inference 4  projection 17  fusion 54  publish 40
+frame  25  total   133.4 ms  preprocess 13  inference 4  projection 17  fusion 58  publish 41
+frame  26  total   127.6 ms  preprocess 13  inference 5  projection 17  fusion 56  publish 37
+frame  27  total   128.5 ms  preprocess 14  inference 4  projection 17  fusion 54  publish 38
+frame  28  total   146.6 ms  preprocess 14  inference 5  projection 19  fusion 63  publish 46
+frame  29  total   131.1 ms  preprocess 13  inference 5  projection 17  fusion 59  publish 37
+frame  30  total   133.2 ms  preprocess 14  inference 4  projection 17  fusion 57  publish 40
+frame  31  total   126.3 ms  preprocess 14  inference 4  projection 17  fusion 56  publish 35
+frame  32  total   126.7 ms  preprocess 14  inference 4  projection 17  fusion 54  publish 38
+frame  33  total   130.1 ms  preprocess 14  inference 4  projection 17  fusion 58  publish 38
+frame  34  total   128.4 ms  preprocess 14  inference 4  projection 18  fusion 55  publish 37
+frame  35  total   143.0 ms  preprocess 14  inference 5  projection 30  fusion 59  publish 36
+frame  36  total   130.2 ms  preprocess 14  inference 4  projection 17  fusion 54  publish 40
+frame  37  total   121.6 ms  preprocess 14  inference 4  projection 17  fusion 51  publish 36
+frame  38  total   119.8 ms  preprocess 14  inference 4  projection 18  fusion 49  publish 35
+frame  39  total   136.5 ms  preprocess 13  inference 4  projection 17  fusion 55  publish 46
+{
+  "dataset": "nuscenes",
+  "source": "nuScenes scene-0103 \u00b7 32-beam Lidar \u00b7 labelled keyframes at 2 Hz",
+  "sensor_rows": 32,
+  "hz": 2.0,
+  "profile": "spec",
+  "hardware": "Tesla T4 GPU (FP16 inference) + CPU grid engine",
+  "frames": 40,
+  "latency_ms": {
+    "p50": 130.255,
+    "p95": 180.873,
+    "p99": 191.77320000000003,
+    "mean": 139.1747368421053
+  },
+  "fps": 7.185212077206994,
+  "grid_only_ms": 79.1778947368421,
+  "uniform5_grid_ms": 4366.2865323333335,
+  "stages_ms": {
+    "preprocess": 14.329473684210523,
+    "inference": 4.64078947368421,
+    "projection": 19.24578947368421,
+    "fusion": 59.93210526315789,
+    "publish": 41.02657894736842
+  },
+  "memory_bytes": {
+    "foveated_spec": 5120000,
+    "foveated_graded": 9120000,
+    "uniform_50cm_2.5d": 2560000,
+    "uniform_5cm_2.5d": 256000000,
+    "occupancy_2d_5cm": 16000000,
+    "dense_voxel_5cm": 5120000000,
+    "sparse_voxel_5cm_one_sweep": 219850,
+    "raw_sweep": 414368
+  },
+  "memory_saving_vs_uniform5": 50.0,
+  "cells": {
+    "foveated_spec": 320000,
+    "uniform_5cm": 16000000
+  },
+  "tiers": [
+    {
+      "cell": 0.05,
+      "half": 10.0,
+      "n": 400
+    },
+    {
+      "cell": 0.5,
+      "half": 100.0,
+      "n": 400
+    }
+  ],
+  "classes": [
+    "drivable surface",
+    "sidewalk / other flat",
+    "(unused)",
+    "terrain",
+    "vegetation",
+    "manmade / static",
+    "barrier / cone",
+    "vehicle",
+    "person"
+  ],
+  "active_classes": [
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "bands": [
+    "0\u201310 m",
+    "10\u201325 m",
+    "25\u201350 m",
+    "50\u2013100 m"
+  ],
+  "point_miou_by_band": [
+    0.44844497853387105,
+    0.43540927650717803,
+    0.30812087271459554,
+    0.15486424659874787
+  ],
+  "grid_miou_by_band": [
+    0.45119089895398223,
+    0.4253954732339432,
+    0.29060016227165264,
+    0.15356959143544485
+  ],
+  "point_miou": 0.44482566431065756,
+  "drivable_iou_grid_0_10": 0.9403386600958886,
+  "drivable_iou_points_0_10": 0.9504898625824636,
+  "moving_iou_by_band": [
+    0.4658144870534251,
+    0.32802547770700635,
+    0.14247669773635152,
+    0.11253196930946291
+  ],
+  "moving_iou": 0.37481576417814805,
+  "curb_recall_10m": null,
+  "pothole_recall_10m": null,
+  "points_lost": 0,
+  "nesting_ok": true
+}

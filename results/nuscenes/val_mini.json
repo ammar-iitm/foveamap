@@ -1,0 +1,20 @@
+{
+  "miou": 0.46261790313485407,
+  "miou_by_band": [
+    0.44496151432736564,
+    0.4533706296737339,
+    0.31341597622755735,
+    0.17957338866056452
+  ],
+  "iou_by_class": {
+    "drivable surface": 0.8516,
+    "sidewalk / other flat": 0.2733,
+    "terrain": 0.4358,
+    "vegetation": 0.605,
+    "manmade / static": 0.6726,
+    "barrier / cone": 0.0005,
+    "vehicle": 0.6999,
+    "person": 0.1622
+  },
+  "moving_iou": 0.24728984532616005
+}

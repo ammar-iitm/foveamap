@@ -115,6 +115,26 @@ Stage means (ms): preprocess 38, inference 127, projection 51, fusion 68, publis
 
 Simulated data is easier than real Lidar, so treat these numbers as a check that the pipeline works, not as benchmark claims. The nuScenes notebook produces the real-data numbers.
 
+## Results, real Lidar (nuScenes)
+
+These were measured with the Colab notebook on a T4 GPU. The model was fine-tuned from the simulator checkpoint on the 8 nuScenes-mini training scenes and scored 46.3% mIoU on the 2 validation scenes. The full outputs are in [`results/nuscenes/`](results/nuscenes/).
+
+| Check (scene-0103, 40 keyframes) | Result | Target | Status |
+| --- | --- | --- | --- |
+| Map memory / saving vs uniform 5 cm | 5.12 MB / 50× | ≤ 8 MB / ≥ 30× | pass |
+| Points lost at tier edges | 0 | 0 | pass |
+| Drivable IoU on grid, 0–10 m | 94.0% | ≥ 90% | pass |
+| Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 44.8% / 43.5% / 30.8% / 15.5% | ≥ 70% near | fail |
+| Moving-object IoU | 37.5% | reported | — |
+| p95 latency / throughput | 181 ms / 7.2 FPS | ≤ 50 ms / ≥ 20 FPS | fail |
+
+Stage means (ms): preprocess 14, network 4.6, projection 19, fusion + cost 60, serialise 41.
+
+- **Structure holds up.** Memory, point conservation and drivable surface hold up on real data.
+- **Accuracy is limited by data.** 8 training scenes are far too few, and the weakest classes are terrain, barriers and cones, pedestrians and sidewalk.
+- **Speed is limited by the CPU.** The GPU network is fast, but the grid engine still runs in NumPy on the CPU.
+- **Potholes.** The pothole heuristic was tuned on flat simulated roads and flags false potholes on real, cambered ones.
+
 ## How the prototype differs from the full design
 
 - **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use.
