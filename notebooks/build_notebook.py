@@ -23,7 +23,7 @@ This notebook runs the FoveaMap prototype on **real Lidar data** from nuScenes-m
 2. Checks the loader on one frame and plots it.
 3. Measures how the **simulator-trained** model does on real data, before any fine-tuning.
 4. **Fine-tunes** the model on the 8 `mini_train` scenes, using the GPU.
-5. Runs the full benchmark on a `mini_val` scene: latency, memory, and accuracy by distance.
+5. Runs the full benchmark on a `mini_val` scene with both grid engines (NumPy on the CPU, PyTorch on the GPU): latency, memory, and accuracy by distance.
 6. Exports the dashboard data and zips everything for download.
 
 **Before you start:** use *Runtime → Change runtime type → T4 GPU*. The whole notebook takes roughly 15–25 minutes.
@@ -153,17 +153,35 @@ code("""
 md("""
 ## 7. Full benchmark on a `mini_val` scene, and export the dashboard data
 
-On a T4 the network takes only a few milliseconds. Most of the remaining time is the grid engine, which still runs in NumPy on Colab's CPU, so expect well under 20 FPS end to end. Moving the grid engine onto the GPU is the next step.
+On a T4 the network takes only a few milliseconds, so the grid engine decides the latency. The scene runs twice: once with the NumPy grid engine on Colab's CPU, and once with the PyTorch engine on the GPU (`--grid torch`). The PyTorch run goes to `dashboard/data`. PNG export for the dashboard runs on a background thread and is reported separately (`export_ms`), not as latency.
 """)
 code("""
 SCENE = 'scene-0103'   # or 'scene-0916'
-!python scripts/run_benchmark.py --dataset nuscenes --cache cache/nuscenes --scene $SCENE \\
-    --ckpt checkpoints/range_unet_nuscenes.pt --out dashboard/data > benchmark_{SCENE}.log
-!tail -n 5 benchmark_{SCENE}.log
+for GRID, OUT in (('numpy', 'results/numpy'), ('torch', 'dashboard/data')):
+    !python scripts/run_benchmark.py --dataset nuscenes --cache cache/nuscenes --scene $SCENE \\
+        --ckpt checkpoints/range_unet_nuscenes.pt --grid $GRID --out $OUT > benchmark_{SCENE}_{GRID}.log
+    !tail -n 3 benchmark_{SCENE}_{GRID}.log
 """)
 code("""
 import pandas as pd
-S = json.load(open('dashboard/data/metrics.json'))['summary']
+R = {g: json.load(open(f'{d}/metrics.json'))['summary'] for g, d in (('numpy', 'results/numpy'), ('torch', 'dashboard/data'))}
+cmp = lambda f: {g: f(s) for g, s in R.items()}
+pd.DataFrame({
+    'p50 / p95 latency (ms)': cmp(lambda s: f"{s['latency_ms']['p50']:.0f} / {s['latency_ms']['p95']:.0f}"),
+    'Throughput (FPS)': cmp(lambda s: f"{s['fps']:.1f}"),
+    'Grid engine (projection + fusion, ms)': cmp(lambda s: f"{s['grid_only_ms']:.1f}"),
+    **{f'{k} (ms)': cmp(lambda s, k=k: f"{s['stages_ms'][k]:.1f}") for k in R['torch']['stages_ms']},
+    'Background export (ms, not in latency)': cmp(lambda s: f"{s['export_ms']:.0f}"),
+    'Points lost': cmp(lambda s: s['points_lost']),
+    'Drivable IoU on grid, 0-10 m': cmp(lambda s: f"{100*s['drivable_iou_grid_0_10']:.1f}%"),
+}).T.rename(columns={'numpy': 'NumPy grid (CPU)', 'torch': 'PyTorch grid (GPU)'})
+""")
+code("""
+p95 = R['torch']['latency_ms']['p95']
+print(f"GPU grid engine p95 = {p95:.0f} ms -> {'PASS' if p95 <= 50 else 'FAIL'} (target <= 50 ms)")
+""")
+code("""
+S = R['torch']
 ft = json.load(open('checkpoints/range_unet_nuscenes_val.json'))
 pct = lambda v: '—' if v is None else f'{100*v:.1f}%'
 rows = [
@@ -205,7 +223,7 @@ md("""
 Send the zip back and I can publish the real-data dashboard and update the docs with these numbers.
 """)
 code("""
-!zip -qr /content/foveamap_nuscenes_results.zip dashboard checkpoints/range_unet_nuscenes.pt checkpoints/range_unet_nuscenes_val.json benchmark_*.log
+!zip -qr /content/foveamap_nuscenes_results.zip dashboard results/numpy/metrics.json checkpoints/range_unet_nuscenes.pt checkpoints/range_unet_nuscenes_val.json benchmark_*.log
 from google.colab import files
 files.download('/content/foveamap_nuscenes_results.zip')
 """)
