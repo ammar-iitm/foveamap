@@ -36,32 +36,34 @@ code("""
 !nvidia-smi --query-gpu=name,memory.total --format=csv || echo "No GPU: Runtime > Change runtime type > T4 GPU"
 """)
 md("""
-Get the code: upload **`foveamap_prototype_v2.zip`** when asked. If the zip is in your Google Drive, set `ZIP_IN_DRIVE` to its path instead. An older copy of the code in this runtime is replaced automatically.
+Get the code: this cell clones the latest `main` from [GitHub](https://github.com/ammar-iitm/foveamap), replacing any older copy in this runtime. To run a local copy instead, set `USE_ZIP = True` and upload the code zip when asked (or set `ZIP_IN_DRIVE` to its path in Google Drive).
 """)
 code("""
 import os, sys, shutil, zipfile, importlib
-ZIP_IN_DRIVE = None   # e.g. '/content/drive/MyDrive/foveamap_prototype_v2.zip'
-NEEDED = '/content/foveamap/foveamap/nuscenes.py'
+REPO = 'https://github.com/ammar-iitm/foveamap.git'
+USE_ZIP = False       # True: upload a code zip instead of cloning
+ZIP_IN_DRIVE = None   # e.g. '/content/drive/MyDrive/foveamap.zip'
 
-if not os.path.exists(NEEDED):
-    shutil.rmtree('/content/foveamap', ignore_errors=True)       # drop an older copy of the code
-    if ZIP_IN_DRIVE:
-        from google.colab import drive
-        drive.mount('/content/drive')
-        zipfile.ZipFile(ZIP_IN_DRIVE).extractall('/content')
-    else:
-        from google.colab import files
-        up = files.upload()
-        zipfile.ZipFile(next(iter(up))).extractall('/content')
-if not os.path.exists(NEEDED):
-    raise FileNotFoundError('That zip is the older version without the nuScenes loader. '
-                            'Rerun this cell and upload foveamap_prototype_v2.zip.')
+%cd /content
+shutil.rmtree('/content/foveamap', ignore_errors=True)            # always start from a fresh copy
+if not USE_ZIP:
+    !git clone -q --depth 1 $REPO /content/foveamap
+elif ZIP_IN_DRIVE:
+    from google.colab import drive
+    drive.mount('/content/drive')
+    zipfile.ZipFile(ZIP_IN_DRIVE).extractall('/content')
+else:
+    from google.colab import files
+    up = files.upload()
+    zipfile.ZipFile(next(iter(up))).extractall('/content')
+if not os.path.exists('/content/foveamap/foveamap/grid_torch.py'):
+    raise FileNotFoundError('This copy of the code has no PyTorch grid engine (foveamap/grid_torch.py).')
 for m in [m for m in list(sys.modules) if m == 'foveamap' or m.startswith('foveamap.')]:
     del sys.modules[m]                                            # forget any old import
 importlib.invalidate_caches()
 %cd /content/foveamap
 !pip -q install -r requirements.txt
-!ls foveamap
+!git log --oneline -1 2>/dev/null; ls foveamap
 """)
 
 md("""

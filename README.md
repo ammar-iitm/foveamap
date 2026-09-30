@@ -26,9 +26,8 @@ sweep ──► features ──► range-image U-Net ──► foveated grid eng
 
 ## Real data: nuScenes-mini on Colab (no Lidar hardware needed)
 
-1. Open `notebooks/foveamap_nuscenes_colab.ipynb` in [Google Colab](https://colab.research.google.com/). Use *File → Upload notebook*.
-2. Set *Runtime → Change runtime type → T4 GPU*, then *Runtime → Run all*.
-3. Upload `foveamap_prototype_v2.zip` when the notebook asks for it.
+1. Open [`notebooks/foveamap_nuscenes_colab.ipynb` in Google Colab](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_nuscenes_colab.ipynb).
+2. Set *Runtime → Change runtime type → T4 GPU*, then *Runtime → Run all*. The notebook clones the latest `main` from GitHub.
 
 The notebook downloads nuScenes-mini and its lidarseg labels (about 4 GB) and checks the loader on one frame. It then scores the simulator-trained model on real data, fine-tunes on the 8 `mini_train` scenes, benchmarks a `mini_val` scene, shows the dashboard inline, and zips the results. It takes about 15–25 minutes in total.
 
