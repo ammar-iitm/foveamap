@@ -197,7 +197,8 @@ class TorchFoveatedGrid(FoveatedGrid):
         out = []
         offset = 0
         for s in self.state:
-            tl = TierLayers(s.n)
+            tl = TierLayers.__new__(TierLayers)        # fields come from the packed buffer, skip allocating them
+            tl.n = s.n
             n_cells = s.n * s.n
             for name, _, dt, b in self.TIER_FIELD_SPECS:
                 sz = n_cells * b

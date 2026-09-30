@@ -6,7 +6,7 @@ torch = pytest.importorskip("torch")
 
 from scipy.ndimage import uniform_filter  # noqa: E402
 from foveamap.grid import FoveatedGrid, DRIVABLE, DEPRESSION_THRESH, DEPRESSION_WIN  # noqa: E402
-from foveamap.grid_torch import TorchFoveatedGrid, stats_to_numpy  # noqa: E402
+from foveamap.grid_torch import TorchFoveatedGrid, TorchTierLayers, stats_to_numpy  # noqa: E402
 from foveamap.sim import NUM_CLASSES, PERSON, VEHICLE  # noqa: E402
 from test_grid import _rand  # noqa: E402
 
@@ -170,3 +170,17 @@ def test_torch_no_point_lost_and_nesting(device, profile):
         ck = (fi // r - org[k][0]) * nc + (fj // r - org[k][1])
         sums = np.bincount(ck, weights=st[k - 1]["n_pts"], minlength=nc * nc)
         np.testing.assert_array_equal(sums[st[k]["key"][under]], st[k]["n_pts"][under])
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_snapshot_matches_to_numpy(device):
+    g = TorchFoveatedGrid("graded", device=device)
+    for xy, z, p, m, ego in _drive(frames=3):
+        g.update(xy, z, p, m, ego)
+    for snap, s in zip(g.snapshot(), g.state):
+        ref = s.to_numpy()
+        assert snap.nbytes == ref.nbytes
+        for f in list(TorchTierLayers.FIELDS) + ["eff_cls"]:
+            a, b = getattr(ref, f), getattr(snap, f)
+            assert a.dtype == b.dtype and a.shape == b.shape, f
+            np.testing.assert_array_equal(a, b, err_msg=f)     # nan == nan for the f16 layers
