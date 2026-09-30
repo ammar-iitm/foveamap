@@ -4,7 +4,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from foveamap.grid import FoveatedGrid  # noqa: E402
+from scipy.ndimage import uniform_filter  # noqa: E402
+from foveamap.grid import FoveatedGrid, DRIVABLE, DEPRESSION_THRESH, DEPRESSION_WIN  # noqa: E402
 from foveamap.grid_torch import TorchFoveatedGrid, stats_to_numpy  # noqa: E402
 from foveamap.sim import NUM_CLASSES, PERSON, VEHICLE  # noqa: E402
 from test_grid import _rand  # noqa: E402
@@ -67,3 +68,83 @@ def test_bin_points_tensor_input_and_empty(device):
     empty = stats_to_numpy(g.bin_points(np.zeros((0, 2)), np.zeros(0), np.zeros((0, NUM_CLASSES)),
                                         np.zeros(0, bool), org))
     assert all(s["n_in"] == 0 and len(s["key"]) == 0 and s["p_all"].shape == (0, NUM_CLASSES) for s in empty)
+
+
+def _drive(frames=6, n=40000, seed=2):
+    """A short drive: ego moves ~1.3 m/frame (window scrolls), dense structured ground near the ego."""
+    r = np.random.default_rng(seed)
+    for f in range(frames):
+        ego = np.array([1.3 * f + 0.37, 0.6 * f - 0.21])
+        xy, z, p, m = _soft(n, seed + f, ego)
+        near = np.abs(xy - ego).max(1) < 9
+        rel = xy - ego
+        z[near] = 0.02 * rel[near, 0] + np.where(rel[near, 1] > 3, 0.15, 0.0) + r.normal(0, 0.01, near.sum())
+        hole = near & (np.hypot(rel[:, 0] - 2, rel[:, 1]) < 0.4)
+        z[hole] -= 0.12                                     # pothole
+        over = near & (np.abs(rel[:, 0] + 3) < 1) & (r.random(n) < 0.3)
+        z[over] += 3.0                                      # overhang (e.g. a sign gantry)
+        yield xy, z, p, m, ego
+
+
+def _depression_ties(t, s, eps=1e-6):
+    """Cells whose pothole test sits within eps of its threshold in the NumPy reference.
+
+    The local-mean filter (scipy vs avg_pool2d) rounds differently in the last
+    float32 bit, so the depression flag of these cells is a coin toss either way.
+    """
+    gz = s.ground.astype(np.float32)
+    drv = DRIVABLE[s.eff_cls] & np.isfinite(gz)
+    win = max(3, int(round(DEPRESSION_WIN / t.cell)) | 1)
+    num = uniform_filter(np.where(drv, gz, 0.0), win, mode="constant")
+    den = uniform_filter(drv.astype(np.float32), win, mode="constant")
+    ref = np.where(den > 0.05, num / np.maximum(den, 1e-6), np.nan)
+    return drv & (np.abs(gz - (ref - DEPRESSION_THRESH)) <= eps)
+
+
+def _state_mismatch(ref_s, got_s, f16_tol, ignore=None):
+    """Fraction of cells whose layers differ (f16 heights compared with a tolerance)."""
+    bad = np.zeros(ref_s.cls.shape, bool)
+    for f in ("count", "cls", "conf", "flags", "clear", "cost", "age", "eff_cls"):
+        bad |= getattr(ref_s, f) != getattr(got_s, f)
+    for f in ("z_min", "z_max", "ground", "rough"):
+        a, b = getattr(ref_s, f).astype(np.float64), getattr(got_s, f).astype(np.float64)
+        bad |= ~(np.isclose(a, b, rtol=f16_tol, atol=f16_tol, equal_nan=True))
+    if ignore is not None:
+        bad &= ~ignore
+    return bad.mean(), bad.sum()
+
+
+def _run_parity(device, dtype, profile, fuse, max_frac, f16_tol, skip_ties=False):
+    ref_g = FoveatedGrid(profile, fuse=fuse)
+    g = TorchFoveatedGrid(profile, fuse=fuse, device=device, dtype=dtype)
+    for xy, z, p, m, ego in _drive():
+        ref_dyn, _ = ref_g.update(xy, z, p, m, ego)
+        dyn, _ = g.update(xy, z, p, m, ego)
+        assert all(np.array_equal(a, b) for a, b in zip(ref_g.origins, g.origins))
+        for k, (rs, ts, rd, td) in enumerate(zip(ref_g.state, g.state, ref_dyn, dyn)):
+            ties = _depression_ties(ref_g.tiers[k], rs) if skip_ties else None
+            frac, cnt = _state_mismatch(rs, ts.to_numpy(), f16_tol, ties)
+            assert frac <= max_frac, (k, frac, cnt)
+            for key in ("i", "j", "cls"):
+                np.testing.assert_array_equal(rd[key], td[key].cpu().numpy())
+    return ref_g, g
+
+
+@pytest.mark.parametrize("profile", ["spec", "graded"])
+@pytest.mark.parametrize("fuse", [True, False])
+def test_update_parity_float64_exact(profile, fuse):
+    ref_g, _ = _run_parity("cpu", torch.float64, profile, fuse, max_frac=0.0, f16_tol=0.0, skip_ties=True)
+    s0 = ref_g.state[0]         # the drive really exercises the derived layers
+    assert all(((s0.flags & fl) > 0).sum() > 10 for fl in (1 << 1, 1 << 2, 1 << 3))
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("fuse", [True, False])
+def test_update_parity_float32(device, fuse):
+    # float32 can move an f16 height by one ulp or tip a threshold; allow a handful of cells in 160k
+    _run_parity(device, torch.float32, "spec", fuse, max_frac=1e-4, f16_tol=2e-3)
+
+
+def test_torch_state_is_16_bytes_per_cell():
+    g = TorchFoveatedGrid("spec", device="cpu")
+    assert g.nbytes == 16 * g.n_cells == 16 * 320000

@@ -12,14 +12,80 @@ parity against it.
   `index_add_` / `scatter_reduce_` instead of sort + `reduceat` / `bincount`.
   The float math runs in `dtype` (float32 by default); roughness uses a
   two-pass variance so float32 does not lose it to cancellation.
+* The persistent state keeps the NumPy engine's 16-byte-per-cell layout, as
+  device tensors. Fusion and derived flags / cost are ported op for op; the
+  box filter for the pothole reference is a separable `avg_pool2d` with zero
+  padding (= scipy `uniform_filter(mode="constant")`).
 """
 from __future__ import annotations
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
-from .grid import FoveatedGrid, GROUND_MASK
-from .sim import PERSON
+from .grid import (FoveatedGrid, TierLayers, GROUND_MASK, COST_PRIOR, DRIVABLE, UNKNOWN,
+                   F_OVERHANG, F_STEP, F_DEPRESSION, VEHICLE_CLEARANCE, STEP_THRESH,
+                   DEPRESSION_THRESH, DEPRESSION_WIN)
+from .sim import PERSON, VEHICLE
+
+# clearance thresholds evaluated in float64 on the stored 2 cm code, exactly as the NumPy engine does
+_CLEAR_CODES = np.arange(256) * 0.02
+OVERHANG_LUT = (_CLEAR_CODES > 0.5) & (np.arange(256) != UNKNOWN)
+PASS_UNDER_LUT = OVERHANG_LUT & (_CLEAR_CODES >= VEHICLE_CLEARANCE)
+
+
+class TorchTierLayers:
+    """Device copy of `grid.TierLayers` (same fields, dtypes and 16 bytes per cell).
+
+    torch has no index_put for uint16 on CPU, so `count` is written through an
+    int16 view of the same bits.
+    """
+    FIELDS = dict(count=torch.uint16, z_min=torch.float16, z_max=torch.float16, ground=torch.float16,
+                  rough=torch.float16, cls=torch.uint8, conf=torch.uint8, flags=torch.uint8,
+                  clear=torch.uint8, cost=torch.uint8, age=torch.uint8)
+    FILL = dict(count=0, z_min=float("nan"), z_max=float("nan"), ground=float("nan"), rough=float("nan"),
+                cls=UNKNOWN, conf=0, flags=0xF0, clear=UNKNOWN, cost=UNKNOWN, age=UNKNOWN)
+
+    def __init__(self, n, device):
+        self.n, self.device = n, device
+        for f, dt in self.FIELDS.items():
+            if f == "count":
+                self.count = torch.zeros((n, n), dtype=torch.int16, device=device).view(torch.uint16)
+            else:
+                setattr(self, f, torch.full((n, n), self.FILL[f], dtype=dt, device=device))
+        self.eff_cls = torch.full((n, n), UNKNOWN, dtype=torch.uint8, device=device)
+
+    @property
+    def count16(self):
+        return self.count.view(torch.int16)
+
+    @property
+    def nbytes(self):
+        return sum(getattr(self, f).nelement() * getattr(self, f).element_size() for f in self.FIELDS)
+
+    def shifted(self, d):
+        """Copy of this state moved by d = (di, dj) cells (window scroll)."""
+        out = TorchTierLayers(self.n, self.device)
+        di, dj = int(d[0]), int(d[1])
+        n = self.n
+        if abs(di) >= n or abs(dj) >= n:
+            return out
+        src = (slice(max(di, 0), n + min(di, 0)), slice(max(dj, 0), n + min(dj, 0)))
+        dst = (slice(max(-di, 0), n + min(-di, 0)), slice(max(-dj, 0), n + min(-dj, 0)))
+        out.count16[dst] = self.count16[src]
+        for f in self.FIELDS:
+            if f != "count":
+                getattr(out, f)[dst] = getattr(self, f)[src]
+        return out
+
+    def to_numpy(self):
+        """Host `grid.TierLayers` with the same contents (plus eff_cls)."""
+        out = TierLayers(self.n)
+        for f in self.FIELDS:
+            v = self.count16.cpu().numpy().view(np.uint16) if f == "count" else getattr(self, f).cpu().numpy()
+            getattr(out, f)[:] = v
+        out.eff_cls = self.eff_cls.cpu().numpy()
+        return out
 
 
 def default_device():
@@ -31,7 +97,13 @@ class TorchFoveatedGrid(FoveatedGrid):
         super().__init__(profile, fuse=fuse)
         self.device = torch.device(device) if device is not None else default_device()
         self.dtype = dtype
-        self._ground_mask = torch.as_tensor(GROUND_MASK, device=self.device)
+        dev = self.device
+        self._ground_mask = torch.as_tensor(GROUND_MASK, device=dev)
+        self._cost_prior = torch.as_tensor(COST_PRIOR, device=dev)
+        self._drivable = torch.as_tensor(DRIVABLE, device=dev)
+        self._overhang = torch.as_tensor(OVERHANG_LUT, device=dev)
+        self._pass_under = torch.as_tensor(PASS_UNDER_LUT, device=dev)
+        self.state = [TorchTierLayers(t.n, dev) for t in self.tiers]
 
     # ------------------------------------------------------------------ utils
     def _t(self, a, dtype):
@@ -96,6 +168,127 @@ class TorchFoveatedGrid(FoveatedGrid):
                 n_in=int(idx.numel()),
             ))
         return out
+
+
+    # --------------------------------------------------------------- update
+    def update(self, xy_world, z, probs, moving, ego_xy):
+        """Process one frame. Returns (dynamic cells per tier, frame stats per tier), as tensors."""
+        origins = self.window_origins(ego_xy)
+        stats = self.bin_points(xy_world, z, probs, moving, origins)
+        if self.origins is not None and self.fuse:
+            self.state = [s.shifted(o - oo) for s, o, oo in zip(self.state, origins, self.origins)]
+        elif not self.fuse:
+            self.state = [TorchTierLayers(t.n, self.device) for t in self.tiers]
+        self.origins = origins
+        dyn = []
+        for t, s, st in zip(self.tiers, self.state, stats):
+            dyn.append(self._fuse_tier(t, s, st))
+            self._derive(t, s)
+        return dyn, stats
+
+    def _fuse_tier(self, t, s: TorchTierLayers, st):
+        n, fdt = t.n, self.dtype
+        key = st["key"]
+        obs = st["n_static"] > 0
+        k = key[obs]
+        i, j = k // n, k % n
+        # ---- class: blend new probabilities with the stored (cls, conf)
+        p = st["p_static"][obs]
+        p = p / p.sum(1, keepdim=True).clamp(min=1e-9)
+        old_c = s.cls[i, j].long()
+        old_conf = s.conf[i, j].to(fdt) / 255.0
+        a = t.alpha if self.fuse else 1.0
+        q = a * p
+        rows = (old_c != UNKNOWN).nonzero().squeeze(1)
+        q[rows, old_c[rows]] += (1 - a) * old_conf[rows]
+        s.cls[i, j] = q.argmax(1).to(torch.uint8)
+        s.conf[i, j] = (q.max(1).values / q.sum(1).clamp(min=1e-9) * 255).clamp(0, 255).to(torch.uint8)
+        # ground class (argmax over ground classes only), kept in the flags high nibble
+        pg = torch.where(self._ground_mask[None, :], p, 0)
+        gcls = torch.where(pg.sum(1) > 0.05, pg.argmax(1), 0xF)
+        # ---- heights
+        g_new = st["ground"][obs]
+        g_old = s.ground[i, j].to(fdt)
+        both = g_new.isfinite() & g_old.isfinite()
+        g = torch.where(both, (1 - a) * g_old + a * g_new, torch.where(g_new.isfinite(), g_new, g_old))
+        s.ground[i, j] = g.half()
+        r_new, r_old = st["rough"][obs], s.rough[i, j].to(fdt)
+        s.rough[i, j] = torch.where(r_new.isfinite(), torch.where(r_old.isfinite(), (1 - a) * r_old + a * r_new, r_new),
+                                    r_old).half()
+        s.z_min[i, j] = st["z_min"][obs].half()
+        s.z_max[i, j] = st["z_max"][obs].half()
+        s.count16[i, j] = st["n_static"][obs].clamp(max=65535).to(torch.int32).to(torch.int16)
+        clear = st["zmin_ng"][obs] - g                  # nan / inf where either side is missing
+        s.clear[i, j] = torch.where(clear.isfinite(), (clear / 0.02).clamp(0, 254), UNKNOWN).to(torch.uint8)
+        keep_g = torch.where(gcls == 0xF, (s.flags[i, j] >> 4).long(), gcls)
+        s.flags[i, j] = (keep_g << 4).to(torch.uint8)
+        # ---- age
+        seen = s.age != UNKNOWN
+        s.age[seen] = (s.age[seen].int() + 1).clamp(max=UNKNOWN).to(torch.uint8)
+        s.age[i, j] = 0
+        # ---- dynamic layer: this frame only, never fused
+        dyn_cells = st["n_dyn"] > 0
+        dk = key[dyn_cells]
+        dcls = torch.where(st["n_dyn_person"][dyn_cells] * 2 > st["n_dyn"][dyn_cells], PERSON, VEHICLE)
+        return dict(i=dk // n, j=dk % n, cls=dcls)
+
+    def _derive(self, t, s: TorchTierLayers):
+        """Flags + traversability cost from the fused layers (vectorised over the tier)."""
+        cls = s.cls.long()
+        gcls = (s.flags >> 4).long()
+        ground = s.ground.float()
+        valid_g = ground.isfinite()
+        clear = s.clear.long()
+        # overhang: obstacle points start well above the ground
+        overhang = self._overhang[clear] & valid_g
+        passable_under = self._pass_under[clear] & valid_g & (gcls != 0xF)
+        eff_cls = torch.where(passable_under, gcls, cls)
+        # step edges: height jump to a neighbour 1 or 2 cells away
+        gz = ground
+        step = torch.zeros_like(gz)
+        for d in (1, 2):
+            for ax in (0, 1):
+                diff = (gz - gz.roll(d, ax)).abs()
+                if ax == 0:
+                    diff[:d, :] = float("nan")
+                else:
+                    diff[:, :d] = float("nan")
+                step = torch.fmax(step, diff.nan_to_num(nan=0.0))
+                step = torch.fmax(step, diff.roll(-d, ax).nan_to_num(nan=0.0))
+        stepf = step > STEP_THRESH
+        # depressions (potholes): below the local mean of drivable ground
+        drv_cls = self._drivable[eff_cls]
+        drv = drv_cls & valid_g
+        win = max(3, int(round(DEPRESSION_WIN / t.cell)) | 1)
+        num = _box(torch.where(drv, gz, 0.0), win)
+        den = _box(drv.float(), win)
+        ref = torch.where(den > 0.05, num / den.clamp(min=1e-6), float("nan"))
+        dep = drv & (gz < ref - DEPRESSION_THRESH)
+        flags = (torch.where(overhang, F_OVERHANG, 0) | torch.where(stepf & valid_g, F_STEP, 0)
+                 | torch.where(dep, F_DEPRESSION, 0))
+        # cost
+        cost = self._cost_prior[eff_cls]
+        cost = torch.where(passable_under, cost + 20, cost)
+        cost = torch.where(stepf & drv_cls, cost.clamp(min=180), cost)
+        cost = torch.where(stepf & (cost < 180), cost.clamp(min=140), cost)
+        cost = torch.where(dep, cost.clamp(min=170), cost)
+        rough = s.rough.float()
+        cost = torch.where(rough.isfinite() & (rough > 0.04), cost + 30, cost)
+        cost = torch.where(s.conf < 150, cost + 25, cost)
+        stale = (s.age != UNKNOWN) & (s.age > 20)
+        cost = torch.where(stale, cost + 20, cost).clamp(0, 254)
+        unknown = cls == UNKNOWN
+        s.cost[:] = torch.where(unknown, UNKNOWN, cost).to(torch.uint8)
+        s.flags[:] = (s.flags & 0xF0) | flags.to(torch.uint8)
+        s.eff_cls = torch.where(unknown, UNKNOWN, eff_cls).to(torch.uint8)
+
+
+def _box(x, win):
+    """Separable zero-padded box mean, = scipy uniform_filter(x, win, mode="constant") for odd win."""
+    x = x[None, None]
+    x = F.avg_pool2d(x, (win, 1), stride=1, padding=(win // 2, 0), count_include_pad=True)
+    x = F.avg_pool2d(x, (1, win), stride=1, padding=(0, win // 2), count_include_pad=True)
+    return x[0, 0]
 
 
 def stats_to_numpy(stats):
