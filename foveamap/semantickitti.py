@@ -159,26 +159,42 @@ def needed_scans(frames, prev_steps=(1, 2)):
     return sorted(need)
 
 
-def build_cache(root, out_dir, splits=("train", "val"), stride=10, info=None):
-    """Convert the selected scans to cached Frame lists (one pickle per sequence)."""
-    info = info or kitti_info()
+def _cache_sequence(root, out_dir, seq, stride, info):
+    """Build one sequence's pickle (unless present). Returns its frame count."""
     ds = SemanticKITTI(root)
+    path = os.path.join(out_dir, f"{seq}.pkl")
+    ids = selected_scans(len(read_poses(os.path.join(ds.seq_dir(seq), "poses.txt"))), stride)
+    if not os.path.exists(path):
+        poses = ds.poses_ego(seq)
+        frames = [ds.frame(seq, i, poses, info) for i in ids]
+        with open(path + ".part", "wb") as fh:
+            pickle.dump(frames, fh, protocol=4)
+        os.replace(path + ".part", path)
+    return len(ids)
+
+
+def build_cache(root, out_dir, splits=("train", "val"), stride=10, info=None, workers=1):
+    """Convert the selected scans to cached Frame lists (one pickle per sequence),
+    `workers` sequences at a time (processes; each holds one sequence in memory)."""
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    info = info or kitti_info()
     os.makedirs(out_dir, exist_ok=True)
     index = {"n_rows": info.n_rows, "n_cols": info.n_cols, "stride": stride, "counts": {}}
+    seqs = [(split, seq) for split in splits for seq in SPLITS[split]]
     for split in splits:
-        index[split] = []
-        for seq in SPLITS[split]:
-            path = os.path.join(out_dir, f"{seq}.pkl")
-            n_scans = len(read_poses(os.path.join(ds.seq_dir(seq), "poses.txt")))
-            ids = selected_scans(n_scans, stride)
-            if not os.path.exists(path):
-                poses = ds.poses_ego(seq)
-                frames = [ds.frame(seq, i, poses, info) for i in ids]
-                with open(path, "wb") as fh:
-                    pickle.dump(frames, fh, protocol=4)
-            index[split].append(seq)
-            index["counts"][seq] = len(ids)
-            print(f"  {split}: sequence {seq} ({len(ids)} frames)", flush=True)
+        index[split] = list(SPLITS[split])
+    if workers > 1:
+        with ProcessPoolExecutor(workers) as ex:
+            jobs = {ex.submit(_cache_sequence, root, out_dir, seq, stride, info): (split, seq) for split, seq in seqs}
+            for job in as_completed(jobs):
+                split, seq = jobs[job]
+                index["counts"][seq] = job.result()
+                print(f"  {split}: sequence {seq} ({index['counts'][seq]} frames)", flush=True)
+    else:
+        for split, seq in seqs:
+            index["counts"][seq] = _cache_sequence(root, out_dir, seq, stride, info)
+            print(f"  {split}: sequence {seq} ({index['counts'][seq]} frames)", flush=True)
     with open(os.path.join(out_dir, "index.json"), "w") as fh:
         json.dump(index, fh)
     return index
@@ -216,13 +232,16 @@ class NotEnoughSpace(OSError):
     pass
 
 
-def fetch_scans(root, wanted, url=VELODYNE_URL, workers=16, log=print, reserve=1 << 30):
+def fetch_scans(root, wanted, url=VELODYNE_URL, workers=16, log=print, reserve=1 << 30, progress_every=30):
     """Extract {sequence: [scan ids]} from the remote velodyne zip into <root>, skipping existing files.
 
     Checks first that the scans (sizes from the zip's index) plus `reserve` bytes fit in the free
     space at <root> (on a mounted Google Drive, the Drive's remaining quota) and raises
-    NotEnoughSpace before downloading anything if they don't."""
+    NotEnoughSpace before downloading anything if they don't. Logs progress every
+    `progress_every` seconds."""
     import shutil
+    import threading
+    import time
     from .remote_zip import open_remote_zip
 
     todo = [(s, i) for s, ids in wanted.items() for i in ids
@@ -239,6 +258,8 @@ def fetch_scans(root, wanted, url=VELODYNE_URL, workers=16, log=print, reserve=1
         raise NotEnoughSpace(f"the scans need {need / 1e9:.1f} GB (+{reserve / 1e9:.0f} GB headroom) but only "
                              f"{free / 1e9:.1f} GB is free at {root}; use a larger stride or free up space")
     chunks = [todo[k::workers] for k in range(workers)]
+    lock, got = threading.Lock(), [0, 0]          # scans, bytes
+    stop = threading.Event()
 
     def work(chunk):
         z = open_remote_zip(url)              # one connection state per thread
@@ -250,11 +271,30 @@ def fetch_scans(root, wanted, url=VELODYNE_URL, workers=16, log=print, reserve=1
             with open(dst + ".part", "wb") as fh:
                 fh.write(data)
             os.replace(dst + ".part", dst)
+            with lock:
+                got[0] += 1
+                got[1] += len(data)
         return len(chunk)
 
+    t0 = time.time()
+
+    def report():
+        while not stop.wait(progress_every):
+            with lock:
+                n, b = got
+            rate = b / max(time.time() - t0, 1e-6)
+            eta = (need - b) / rate if rate > 0 else float("inf")
+            log(f"  {n}/{len(todo)} scans, {b / 1e9:.1f}/{need / 1e9:.1f} GB, "
+                f"{rate / 1e6:.0f} MB/s, about {eta / 60:.0f} min left")
+
+    reporter = threading.Thread(target=report, daemon=True)
+    reporter.start()
     done = 0
-    with ThreadPoolExecutor(workers) as ex:
-        for n in ex.map(work, [c for c in chunks if c]):
-            done += n
-    log(f"fetched {done} scans")
+    try:
+        with ThreadPoolExecutor(workers) as ex:
+            for n in ex.map(work, [c for c in chunks if c]):
+                done += n
+    finally:
+        stop.set()
+    log(f"fetched {done} scans ({got[1] / 1e9:.1f} GB) in {(time.time() - t0) / 60:.1f} min")
     return done

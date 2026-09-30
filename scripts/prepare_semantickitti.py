@@ -46,7 +46,9 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "cache", "semantickitti"))
     ap.add_argument("--stride", type=int, default=10, help="use every n-th scan as a frame")
     ap.add_argument("--splits", default="train,val")
-    ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--workers", type=int, default=16, help="parallel scan downloads")
+    ap.add_argument("--cache-workers", type=int, default=min(2, os.cpu_count() or 1),
+                    help="sequences cached in parallel (each holds one sequence in memory, up to ~3 GB)")
     a = ap.parse_args()
     splits = a.splits.split(",")
     seqs = [s for sp in splits for s in SK.SPLITS[sp]]
@@ -68,5 +70,5 @@ if __name__ == "__main__":
     print(f"extracted {extract(lz, a.root, lambda n: n in labels)} label files", flush=True)
     SK.fetch_scans(a.root, wanted, workers=a.workers)
     print(f"data ready in {time.time() - t0:.0f}s; building the frame cache", flush=True)
-    SK.build_cache(a.root, a.out, splits, stride=a.stride)
+    SK.build_cache(a.root, a.out, splits, stride=a.stride, workers=a.cache_workers)
     print(f"done in {time.time() - t0:.0f}s")

@@ -1,5 +1,6 @@
 """SemanticKITTI loader on a simulated drive written in the SemanticKITTI layout."""
 import io
+import json
 import os
 import zipfile
 
@@ -96,3 +97,33 @@ def test_fetch_scans_from_zip(kitti, tmp_path, monkeypatch):
         SK.fetch_scans(small, {"08": [1, 3]}, url="unused", workers=2, log=lambda *a: None, reserve=0)
     assert not os.path.exists(os.path.join(small, "dataset"))
 
+
+
+def test_parallel_cache_matches_serial(kitti, tmp_path):
+    root, _, _ = kitti
+    a, b = str(tmp_path / "serial"), str(tmp_path / "parallel")
+    SK.build_cache(root, a, splits=("val",), stride=1, workers=1)
+    SK.build_cache(root, b, splits=("val",), stride=1, workers=2)
+    assert json.load(open(os.path.join(a, "index.json"))) == json.load(open(os.path.join(b, "index.json")))
+    fa, fb = list(SK.iter_cached(a, "val")), list(SK.iter_cached(b, "val"))
+    assert len(fa) == len(fb) > 0
+    for x, y in zip(fa, fb):
+        for k in ("pts", "label", "moving", "ring", "pose"):
+            np.testing.assert_array_equal(x[k], y[k])
+    assert not [f for f in os.listdir(b) if f.endswith(".part")]
+
+
+def test_fetch_logs_a_summary(kitti, tmp_path, monkeypatch):
+    root, sim, _ = kitti
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        for i in range(len(sim)):
+            name = f"dataset/sequences/08/velodyne/{i:06d}.bin"
+            z.write(os.path.join(root, name), name)
+    import foveamap.remote_zip as rz
+    monkeypatch.setattr(rz, "open_remote_zip", lambda url: zipfile.ZipFile(io.BytesIO(buf.getvalue())))
+    lines = []
+    SK.fetch_scans(str(tmp_path / "f"), {"08": list(range(len(sim)))}, url="unused", workers=2,
+                   log=lines.append, progress_every=0.001)
+    assert lines[0].startswith(f"fetching {len(sim)} scans") and "GB to download" in lines[1]
+    assert lines[-1].startswith(f"fetched {len(sim)} scans (") and "GB) in" in lines[-1]
