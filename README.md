@@ -48,6 +48,28 @@ How the loader maps nuScenes onto FoveaMap:
 - **Moving flags.** They come from annotation boxes whose attribute is moving, or whose speed is above 0.5 m/s.
 - **Classes.** The 32 lidarseg classes map to FoveaMap's. nuScenes has no parking or pole/sign class, so the "pole" slot holds barriers and cones and parking is masked out.
 
+## Real data: SemanticKITTI on Colab
+
+nuScenes-mini's 8 training scenes are too few to learn real-world classes. SemanticKITTI has 19,130 labelled training scans from a 64-beam HDL-64E, the sensor the simulator models.
+
+1. Register at [cvlibs.net](http://www.cvlibs.net/datasets/kitti/user_register.php) and accept the KITTI terms (CC BY-NC-SA 3.0; SemanticKITTI is CC BY-NC-SA 4.0, non-commercial).
+2. Open [`notebooks/foveamap_semantickitti_colab.ipynb` in Google Colab](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_semantickitti_colab.ipynb), set a T4 runtime and *Run all* (about 40–60 minutes).
+
+The notebook scores the simulator model on sequence 08, fine-tunes on sequences 00–07, 09 and 10, scores sequence 08 again and benchmarks it. Outside Colab:
+
+```bash
+python scripts/prepare_semantickitti.py --root /path/to/kitti --out cache/semantickitti --stride 10
+python scripts/train.py --dataset semantickitti --init checkpoints/range_unet.pt --epochs 20
+python scripts/run_benchmark.py --dataset semantickitti --scene 08 --max-frames 100 --grid torch
+```
+
+How the loader maps SemanticKITTI onto FoveaMap:
+
+- **Only the scans it needs.** The KITTI velodyne zip is 85 GB. `prepare_semantickitti.py` fetches every n-th scan (default 10) and the two scans before it straight from the remote zip with HTTP range requests, about 14 GB at stride 10.
+- **Laser rows.** The files carry no laser id, so rows come from elevation over the simulator's field of view (+2° to −24.9°, 64 rows).
+- **Frames and poses.** The ego frame is the Lidar frame moved down 1.73 m to the ground. Poses are cam0 poses converted to the Lidar with the calibration, so the world is the first scan's ego frame.
+- **Classes and moving flags.** SemanticKITTI's classes map onto all 9 FoveaMap classes, and its moving-car and moving-person labels give the moving flags.
+
 ## What's in the box
 
 | Path | What it does |
@@ -55,12 +77,13 @@ How the loader maps nuScenes onto FoveaMap:
 | `foveamap/sim.py` | Procedural streets and a vectorised 64 × 1024 Lidar ray caster, with exact per-point labels and moving flags. Scenes have 15 cm curbs, potholes, parking lots, buildings, walls, poles and signs, trees with overhanging canopies, an overhead gantry, parked and moving cars, and walking or crossing pedestrians. |
 | `foveamap/frames.py` | Turns any Lidar source into one frame format: ego-frame points, laser row, ego→world pose (with heading), and the earlier sweeps. It also builds the 8-channel range-image features, which use the earlier sweeps as a motion cue. |
 | `foveamap/nuscenes.py` | The nuScenes and nuScenes-lidarseg loader, splits, class map, moving flags and frame cache. |
+| `foveamap/semantickitti.py` | The SemanticKITTI loader, splits, class map, moving flags and frame cache, plus fetching selected scans from the remote KITTI zip (`foveamap/remote_zip.py`). |
 | `foveamap/model.py` | The range-image U-Net, with a 9-class head and a moving/static head. It runs on GPU with FP16 or on CPU, and can mask out classes a dataset doesn't have. |
 | `foveamap/grid.py` | **The foveated grid engine.** It uses integer fine indices with floor-division per tier, so tiers nest exactly. Windows snap to the coarse lattice and scroll with the vehicle. Each cell is a 16-byte structure-of-arrays record. The engine also does fused class, ground height, roughness, overhang clearance, curb-step and pothole flags, and traversability cost. |
 | `foveamap/grid_torch.py` | The same grid engine in PyTorch, for any `torch.device` (CUDA, MPS or CPU). It keeps the 16-byte cell layout and exact integer nesting, and is checked for parity against `grid.py`. Select it with `--grid torch`. |
 | `foveamap/features_torch.py` | The range-image features in PyTorch, so `--grid torch` keeps the whole path from features to map on the GPU. |
 | `foveamap/pipeline.py` | The pipeline and benchmark harness. It records per-stage latency, measured memory against uniform baselines, and accuracy by distance band (points and grid cells). It also measures moving IoU, curb and pothole recall (simulator only), and a per-frame integrity check, and exports the dashboard data. |
-| `scripts/` | `gen_data.py` (simulated drives), `prepare_nuscenes.py` (frame cache), `train.py` (sim, or nuScenes fine-tune), `run_benchmark.py`, `make_local_view.py`. |
+| `scripts/` | `gen_data.py` (simulated drives), `prepare_nuscenes.py` and `prepare_semantickitti.py` (frame caches), `train.py` (sim, or nuScenes / SemanticKITTI fine-tune), `run_benchmark.py`, `make_local_view.py`. |
 | `notebooks/foveamap_nuscenes_colab.ipynb` | The Colab notebook. `build_notebook.py` generates it. |
 | `dashboard/index.html` | The replay dashboard. It rotates the world-aligned grid so the vehicle's heading is always up. |
 | `tests/` | Grid invariants (no point lost, exact nesting, world alignment after scrolling, 16 B per cell). There is also a nuScenes loader test on a mock dataset written in nuScenes' exact file layout. The mock uses a rotated world, a rotated sensor mount, shuffled laser ids, lidarseg ids and annotation boxes. Parity tests compare the PyTorch grid engine with the NumPy one, cell by cell and across a scrolling drive, on CPU and on MPS/CUDA when present. |
@@ -157,4 +180,4 @@ All three columns come from one Colab session. The NumPy column exports concurre
 
 - **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use.
 - **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. With `--grid torch`, the range-image features are also built on the GPU (`foveamap/features_torch.py`, also parity-tested; override with `--features numpy`). Dashboard PNG export is encoded after the timed loop by default and reported as `export_ms`, not counted in latency (`--export async` encodes on a background thread during the run instead, and `none` skips it).
-- **Not built yet:** 3D view, velocity arrows (no tracker), free-space ray clearing, ROS 2 node, TensorRT export, and a SemanticKITTI loader (it would fill the same frame format as `nuscenes.py`).
+- **Not built yet:** 3D view, velocity arrows (no tracker), free-space ray clearing, ROS 2 node, and TensorRT export.
