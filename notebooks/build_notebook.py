@@ -15,6 +15,10 @@ def code(src):
 
 
 md("""
+<a href="https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_nuscenes_colab.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
+""")
+
+md("""
 # FoveaMap on real Lidar: nuScenes-mini
 
 This notebook runs the FoveaMap prototype on **real Lidar data** from nuScenes-mini (10 scenes, 32-beam Velodyne, about 4 GB). It works through these steps:
