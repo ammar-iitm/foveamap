@@ -1,0 +1,327 @@
+"""End-to-end FoveaMap pipeline: sweep -> features -> network -> foveated grid.
+
+Also the benchmark harness (PRD FR-18/19): per-stage latency, map memory vs.
+uniform baselines, accuracy by distance band, integrity, and the frame
+export consumed by the web dashboard.
+"""
+from __future__ import annotations
+
+import io
+import json
+import os
+import time
+
+import numpy as np
+import torch
+from PIL import Image
+
+from .sim import NUM_CLASSES, ROAD, PARKING, VEHICLE, PERSON
+from .model import load_model, predict, pick_device
+from .frames import DatasetInfo, make_features, prev_in_ego, transform
+from .grid import (FoveatedGrid, UNKNOWN, F_DYNAMIC, F_OVERHANG, F_STEP, F_DEPRESSION)
+
+BANDS = [(0, 10), (10, 25), (25, 50), (50, 100)]
+BAND_NAMES = ["0–10 m", "10–25 m", "25–50 m", "50–100 m"]
+
+
+def hardware_label(device):
+    if device.type == "cuda":
+        return f"{torch.cuda.get_device_name(device)} GPU (FP16 inference) + CPU grid engine"
+    return f"{os.cpu_count()} vCPU, no GPU (CPU PyTorch)"
+
+
+class FoveaMapPipeline:
+    """sweep -> features -> network -> foveated grid, with per-stage timing."""
+
+    def __init__(self, ckpt, info: DatasetInfo, profile="spec", fuse=True, device=None):
+        if not torch.cuda.is_available():
+            torch.set_num_threads(max(1, os.cpu_count() or 1))
+        self.device = pick_device(device)
+        self.model = load_model(ckpt, self.device)
+        self.info = info
+        self.grid = FoveatedGrid(profile, fuse=fuse)
+        self.history = []          # last 2 sweeps as (pts_world, ring), newest last
+
+    def step(self, frame):
+        T = {}
+        t0 = time.perf_counter()
+        hist = [self.history[-k] if len(self.history) >= k else None for k in (1, 2)]
+        feats, idx, row, col = make_features(frame, self.info, prev_in_ego(frame, hist))
+        T["preprocess"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        probs, pmove = predict(self.model, feats, self.info.active)
+        T["inference"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        P = probs[row, col]                                   # every point takes its pixel's prediction
+        cls = P.argmax(1)
+        moving = (pmove[row, col] > 0.5) & np.isin(cls, (VEHICLE, PERSON))
+        pw = transform(frame["pose"], frame["pts"].astype(np.float64))
+        ego_xy = frame["pose"][:2, 3]
+        origins = self.grid.window_origins(ego_xy)
+        stats = self.grid.bin_points(pw[:, :2], pw[:, 2], P, moving, origins)
+        T["projection"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        g = self.grid
+        if g.origins is not None and g.fuse:
+            g.state = [s.shifted(o - oo) for s, o, oo in zip(g.state, origins, g.origins)]
+        g.origins = origins
+        dyn = []
+        for t, s, st in zip(g.tiers, g.state, stats):
+            dyn.append(g._fuse_tier(t, s, st))
+            g._derive(t, s)
+        T["fusion"] = time.perf_counter() - t0
+
+        self.history.append((pw, frame["ring"]))
+        self.history = self.history[-2:]
+        return dict(timing=T, cls_pts=cls, moving_pts=moving, stats=stats, dyn=dyn,
+                    pts=frame["pts"], pw=pw, ego_xy=ego_xy)
+
+
+# ----------------------------------------------------------------------------
+# Dashboard encoding
+# ----------------------------------------------------------------------------
+def encode_tier(state, dyn, n):
+    """Pack one tier into an RGB tile (see dashboard/README for the bit layout)."""
+    cls = getattr(state, "eff_cls", state.cls).astype(np.int32)
+    disp = np.where(cls == UNKNOWN, 0, cls + 1)
+    flags = state.flags & 0x0F
+    dmask = np.zeros((n, n), bool)
+    dmask[dyn["i"], dyn["j"]] = True
+    disp[dyn["i"], dyn["j"]] = dyn["cls"] + 1
+    R = disp | np.where(dmask, 16, 0) | np.where(flags & F_OVERHANG, 32, 0) \
+        | np.where(flags & F_STEP, 64, 0) | np.where(flags & F_DEPRESSION, 128, 0)
+    z = state.z_max.astype(np.float32)
+    G = np.where(np.isfinite(z), np.clip((z + 0.5) / 4.5 * 254, 0, 254) + 1, 0)
+    cost = np.where(dmask, 254, state.cost.astype(np.int32))
+    age = state.age.astype(np.int32)
+    ab = np.where(age == 0, 0, np.where(age <= 10, 1, np.where(age <= 20, 2, 3)))
+    ab = np.where(age == UNKNOWN, 3, ab)
+    B = ((cost >> 2) << 2) | ab
+    img = np.stack([R, G, B], -1).astype(np.uint8)
+    return img[::-1, ::-1]          # rows = -x (forward is up), cols = -y (left is left)
+
+
+def encode_gt(gt_stats, conf, n):
+    cls = np.zeros(n * n, np.int32)
+    k = gt_stats["key"]
+    c = gt_stats["p_all"].argmax(1)
+    mv = gt_stats["n_dyn"] > 0
+    cls[k] = (c + 1) | np.where(mv, 16, 0)
+    R = cls.reshape(n, n)
+    img = np.stack([R, conf.astype(np.int32), np.zeros_like(R)], -1).astype(np.uint8)
+    return img[::-1, ::-1]
+
+
+# ----------------------------------------------------------------------------
+# Benchmark
+# ----------------------------------------------------------------------------
+def confusion(pred, gt, k=NUM_CLASSES):
+    return np.bincount(gt * k + pred, minlength=k * k).reshape(k, k)
+
+
+def ious_from(cm):
+    tp = np.diag(cm).astype(np.float64)
+    den = cm.sum(0) + cm.sum(1) - tp
+    return np.where(den > 0, tp / np.maximum(den, 1), np.nan)
+
+
+def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile="spec",
+                  export=True, n_uniform=3, device=None):
+    """Run frames through the pipeline; write metrics.json, frames/*.png and
+    points.b64.txt for the dashboard. truth: simulator-only curb/pothole geometry."""
+    T = len(frames)
+    pipe = FoveaMapPipeline(ckpt, info, profile, device=device)
+    gt_grid = FoveatedGrid(profile, fuse=False)
+    frames_dir = os.path.join(out_dir, "frames")
+    os.makedirs(frames_dir, exist_ok=True)
+    for old in os.listdir(frames_dir):
+        os.remove(os.path.join(frames_dir, old))
+    C = NUM_CLASSES
+    cm_pts = np.zeros((len(BANDS), C, C), np.int64)
+    cm_grid = np.zeros((len(BANDS), C, C), np.int64)
+    mov_tp = np.zeros(len(BANDS)); mov_un = np.zeros(len(BANDS))
+    curb_hit = curb_tot = pot_hit = pot_tot = 0
+    per_frame, pts_blob, pts_index = [], [], []
+    rng = np.random.default_rng(0)
+    from scipy.ndimage import binary_dilation
+
+    for t, fr in enumerate(frames):
+        r = pipe.step(fr)
+        ego = r["ego_xy"]
+
+        # ---- serialise (the "publish" stage) -----------------------------------
+        t0 = time.perf_counter()
+        tiles = [encode_tier(s, d, tr.n) for s, d, tr in zip(pipe.grid.state, r["dyn"], pipe.grid.tiers)]
+        pub_buf = io.BytesIO()
+        Image.fromarray(np.concatenate(tiles, 1)).save(pub_buf, format="PNG", compress_level=1)
+        r["timing"]["publish"] = time.perf_counter() - t0
+
+        # ground truth grid for the same frame (benchmark only, not timed)
+        lab = fr["label"].astype(np.int64)
+        has = lab >= 0
+        gm = fr["moving"]
+        gstats = gt_grid.bin_points(r["pw"][has, :2], r["pw"][has, 2], np.eye(C)[lab[has]], gm[has], pipe.grid.origins)
+        gt_tiles = [encode_gt(gs, s.conf, tr.n) for gs, s, tr in zip(gstats, pipe.grid.state, pipe.grid.tiers)]
+        img = np.concatenate(tiles + gt_tiles, 1)
+        buf = io.BytesIO()
+        Image.fromarray(img).save(buf, format="PNG", optimize=False, compress_level=6)
+        if export:
+            with open(os.path.join(frames_dir, f"f{t:03d}.png"), "wb") as fh:
+                fh.write(buf.getvalue())
+
+        # ---- point accuracy by distance band (ego-frame horizontal distance) ----
+        d = np.hypot(r["pts"][:, 0], r["pts"][:, 1])
+        for b, (lo, hi) in enumerate(BANDS):
+            m = (d >= lo) & (d < hi) & has
+            cm_pts[b] += confusion(r["cls_pts"][m], lab[m])
+            pm, gmm = r["moving_pts"][m], gm[m]
+            mov_tp[b] += np.sum(pm & gmm); mov_un[b] += np.sum(pm | gmm)
+
+        # ---- grid accuracy (single-frame prediction vs rasterised ground truth) ---
+        for k, (ps, gs) in enumerate(zip(r["stats"], gstats)):
+            common, ip, ig = np.intersect1d(ps["key"], gs["key"], return_indices=True)
+            pc = ps["p_all"][ip].argmax(1); gc = gs["p_all"][ig].argmax(1)
+            cen = pipe.grid.cell_centres(k).reshape(-1, 2)[common] - ego[:2]
+            dist = np.hypot(cen[:, 0], cen[:, 1])
+            finer = pipe.grid.inner_mask(k).reshape(-1)[common]
+            for b, (lo, hi) in enumerate(BANDS):
+                m = (dist >= lo) & (dist < hi) & ~finer
+                cm_grid[b] += confusion(pc[m], gc[m])
+
+        # ---- curb + pothole detection (simulator only: needs exact geometry) ----
+        if truth is not None:
+            s0, tr0 = pipe.grid.state[0], pipe.grid.tiers[0]
+            cen = pipe.grid.cell_centres(0)
+            near = np.hypot(cen[..., 0] - ego[0], cen[..., 1] - ego[1]) < 10
+            obs = s0.age == 0
+            step_d = binary_dilation((s0.flags & (F_STEP | F_DEPRESSION)) > 0, iterations=2)
+            curb = (np.abs(np.abs(cen[..., 1]) - 7.0) < tr0.cell) & (np.abs(cen[..., 0] - truth["cross_x"]) > 8) & near & obs
+            curb_hit += np.sum(curb & step_d); curb_tot += np.sum(curb)
+            for px, py, pr, _ in truth["potholes"]:
+                ph = ((cen[..., 0] - px) ** 2 + (cen[..., 1] - py) ** 2 < (pr * 0.7) ** 2) & near & obs
+                pot_hit += np.sum(ph & step_d); pot_tot += np.sum(ph)
+
+        # ---- integrity: every point in the window binned, fine tier nests in coarse
+        g = pipe.grid
+        n_in = int(r["stats"][-1]["n_pts"].sum())                 # sum of per-cell counts
+        n_pts = int(len(r["pts"]))
+        fo = g.fine_index(r["pw"][:, :2]) // g.tiers[-1].ratio - g.origins[-1]
+        in_window = int(np.sum(((fo >= 0) & (fo < g.tiers[-1].n)).all(1)))   # independent window test
+        nest_ok = True
+        for k in range(1, len(g.tiers)):
+            m = g.inner_mask(k).reshape(-1)[r["stats"][k]["key"]]
+            nest_ok &= int(r["stats"][k]["n_pts"][m].sum()) == int(r["stats"][k - 1]["n_in"])
+
+        # ---- points overlay for the dashboard (decimated, ego frame) ------------
+        sel = rng.choice(n_pts, size=min(12000, n_pts), replace=False)
+        px = np.clip(np.round(r["pts"][sel, 0] * 100), -32000, 32000).astype(np.int16)
+        py = np.clip(np.round(r["pts"][sel, 1] * 100), -32000, 32000).astype(np.int16)
+        pc = (r["cls_pts"][sel] | (r["moving_pts"][sel] << 4)).astype(np.uint8)
+        pts_index.append([int(sum(len(b) for b in pts_blob)), int(len(sel))])
+        pts_blob.append(np.concatenate([px.view(np.uint8), py.view(np.uint8), pc]).tobytes())
+
+        pose = fr["pose"]
+        timing_ms = {k: round(v * 1000, 2) for k, v in r["timing"].items()}
+        per_frame.append(dict(
+            t=t, ego=[round(float(ego[0]), 3), round(float(ego[1]), 3)],
+            yaw=round(float(np.arctan2(pose[1, 0], pose[0, 0])), 5),
+            origins=[[int(o[0]), int(o[1])] for o in g.origins],
+            timing_ms=timing_ms, total_ms=round(sum(timing_ms.values()), 2),
+            points=n_pts, binned=n_in, in_window=in_window, nest_ok=bool(nest_ok),
+            cells_updated=int(sum(len(s["key"]) for s in r["stats"])),
+            png_bytes=len(buf.getvalue()),
+        ))
+        print(f"frame {t:3d}  total {per_frame[-1]['total_ms']:7.1f} ms  "
+              + "  ".join(f"{k} {v:.0f}" for k, v in timing_ms.items()), flush=True)
+
+    # ------------------------------------------------------------------ summary
+    warm = per_frame[2:] if T > 3 else per_frame
+    totals = np.array([f["total_ms"] for f in warm])
+    stages = {k: float(np.mean([f["timing_ms"][k] for f in warm])) for k in per_frame[0]["timing_ms"]}
+    pts_iou = [ious_from(cm) for cm in cm_pts]
+    grid_iou = [ious_from(cm) for cm in cm_grid]
+    all_pts = ious_from(cm_pts.sum(0))
+    drv = lambda cm: _binary_iou(cm, (ROAD, PARKING))  # noqa: E731
+
+    # memory: measured bytes of the live structure vs. baselines of the same extent
+    mem = {"foveated_spec": pipe.grid.nbytes}
+    mem["foveated_graded"] = FoveatedGrid("graded").nbytes
+    mem["uniform_50cm_2.5d"] = FoveatedGrid("uniform50").nbytes
+    u5 = FoveatedGrid("uniform5", fuse=False)
+    mem["uniform_5cm_2.5d"] = u5.nbytes
+    mem["occupancy_2d_5cm"] = 4000 * 4000 * 1
+    mem["dense_voxel_5cm"] = 4000 * 4000 * 160 * 2
+    vk = np.unique(np.floor(r["pw"] / 0.05).astype(np.int64), axis=0)   # sparse 5 cm voxel hash, one sweep
+    mem["sparse_voxel_5cm_one_sweep"] = int(len(vk) * 10)
+    mem["raw_sweep"] = int(len(r["pts"]) * 16)
+    u_times = []
+    for fr in frames[:min(n_uniform, T)]:            # uniform 5 cm grid, same code path
+        pw = transform(fr["pose"], fr["pts"].astype(np.float64))
+        lab = np.clip(fr["label"].astype(np.int64), 0, C - 1)
+        t0 = time.perf_counter()
+        u5.update(pw[:, :2], pw[:, 2], np.eye(C)[lab], np.zeros(len(pw), bool), fr["pose"][:2, 3])
+        u_times.append((time.perf_counter() - t0) * 1000)
+    del u5
+
+    active = np.asarray(info.active, bool)
+    summary = dict(
+        dataset=info.name, source=info.source, sensor_rows=info.n_rows, hz=info.hz,
+        profile=profile,
+        hardware=hardware_label(pipe.device),
+        frames=T,
+        latency_ms=dict(p50=float(np.percentile(totals, 50)), p95=float(np.percentile(totals, 95)),
+                        p99=float(np.percentile(totals, 99)), mean=float(totals.mean())),
+        fps=float(1000.0 / totals.mean()),
+        grid_only_ms=float(np.mean([f["timing_ms"]["projection"] + f["timing_ms"]["fusion"] for f in warm])),
+        uniform5_grid_ms=float(np.mean(u_times)),
+        stages_ms=stages,
+        memory_bytes=mem,
+        memory_saving_vs_uniform5=mem["uniform_5cm_2.5d"] / mem["foveated_spec"],
+        cells=dict(foveated_spec=pipe.grid.n_cells, uniform_5cm=16_000_000),
+        tiers=[dict(cell=tr.cell, half=tr.half, n=tr.n) for tr in pipe.grid.tiers],
+        classes=list(info.class_names),
+        active_classes=[bool(a) for a in active],
+        bands=BAND_NAMES,
+        point_miou_by_band=[_nanmean(x[active]) for x in pts_iou],
+        grid_miou_by_band=[_nanmean(x[active]) for x in grid_iou],
+        point_iou_by_class=[_f(x) for x in all_pts],
+        grid_iou_by_class_band=[[_f(x) for x in g] for g in grid_iou],
+        point_iou_by_class_band=[[_f(x) for x in g] for g in pts_iou],
+        point_miou=_nanmean(all_pts[active]),
+        drivable_iou_grid_0_10=drv(cm_grid[0]),
+        drivable_iou_points_0_10=drv(cm_pts[0]),
+        moving_iou_by_band=[float(a / b) if b else None for a, b in zip(mov_tp, mov_un)],
+        moving_iou=float(mov_tp.sum() / max(mov_un.sum(), 1)) if mov_un.sum() else None,
+        curb_recall_10m=float(curb_hit / max(curb_tot, 1)) if truth is not None else None,
+        pothole_recall_10m=float(pot_hit / max(pot_tot, 1)) if truth is not None else None,
+        points_lost=int(sum(f["in_window"] - f["binned"] for f in per_frame)),
+        nesting_ok=all(f["nest_ok"] for f in per_frame),
+        points_file_index=pts_index,
+    )
+    if export:
+        import base64
+        with open(os.path.join(out_dir, "points.b64.txt"), "w") as fh:     # artifacts serve text, not raw binary
+            fh.write(base64.b64encode(b"".join(pts_blob)).decode())
+        with open(os.path.join(out_dir, "metrics.json"), "w") as fh:
+            json.dump(dict(summary=summary, frames=per_frame), fh)
+    return summary, per_frame
+
+
+def _binary_iou(cm, pos):
+    pos = list(pos)
+    tp = cm[np.ix_(pos, pos)].sum()
+    fp = cm[:, pos].sum() - tp
+    fn = cm[pos, :].sum() - tp
+    return float(tp / max(tp + fp + fn, 1))
+
+
+def _nanmean(x):
+    x = np.asarray(x, float)
+    return float(np.nanmean(x)) if np.isfinite(x).any() else None
+
+
+def _f(x):
+    return None if not np.isfinite(x) else round(float(x), 4)
