@@ -9,9 +9,15 @@ tiers meet.
 **Live dashboard: [foveamap-teal.vercel.app](https://foveamap-teal.vercel.app)**, a replay of real
 Lidar (nuScenes scene-0103) run through the GPU pipeline on a T4.
 
-It runs on two data sources through the same code:
+It runs on three data sources through the same code:
 - **Simulated Lidar**: built in, no download needed, exact labels.
-- **Real Lidar from nuScenes-mini**: through the Colab notebook, on a free GPU.
+- **Real Lidar from SemanticKITTI**: 64-beam, the main real-data training set, through its Colab notebook.
+- **Real Lidar from nuScenes-mini**: 32-beam, 8 training scenes, through its Colab notebook.
+
+| Colab notebook (T4 GPU) | What it does |
+| --- | --- |
+| [**SemanticKITTI**](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_semantickitti_colab.ipynb) | Fine-tunes on SemanticKITTI and scores sequence 08 by distance and class. |
+| [**nuScenes-mini**](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_nuscenes_colab.ipynb) | Fine-tunes on nuScenes-mini, compares training recipes, and benchmarks latency with both grid engines. |
 
 ```
 sweep ──► features ──► range-image U-Net ──► foveated grid engine ──► fusion + cost ──► dashboard frames
