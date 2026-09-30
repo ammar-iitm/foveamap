@@ -58,11 +58,12 @@ How the loader maps nuScenes onto FoveaMap:
 | `foveamap/nuscenes.py` | The nuScenes and nuScenes-lidarseg loader, splits, class map, moving flags and frame cache. |
 | `foveamap/model.py` | The range-image U-Net, with a 9-class head and a moving/static head. It runs on GPU with FP16 or on CPU, and can mask out classes a dataset doesn't have. |
 | `foveamap/grid.py` | **The foveated grid engine.** It uses integer fine indices with floor-division per tier, so tiers nest exactly. Windows snap to the coarse lattice and scroll with the vehicle. Each cell is a 16-byte structure-of-arrays record. The engine also does fused class, ground height, roughness, overhang clearance, curb-step and pothole flags, and traversability cost. |
+| `foveamap/grid_torch.py` | The same grid engine in PyTorch, for any `torch.device` (CUDA, MPS or CPU). It keeps the 16-byte cell layout and exact integer nesting, and is checked for parity against `grid.py`. Select it with `--grid torch`. |
 | `foveamap/pipeline.py` | The pipeline and benchmark harness. It records per-stage latency, measured memory against uniform baselines, and accuracy by distance band (points and grid cells). It also measures moving IoU, curb and pothole recall (simulator only), and a per-frame integrity check, and exports the dashboard data. |
 | `scripts/` | `gen_data.py` (simulated drives), `prepare_nuscenes.py` (frame cache), `train.py` (sim, or nuScenes fine-tune), `run_benchmark.py`, `make_local_view.py`. |
 | `notebooks/foveamap_nuscenes_colab.ipynb` | The Colab notebook. `build_notebook.py` generates it. |
 | `dashboard/index.html` | The replay dashboard. It rotates the world-aligned grid so the vehicle's heading is always up. |
-| `tests/` | Grid invariants (no point lost, exact nesting, world alignment after scrolling, 16 B per cell). There is also a nuScenes loader test on a mock dataset written in nuScenes' exact file layout. The mock uses a rotated world, a rotated sensor mount, shuffled laser ids, lidarseg ids and annotation boxes. |
+| `tests/` | Grid invariants (no point lost, exact nesting, world alignment after scrolling, 16 B per cell). There is also a nuScenes loader test on a mock dataset written in nuScenes' exact file layout. The mock uses a rotated world, a rotated sensor mount, shuffled laser ids, lidarseg ids and annotation boxes. Parity tests compare the PyTorch grid engine with the NumPy one, cell by cell and across a scrolling drive, on CPU and on MPS/CUDA when present. |
 
 ## Run the simulator version
 
@@ -71,6 +72,7 @@ pip install -r requirements.txt
 python scripts/gen_data.py                            # ~8 min on 2 CPU cores
 python scripts/train.py --dataset sim --budget 1000   # ~17 min on CPU
 python scripts/run_benchmark.py                       # writes dashboard/data/
+python scripts/run_benchmark.py --grid torch          # same, with the PyTorch grid engine (on the GPU if there is one)
 python -m pytest -q tests
 python scripts/make_local_view.py && cd dashboard && python -m http.server 8000   # open http://localhost:8000/view.html
 ```
@@ -128,7 +130,7 @@ These were measured with the Colab notebook on a T4 GPU. The model was fine-tune
 | Moving-object IoU | 37.5% | reported | — |
 | p95 latency / throughput | 181 ms / 7.2 FPS | ≤ 50 ms / ≥ 20 FPS | fail |
 
-Stage means (ms): preprocess 14, network 4.6, projection 19, fusion + cost 60, serialise 41.
+Stage means (ms): preprocess 14, network 4.6, projection 19, fusion + cost 60, serialise 41. These were measured with the NumPy grid engine, and before PNG export moved to a background thread.
 
 - **Structure holds up.** Memory, point conservation and drivable surface hold up on real data.
 - **Accuracy is limited by data.** 8 training scenes are far too few, and the weakest classes are terrain, barriers and cones, pedestrians and sidewalk.
@@ -138,5 +140,5 @@ Stage means (ms): preprocess 14, network 4.6, projection 19, fusion + cost 60, s
 ## How the prototype differs from the full design
 
 - **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use.
-- **Grid engine on CPU.** The grid engine is NumPy on the CPU. On a GPU machine the network becomes a few milliseconds and the grid engine dominates. Porting its scatter-reduce to PyTorch or CUDA is the next step toward ≤ 50 ms.
+- **Grid engine on the GPU: not yet measured.** The grid engine now also runs in PyTorch (`--grid torch`), and dashboard PNG export runs on a background thread, reported as `export_ms` and not counted in latency. The results above still come from the NumPy engine. The Colab notebook benchmarks both engines on a T4, and those numbers will replace the ones above.
 - **Not built yet:** 3D view, velocity arrows (no tracker), free-space ray clearing, ROS 2 node, TensorRT export, and a SemanticKITTI loader (it would fill the same frame format as `nuscenes.py`).
