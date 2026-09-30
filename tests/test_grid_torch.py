@@ -148,3 +148,25 @@ def test_update_parity_float32(device, fuse):
 def test_torch_state_is_16_bytes_per_cell():
     g = TorchFoveatedGrid("spec", device="cpu")
     assert g.nbytes == 16 * g.n_cells == 16 * 320000
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("profile", ["spec", "graded"])
+def test_torch_no_point_lost_and_nesting(device, profile):
+    g = TorchFoveatedGrid(profile, fuse=False, device=device)
+    xy, z, p, m = _rand()
+    org = g.window_origins(EGO)
+    st = stats_to_numpy(g.bin_points(xy, z, p, m, org))
+    f = g.fine_index(xy) // g.tiers[-1].ratio - org[-1]
+    assert st[-1]["n_pts"].sum() == ((f >= 0) & (f < g.tiers[-1].n)).all(1).sum()
+    g.origins = org
+    for k in range(1, len(g.tiers)):
+        # coarse cells under the fine box hold exactly the points the fine tier binned
+        under = g.inner_mask(k).ravel()[st[k]["key"]]
+        assert st[k]["n_pts"][under].sum() == st[k - 1]["n_in"] == st[k - 1]["n_pts"].sum()
+        r = g.tiers[k].ratio // g.tiers[k - 1].ratio
+        nf, nc = g.tiers[k - 1].n, g.tiers[k].n
+        fi, fj = st[k - 1]["key"] // nf + org[k - 1][0], st[k - 1]["key"] % nf + org[k - 1][1]
+        ck = (fi // r - org[k][0]) * nc + (fj // r - org[k][1])
+        sums = np.bincount(ck, weights=st[k - 1]["n_pts"], minlength=nc * nc)
+        np.testing.assert_array_equal(sums[st[k]["key"][under]], st[k]["n_pts"][under])
