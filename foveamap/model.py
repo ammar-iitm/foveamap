@@ -64,11 +64,12 @@ def load_model(ckpt, device=None):
 
 @torch.no_grad()
 def predict(model, feats, active=None, fp16=True, to_host=True):
-    """feats: (8, H, W) numpy -> probs (H, W, C) numpy, p_move (H, W) numpy.
+    """feats: (8, H, W) numpy or tensor -> probs (H, W, C) numpy, p_move (H, W) numpy.
     active: boolean class mask; inactive classes are never predicted.
     to_host=False returns device tensors instead (no sync, no copy)."""
     dev = next(model.parameters()).device
-    x = torch.from_numpy(np.asarray(feats, np.float32))[None].to(dev)
+    x = feats if torch.is_tensor(feats) else torch.from_numpy(np.asarray(feats, np.float32))
+    x = x[None].to(dev, torch.float32)
     with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(fp16 and dev.type == "cuda")):
         sem, mot = model(x)
     sem = sem.float()

@@ -21,6 +21,7 @@ from .model import load_model, predict, pick_device
 from .frames import DatasetInfo, make_features, prev_in_ego, transform
 from .grid import (FoveatedGrid, UNKNOWN, F_DYNAMIC, F_OVERHANG, F_STEP, F_DEPRESSION)
 from .grid_torch import TorchFoveatedGrid
+from . import features_torch
 
 BANDS = [(0, 10), (10, 25), (25, 50), (50, 100)]
 BAND_NAMES = ["0–10 m", "10–25 m", "25–50 m", "50–100 m"]
@@ -55,13 +56,18 @@ def to_host(x):
 class FoveaMapPipeline:
     """sweep -> features -> network -> foveated grid, with per-stage timing."""
 
-    def __init__(self, ckpt, info: DatasetInfo, profile="spec", fuse=True, device=None, grid="numpy"):
+    def __init__(self, ckpt, info: DatasetInfo, profile="spec", fuse=True, device=None, grid="numpy",
+                 features=None):
+        """grid / features: "numpy" (CPU) or "torch" (on the model's device); features follows grid by default."""
         if not torch.cuda.is_available():
             torch.set_num_threads(max(1, os.cpu_count() or 1))
         self.device = pick_device(device)
         self.model = load_model(ckpt, self.device)
         self.info = info
         self.grid_engine = grid
+        self.features = features or grid
+        if self.features not in ("numpy", "torch"):
+            raise ValueError(f"unknown features engine {self.features!r}")
         if grid == "torch":
             self.grid = TorchFoveatedGrid(profile, fuse=fuse, device=self.device)
         elif grid == "numpy":
@@ -77,7 +83,12 @@ class FoveaMapPipeline:
         T = {}
         t0 = time.perf_counter()
         hist = [self.history[-k] if len(self.history) >= k else None for k in (1, 2)]
-        feats, idx, row, col = make_features(frame, self.info, prev_in_ego(frame, hist))
+        prev = prev_in_ego(frame, hist)
+        if self.features == "torch":
+            feats, idx, row, col = features_torch.make_features(frame, self.info, prev, self.device)
+        else:
+            feats, idx, row, col = make_features(frame, self.info, prev)
+        _sync(self.device)
         T["preprocess"] = time.perf_counter() - t0
 
         t0 = time.perf_counter()
@@ -87,7 +98,9 @@ class FoveaMapPipeline:
 
         t0 = time.perf_counter()
         if on_dev:
-            row, col = (torch.from_numpy(np.asarray(a)).to(self.device) for a in (row, col))
+            row, col = (torch.as_tensor(a).to(self.device) for a in (row, col))
+        else:
+            row, col = to_host(row), to_host(col)
         P = probs[row, col]                                   # every point takes its pixel's prediction
         cls = P.argmax(1)
         moving = (pmove[row, col] > 0.5) & ((cls == VEHICLE) | (cls == PERSON))
@@ -174,12 +187,12 @@ def _export_frame(snap, dyn, gstats, tiers, path):
 
 
 def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile="spec",
-                  export=True, n_uniform=3, device=None, grid="numpy"):
+                  export=True, n_uniform=3, device=None, grid="numpy", features=None):
     """Run frames through the pipeline; write metrics.json, frames/*.png and
     points.b64.txt for the dashboard. truth: simulator-only curb/pothole geometry.
-    grid: "numpy" or "torch" (on the model's device)."""
+    grid / features: "numpy" or "torch" (on the model's device); features follows grid by default."""
     T = len(frames)
-    pipe = FoveaMapPipeline(ckpt, info, profile, device=device, grid=grid)
+    pipe = FoveaMapPipeline(ckpt, info, profile, device=device, grid=grid, features=features)
     gt_grid = FoveatedGrid(profile, fuse=False)
     frames_dir = os.path.join(out_dir, "frames")
     os.makedirs(frames_dir, exist_ok=True)
@@ -320,6 +333,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         profile=profile,
         hardware=hardware_label(pipe.device, grid),
         grid_engine=grid,
+        features_engine=pipe.features,
         frames=T,
         latency_ms=dict(p50=float(np.percentile(totals, 50)), p95=float(np.percentile(totals, 95)),
                         p99=float(np.percentile(totals, 99)), mean=float(totals.mean())),

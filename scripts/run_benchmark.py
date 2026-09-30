@@ -28,6 +28,8 @@ if __name__ == "__main__":
     ap.add_argument("--device", default=None)
     ap.add_argument("--grid", default="numpy", choices=["numpy", "torch"],
                     help="grid engine: NumPy on the CPU, or PyTorch on the model's device")
+    ap.add_argument("--features", default=None, choices=["numpy", "torch"],
+                    help="range-image features engine (default: same as --grid)")
     args = ap.parse_args()
 
     if args.dataset == "sim":
@@ -42,6 +44,6 @@ if __name__ == "__main__":
         ckpt = args.ckpt or os.path.join(ROOT, "checkpoints", "range_unet_nuscenes.pt")
 
     summary, _ = run_benchmark(frames, info, ckpt, args.out, truth=truth, profile=args.profile, device=args.device,
-                               grid=args.grid)
+                               grid=args.grid, features=args.features)
     s = {k: v for k, v in summary.items() if not k.endswith("_index") and "by_class" not in k}
     print(json.dumps(s, indent=2))

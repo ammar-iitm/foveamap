@@ -16,7 +16,7 @@ CKPT = os.path.join(os.path.dirname(__file__), "..", "checkpoints", "range_unet.
 def test_pipeline_engines_agree(drive):
     frames, _ = drive
     ref = FoveaMapPipeline(CKPT, SIM_INFO, device="cpu", grid="numpy")
-    tor = FoveaMapPipeline(CKPT, SIM_INFO, device="cpu", grid="torch")
+    tor = FoveaMapPipeline(CKPT, SIM_INFO, device="cpu", grid="torch", features="numpy")
     for fr in frames:
         a, b = ref.step(fr), tor.step(fr)
         np.testing.assert_array_equal(a["cls_pts"], to_host(b["cls_pts"]))
@@ -37,3 +37,16 @@ def test_benchmark_runs_with_torch_grid(drive, tmp_path):
     assert all(f["png_bytes"] > 0 and f["export_ms"] > 0 for f in per_frame)
     assert len(os.listdir(tmp_path / "frames")) == len(frames)
     assert "export" not in per_frame[0]["timing_ms"]          # background export is not latency
+
+
+def test_torch_features_in_pipeline(drive):
+    frames, _ = drive
+    ref = FoveaMapPipeline(CKPT, SIM_INFO, device="cpu", grid="numpy")
+    tor = FoveaMapPipeline(CKPT, SIM_INFO, device="cpu", grid="torch")
+    assert tor.features == "torch"
+    for fr in frames:
+        a, b = ref.step(fr), tor.step(fr)
+        # features differ only at rare tie pixels, so a handful of points may change class
+        assert (a["cls_pts"] != to_host(b["cls_pts"])).mean() < 1e-3
+    for ra, rb in zip(ref.grid.snapshot(), tor.grid.snapshot()):
+        assert (ra.cls != rb.cls).mean() < 1e-3
