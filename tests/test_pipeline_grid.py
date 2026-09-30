@@ -34,9 +34,21 @@ def test_benchmark_runs_with_torch_grid(drive, tmp_path):
     s, per_frame = run_benchmark(frames, SIM_INFO, CKPT, str(tmp_path), truth=truth, n_uniform=1,
                                  device="cpu", grid="torch")
     assert s["grid_engine"] == "torch" and s["points_lost"] == 0 and s["nesting_ok"]
+    assert s["export_mode"] == "async"
     assert all(f["png_bytes"] > 0 and f["export_ms"] > 0 for f in per_frame)
     assert len(os.listdir(tmp_path / "frames")) == len(frames)
     assert "export" not in per_frame[0]["timing_ms"]          # background export is not latency
+
+
+def test_benchmark_export_modes(drive, tmp_path):
+    frames, truth = drive
+    out_after = tmp_path / "after"
+    s, per_frame = run_benchmark(frames, SIM_INFO, CKPT, str(out_after), truth=truth, n_uniform=1,
+                                 device="cpu", grid="torch", export="after")
+    assert s["export_mode"] == "after"
+    assert all(f["png_bytes"] > 0 and f["export_ms"] > 0 for f in per_frame)
+    assert len(os.listdir(out_after / "frames")) == len(frames)
+    assert "export" not in per_frame[0]["timing_ms"]
 
 
 def test_torch_features_in_pipeline(drive):

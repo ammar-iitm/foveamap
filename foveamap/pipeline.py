@@ -187,10 +187,20 @@ def _export_frame(snap, dyn, gstats, tiers, path):
 
 
 def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile="spec",
-                  export=True, n_uniform=3, device=None, grid="numpy", features=None):
+                  export="async", n_uniform=3, device=None, grid="numpy", features=None):
     """Run frames through the pipeline; write metrics.json, frames/*.png and
     points.b64.txt for the dashboard. truth: simulator-only curb/pothole geometry.
+    export: 'async' (background thread during run), 'after' (encode after timed loop),
+    or 'none' / False.
     grid / features: "numpy" or "torch" (on the model's device); features follows grid by default."""
+    if export is True:
+        export_mode = "async"
+    elif export is False:
+        export_mode = "none"
+    elif isinstance(export, str) and export.lower() in ("async", "after", "none"):
+        export_mode = export.lower()
+    else:
+        raise ValueError(f"unknown export mode {export!r}; choose 'async', 'after', or 'none'")
     T = len(frames)
     pipe = FoveaMapPipeline(ckpt, info, profile, device=device, grid=grid, features=features)
     gt_grid = FoveatedGrid(profile, fuse=False)
@@ -206,8 +216,11 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
     per_frame, pts_blob, pts_index = [], [], []
     rng = np.random.default_rng(0)
     from scipy.ndimage import binary_dilation
-    exporter = ThreadPoolExecutor(max_workers=1)
-    exports = []
+    if export_mode == "async":
+        exporter = ThreadPoolExecutor(max_workers=1)
+        exports = []
+    elif export_mode == "after":
+        export_queue = []
 
     for t, fr in enumerate(frames):
         r = pipe.step(fr)
@@ -226,8 +239,11 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         has = lab >= 0
         gm = fr["moving"]
         gstats = gt_grid.bin_points(r["pw"][has, :2], r["pw"][has, 2], np.eye(C)[lab[has]], gm[has], pipe.grid.origins)
-        exports.append(exporter.submit(_export_frame, snap, dyn, gstats, pipe.grid.tiers,
-                                       os.path.join(frames_dir, f"f{t:03d}.png") if export else None))
+        path = os.path.join(frames_dir, f"f{t:03d}.png") if export_mode != "none" else None
+        if export_mode == "async":
+            exports.append(exporter.submit(_export_frame, snap, dyn, gstats, pipe.grid.tiers, path))
+        elif export_mode == "after":
+            export_queue.append((snap, dyn, gstats, pipe.grid.tiers, path))
 
         # ---- point accuracy by distance band (ego-frame horizontal distance) ----
         d = np.hypot(r["pts"][:, 0], r["pts"][:, 1])
@@ -293,10 +309,18 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         print(f"frame {t:3d}  total {per_frame[-1]['total_ms']:7.1f} ms  "
               + "  ".join(f"{k} {v:.0f}" for k, v in timing_ms.items()), flush=True)
 
-    exporter.shutdown(wait=True)
-    for f, job in zip(per_frame, exports):
-        f["export_ms"], f["png_bytes"] = job.result()
-        f["export_ms"] = round(f["export_ms"], 2)
+    if export_mode == "async":
+        exporter.shutdown(wait=True)
+        for f, job in zip(per_frame, exports):
+            f["export_ms"], f["png_bytes"] = job.result()
+            f["export_ms"] = round(f["export_ms"], 2)
+    elif export_mode == "after":
+        for f, args in zip(per_frame, export_queue):
+            f["export_ms"], f["png_bytes"] = _export_frame(*args)
+            f["export_ms"] = round(f["export_ms"], 2)
+    else:
+        for f in per_frame:
+            f["export_ms"], f["png_bytes"] = 0.0, 0
 
     # ------------------------------------------------------------------ summary
     warm = per_frame[2:] if T > 3 else per_frame
@@ -334,6 +358,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         hardware=hardware_label(pipe.device, grid),
         grid_engine=grid,
         features_engine=pipe.features,
+        export_mode=export_mode,
         frames=T,
         latency_ms=dict(p50=float(np.percentile(totals, 50)), p95=float(np.percentile(totals, 95)),
                         p99=float(np.percentile(totals, 99)), mean=float(totals.mean())),
@@ -365,7 +390,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         nesting_ok=all(f["nest_ok"] for f in per_frame),
         points_file_index=pts_index,
     )
-    if export:
+    if export_mode != "none":
         import base64
         with open(os.path.join(out_dir, "points.b64.txt"), "w") as fh:     # artifacts serve text, not raw binary
             fh.write(base64.b64encode(b"".join(pts_blob)).decode())
