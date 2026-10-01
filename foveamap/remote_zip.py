@@ -7,18 +7,26 @@ requests: the central directory once, then each wanted member's bytes.
 """
 from __future__ import annotations
 
+import http.client
 import io
+import time
+import urllib.error
 import urllib.request
 import zipfile
+
+# transient failures worth another try: timeouts, dropped connections, TLS handshake stalls
+RETRYABLE = (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException)
 
 
 class HTTPRangeFile(io.RawIOBase):
     """Seekable, read-only view of a URL (the server must honour Range requests)."""
 
-    def __init__(self, url, block=1 << 20, timeout=60):
+    def __init__(self, url, block=1 << 20, timeout=60, retries=6, backoff=2.0):
         self.url, self.block, self.timeout = url, block, timeout
+        self.retries, self.backoff = retries, backoff
         self.pos = 0
-        self.size = int(self._open("bytes=0-0").headers["Content-Range"].split("/")[1])
+        size = self._retry(lambda: self._open("bytes=0-0").headers["Content-Range"])
+        self.size = int(size.split("/")[1])
         self._buf_start, self._buf = 0, b""
 
     def _open(self, rng):
@@ -27,6 +35,28 @@ class HTTPRangeFile(io.RawIOBase):
         if resp.status != 206:
             raise OSError(f"{self.url}: server ignored the Range header (HTTP {resp.status})")
         return resp
+
+    def _retry(self, fn):
+        """fn(), retried with exponential backoff on transient network errors."""
+        for attempt in range(self.retries + 1):
+            try:
+                return fn()
+            except RETRYABLE as e:
+                if isinstance(e, urllib.error.HTTPError) and e.code < 500 and e.code != 429:
+                    raise                                   # 4xx won't fix itself
+                if attempt == self.retries:
+                    raise
+                time.sleep(self.backoff * 2 ** attempt)
+
+    def _get(self, start, stop):
+        """Bytes [start, stop) of the URL, checked for length."""
+        def once():
+            with self._open(f"bytes={start}-{stop - 1}") as resp:
+                data = resp.read()
+            if len(data) != stop - start:
+                raise http.client.IncompleteRead(data, stop - start - len(data))
+            return data
+        return self._retry(once)
 
     def readable(self):
         return True
@@ -53,8 +83,7 @@ class HTTPRangeFile(io.RawIOBase):
         if not (self._buf_start <= self.pos and end <= buf_end):
             # read ahead a block: a member's local header and its data usually arrive in one request
             stop = min(self.size, max(end, self.pos + self.block))
-            with self._open(f"bytes={self.pos}-{stop - 1}") as resp:
-                self._buf = resp.read()
+            self._buf = self._get(self.pos, stop)
             self._buf_start = self.pos
         out = self._buf[self.pos - self._buf_start:end - self._buf_start]
         self.pos += len(out)
