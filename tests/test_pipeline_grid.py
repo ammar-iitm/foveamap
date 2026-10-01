@@ -62,3 +62,10 @@ def test_torch_features_in_pipeline(drive):
         assert (a["cls_pts"] != to_host(b["cls_pts"])).mean() < 1e-3
     for ra, rb in zip(ref.grid.snapshot(), tor.grid.snapshot()):
         assert (ra.cls != rb.cls).mean() < 1e-3
+
+
+def test_benchmark_writes_metrics_without_export(drive, tmp_path):
+    frames, truth = drive
+    run_benchmark(frames, SIM_INFO, CKPT, str(tmp_path), truth=truth, n_uniform=1,
+                  device="cpu", grid="torch", export="none")
+    assert (tmp_path / "metrics.json").exists()

@@ -395,8 +395,8 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         import base64
         with open(os.path.join(out_dir, "points.b64.txt"), "w") as fh:     # artifacts serve text, not raw binary
             fh.write(base64.b64encode(b"".join(pts_blob)).decode())
-        with open(os.path.join(out_dir, "metrics.json"), "w") as fh:
-            json.dump(dict(summary=summary, frames=per_frame), fh)
+    with open(os.path.join(out_dir, "metrics.json"), "w") as fh:
+        json.dump(dict(summary=summary, frames=per_frame), fh)
     return summary, per_frame
 
 
