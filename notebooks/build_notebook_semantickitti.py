@@ -85,6 +85,9 @@ if USE_DRIVE and os.path.exists(f'{DRIVE_CACHE}/index.json'):          # index.j
     !mkdir -p $CACHE && cp "$DRIVE_CACHE"/*.pkl "$DRIVE_CACHE"/index.json $CACHE/
 else:
     !python scripts/prepare_semantickitti.py --root $KITTI --out $CACHE --stride $STRIDE
+    if not os.path.exists(f'{CACHE}/index.json'):                       # written last by the cache build
+        raise RuntimeError('Preparing SemanticKITTI failed (see above). Run this cell again: '
+                           'scans already fetched are kept, so it resumes where it stopped.')
     if USE_DRIVE:
         print('Saving the frame cache to Drive for later sessions')
         !mkdir -p "$DRIVE_CACHE" && cp $CACHE/*.pkl "$DRIVE_CACHE"/ && cp $CACHE/index.json "$DRIVE_CACHE"/
