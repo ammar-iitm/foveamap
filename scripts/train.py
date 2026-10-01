@@ -139,7 +139,8 @@ def main():
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
     frames, info, n_frames = load_frames(args, "train")
-    X, Y, M, R = frames_to_training_arrays(frames, info, n_frames)
+    print(f"preparing {n_frames} training frames", flush=True)
+    X, Y, M, R = frames_to_training_arrays(frames, info, n_frames, log=lambda m: print(m, flush=True))
     del frames
     print(f"{args.dataset}: {len(X)} training frames, range image {info.n_rows} x {info.n_cols}, device {dev}", flush=True)
 
@@ -151,6 +152,7 @@ def main():
     cw[~np.asarray(info.active, bool) | (freq == 0)] = 0.0
     cw = torch.tensor(cw / cw[cw > 0].mean(), dtype=torch.float32, device=dev)
     pos_w = torch.tensor(min(50.0, (~M & valid).sum() / max(M.sum(), 1)) ** 0.5, device=dev)
+    del valid
 
     model = RangeUNet()
     if args.init:
@@ -217,6 +219,7 @@ def main():
     torch.save(model.cpu().state_dict(), out)
     model.to(dev).eval()
     print("saved", out, f"({step} steps, {time.time() - t0:.0f}s)")
+    del X, Y, M, R                                    # free the training arrays (~2.5 GB on SemanticKITTI) before validation
 
     vframes, _, _ = load_frames(args, "val")
     res = evaluate(model, vframes, info)

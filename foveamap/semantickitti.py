@@ -211,7 +211,10 @@ def iter_cached(out_dir, split):
         index = json.load(fh)
     for seq in index[split]:
         with open(os.path.join(out_dir, f"{seq}.pkl"), "rb") as fh:
-            yield from pickle.load(fh)
+            frames = pickle.load(fh)
+        frames.reverse()
+        while frames:              # drop each frame once used, so the sequence's memory shrinks as it goes
+            yield frames.pop()
 
 
 def count_cached(out_dir, split):

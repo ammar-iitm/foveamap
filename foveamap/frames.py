@@ -190,9 +190,10 @@ def sim_frames(path_or_seq):
     return frames, truth
 
 
-def frames_to_training_arrays(frames, info: DatasetInfo, n=None):
+def frames_to_training_arrays(frames, info: DatasetInfo, n=None, log=None, every=250):
     """Features + per-pixel targets for a list of frames (used by training).
-    frames may be any iterable when n (the number of frames) is given."""
+    frames may be any iterable when n (the number of frames) is given.
+    log: called with a progress line every `every` frames."""
     F = len(frames) if n is None else n
     X = np.zeros((F, IN_CH, info.n_rows, info.n_cols), np.float16)
     Y = np.full((F, info.n_rows, info.n_cols), -1, np.int8)
@@ -203,4 +204,6 @@ def frames_to_training_arrays(frames, info: DatasetInfo, n=None):
         X[i] = feats
         Y[i], M[i] = label_images(f, idx)
         R[i] = feats[0] * 50.0
+        if log and (i + 1) % every == 0:
+            log(f"prepared {i + 1}/{F} frames")
     return X, Y, M, R
