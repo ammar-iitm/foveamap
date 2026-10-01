@@ -33,6 +33,28 @@ sweep ──► features ──► range-image U-Net ──► foveated grid eng
 | [`docs/FoveaMap_Architecture_Vision.pdf`](docs/FoveaMap_Architecture_Vision.pdf) | Pipeline, perception model, tiered grid design, projection and fusion rules, latency and memory budget, key decisions |
 | [`docs/FoveaMap_Visual_Design.pdf`](docs/FoveaMap_Visual_Design.pdf) | Dashboard layout, colour system, map rendering, components, interaction, accessibility |
 
+## Real data: SemanticKITTI on Colab
+
+nuScenes-mini's 8 training scenes are too few to learn real-world classes. SemanticKITTI has 19,130 labelled training scans from a 64-beam HDL-64E, the sensor the simulator models.
+
+1. Register at [cvlibs.net](http://www.cvlibs.net/datasets/kitti/user_register.php) and accept the KITTI terms (CC BY-NC-SA 3.0; SemanticKITTI is CC BY-NC-SA 4.0, non-commercial).
+2. Open [`notebooks/foveamap_semantickitti_colab.ipynb` in Google Colab](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_semantickitti_colab.ipynb), set a T4 runtime and *Run all* (about 40–60 minutes the first time). It downloads to the runtime's local disk, builds the frame cache, and saves the cache (about 14 GB at stride 10) to your Google Drive under `MyDrive/foveamap_data/`, so later sessions copy it back in about 5 minutes instead of downloading and rebuilding.
+
+The notebook scores the simulator model on sequence 08, fine-tunes on sequences 00–07, 09 and 10, scores sequence 08 again and benchmarks it. Outside Colab:
+
+```bash
+python scripts/prepare_semantickitti.py --root /path/to/kitti --out cache/semantickitti --stride 10
+python scripts/train.py --dataset semantickitti --init checkpoints/range_unet.pt --epochs 20
+python scripts/run_benchmark.py --dataset semantickitti --scene 08 --max-frames 100 --grid torch
+```
+
+How the loader maps SemanticKITTI onto FoveaMap:
+
+- **Only the scans it needs.** The KITTI velodyne zip is 85 GB. `prepare_semantickitti.py` fetches every n-th scan (default 10) and the two scans before it straight from the remote zip with HTTP range requests, about 14 GB at stride 10.
+- **Laser rows.** The files carry no laser id, so rows come from elevation over the simulator's field of view (+2° to −24.9°, 64 rows).
+- **Frames and poses.** The ego frame is the Lidar frame moved down 1.73 m to the ground. Poses are cam0 poses converted to the Lidar with the calibration, so the world is the first scan's ego frame.
+- **Classes and moving flags.** SemanticKITTI's classes map onto all 9 FoveaMap classes, and its moving-car and moving-person labels give the moving flags.
+
 ## Real data: nuScenes-mini on Colab (no Lidar hardware needed)
 
 1. Open [`notebooks/foveamap_nuscenes_colab.ipynb` in Google Colab](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_nuscenes_colab.ipynb).
@@ -57,28 +79,6 @@ How the loader maps nuScenes onto FoveaMap:
 - **Moving flags.** They come from annotation boxes whose attribute is moving, or whose speed is above 0.5 m/s.
 - **Classes.** The 32 lidarseg classes map to FoveaMap's. nuScenes has no parking or pole/sign class, so the "pole" slot holds barriers and cones and parking is masked out.
 
-## Real data: SemanticKITTI on Colab
-
-nuScenes-mini's 8 training scenes are too few to learn real-world classes. SemanticKITTI has 19,130 labelled training scans from a 64-beam HDL-64E, the sensor the simulator models.
-
-1. Register at [cvlibs.net](http://www.cvlibs.net/datasets/kitti/user_register.php) and accept the KITTI terms (CC BY-NC-SA 3.0; SemanticKITTI is CC BY-NC-SA 4.0, non-commercial).
-2. Open [`notebooks/foveamap_semantickitti_colab.ipynb` in Google Colab](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_semantickitti_colab.ipynb), set a T4 runtime and *Run all* (about 40–60 minutes the first time). It downloads to the runtime's local disk, builds the frame cache, and saves the cache (about 14 GB at stride 10) to your Google Drive under `MyDrive/foveamap_data/`, so later sessions copy it back in about 5 minutes instead of downloading and rebuilding.
-
-The notebook scores the simulator model on sequence 08, fine-tunes on sequences 00–07, 09 and 10, scores sequence 08 again and benchmarks it. Outside Colab:
-
-```bash
-python scripts/prepare_semantickitti.py --root /path/to/kitti --out cache/semantickitti --stride 10
-python scripts/train.py --dataset semantickitti --init checkpoints/range_unet.pt --epochs 20
-python scripts/run_benchmark.py --dataset semantickitti --scene 08 --max-frames 100 --grid torch
-```
-
-How the loader maps SemanticKITTI onto FoveaMap:
-
-- **Only the scans it needs.** The KITTI velodyne zip is 85 GB. `prepare_semantickitti.py` fetches every n-th scan (default 10) and the two scans before it straight from the remote zip with HTTP range requests, about 14 GB at stride 10.
-- **Laser rows.** The files carry no laser id, so rows come from elevation over the simulator's field of view (+2° to −24.9°, 64 rows).
-- **Frames and poses.** The ego frame is the Lidar frame moved down 1.73 m to the ground. Poses are cam0 poses converted to the Lidar with the calibration, so the world is the first scan's ego frame.
-- **Classes and moving flags.** SemanticKITTI's classes map onto all 9 FoveaMap classes, and its moving-car and moving-person labels give the moving flags.
-
 ## What's in the box
 
 | Path | What it does |
@@ -93,7 +93,7 @@ How the loader maps SemanticKITTI onto FoveaMap:
 | `foveamap/features_torch.py` | The range-image features in PyTorch, so `--grid torch` keeps the whole path from features to map on the GPU. |
 | `foveamap/pipeline.py` | The pipeline and benchmark harness. It records per-stage latency, measured memory against uniform baselines, and accuracy by distance band (points and grid cells). It also measures moving IoU, curb and pothole recall (simulator only), and a per-frame integrity check, and exports the dashboard data. |
 | `scripts/` | `gen_data.py` (simulated drives), `prepare_nuscenes.py` and `prepare_semantickitti.py` (frame caches), `train.py` (sim, or nuScenes / SemanticKITTI fine-tune), `run_benchmark.py`, `make_local_view.py`. |
-| `notebooks/foveamap_nuscenes_colab.ipynb` | The Colab notebook. `build_notebook.py` generates it. |
+| `notebooks/` | The Colab notebooks: `foveamap_semantickitti_colab.ipynb` (generated by `build_notebook_semantickitti.py`) and `foveamap_nuscenes_colab.ipynb` (generated by `build_notebook.py`). |
 | `dashboard/index.html` | The replay dashboard. It rotates the world-aligned grid so the vehicle's heading is always up. |
 | `site/data/` | The replay the live dashboard shows. Vercel builds every push to `main` (`vercel.json` runs `scripts/build_site.py`, which wraps the dashboard into `site/index.html`). To publish another run, copy its dashboard data here and push. |
 | `tests/` | Grid invariants (no point lost, exact nesting, world alignment after scrolling, 16 B per cell). There is also a nuScenes loader test on a mock dataset written in nuScenes' exact file layout. The mock uses a rotated world, a rotated sensor mount, shuffled laser ids, lidarseg ids and annotation boxes. Parity tests compare the PyTorch grid engine with the NumPy one, cell by cell and across a scrolling drive, on CPU and on MPS/CUDA when present. |
