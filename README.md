@@ -148,7 +148,49 @@ Demo drive: 60 frames of a world the model never saw in training. Validation mIo
 
 Stage means (ms): preprocess 38, inference 127, projection 51, fusion 68, publish 39.
 
-Simulated data is easier than real Lidar, so treat these numbers as a check that the pipeline works, not as benchmark claims. The nuScenes notebook produces the real-data numbers.
+Simulated data is easier than real Lidar, so treat these numbers as a check that the pipeline works, not as benchmark claims. The real-data numbers come from the SemanticKITTI and nuScenes notebooks below.
+
+## Results, real Lidar (SemanticKITTI)
+
+Measured with the SemanticKITTI notebook on a T4 GPU (stride 10, 20 epochs, seed 0). The model was fine-tuned from the simulator checkpoint on 1,922 frames from sequences 00–07, 09 and 10, and scored on every 10th scan of sequence 08, which it never saw. The full outputs are in [`results/semantickitti/`](results/semantickitti/).
+
+| Sequence 08, all points | Simulator model | Fine-tuned |
+| --- | --- | --- |
+| **mIoU** | 10.7% | **58.1%** |
+| mIoU 0–10 m / 10–25 / 25–50 / 50–100 m | 9.9% / 10.2% / 8.8% / 0.9% | 62.4% / 53.8% / 40.1% / 18.3% |
+| Road / sidewalk / parking | 16.6% / 21.7% / 2.8% | 87.9% / 69.3% / 25.7% |
+| Terrain / vegetation / building | 21.5% / 12.1% / 17.3% | 69.5% / 76.4% / 65.5% |
+| Pole / vehicle / person | 1.4% / 3.1% / 0.3% | 22.9% / 76.1% / 29.4% |
+| Moving-object IoU | 0.8% | 31.7% |
+
+| Check (first 100 frames of sequence 08, 1 s apart) | Result | Target | Status |
+| --- | --- | --- | --- |
+| Map memory / saving vs uniform 5 cm | 5.12 MB / 50× | ≤ 8 MB / ≥ 30× | pass |
+| Points lost at tier edges | 0 | 0 | pass |
+| Drivable IoU on grid, 0–10 m | 90.9% | ≥ 90% | pass |
+| Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 59.9% / 51.3% / 40.4% / 11.9% | ≥ 70% near | fail |
+| p50 / p95 latency, features + grid engine on the GPU | 36 / 46 ms | ≤ 50 ms p95 | pass |
+| Throughput, same run | 26.2 FPS | ≥ 20 FPS | pass |
+
+KITTI scans average about 123,000 points, nearly 5 times as many as nuScenes keyframes (about 26,000), so every stage has more to do. The first run kept the point transforms on the CPU in float64 and missed the target. Moving them to the GPU fixed it:
+
+| Stage means, T4 (ms) | Transforms on the CPU | Transforms on the GPU |
+| --- | --- | --- |
+| Preprocess | 22.2 | 12.5 |
+| Network | 4.6 | 4.2 |
+| Projection | 16.2 | 7.2 |
+| Fusion + cost | 14.1 | 12.5 |
+| Publish (map snapshot to host) | 2.1 | 1.7 |
+| **p50 / p95 end to end** | **47 / 149** | **36 / 46** |
+| Throughput (FPS) | 16.9 | 26.2 |
+
+The p95 margin is thin and comes from one run. Colab's shared vCPUs have busy spells that slow every stage at once for a few seconds: in two runs with the CPU transforms, the slow stretches fell in different places (frames 26–36 and 90–98, then 50–58) and those frames had normal point counts, so they come from the machine, not the data. The run with GPU transforms is `seq08_metrics.json` / `benchmark_seq08.log`; the earlier one is `*_cpu_transforms*`.
+
+- **The simulator alone doesn't carry over to real Lidar.** It scores 10.7% on SemanticKITTI, about the same as on nuScenes (9.8%), even though KITTI's 64-beam HDL-64E is the sensor it simulates. The gap comes from simulated versus real scenes, not the beam count.
+- **Fine-tuning brings it to 58.1% mIoU**, with road at 87.9% and vehicles at 76.1%, against 46.3% after fine-tuning on nuScenes-mini's 8 scenes.
+- **Weak classes.** Most poles and people are found (recall 67% and 61%), but too many other points are labelled as them, so their IoU stays low (22.9% and 29.4%). Parking (25.7%) is flat ground that looks like road or sidewalk.
+- **Reproducible.** Two training runs with seed 0 gave identical scores, down to the per-class IoUs.
+- **Training loss was still falling** after 20 epochs, so longer training may help.
 
 ## Results, real Lidar (nuScenes)
 
