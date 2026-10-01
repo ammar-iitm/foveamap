@@ -43,7 +43,7 @@ The finished frame cache is kept in your **Google Drive** (`MyDrive/foveamap_dat
 
 The raw KITTI files go to this runtime's local disk, which is much faster than Drive for thousands of small files, and are not kept.
 
-This cell also clones the latest `main` from [GitHub](https://github.com/ammar-iitm/foveamap), replacing any older copy of the code.
+This cell also clones the latest `main` from [GitHub](https://github.com/ammar-iitm/foveamap), replacing any older copy of the code. Run again, it keeps this session's checkpoints, results and logs.
 """)
 code("""
 import os, sys, shutil, importlib
@@ -56,8 +56,20 @@ KITTI = '/content/kitti'                    # raw scans, labels, poses, calibrat
 CACHE = '/content/cache/semantickitti'      # frames built from them
 
 %cd /content
+KEEP = ['checkpoints', 'results', 'train_semantickitti.log', 'benchmark_semantickitti.log']   # this session's outputs
+shutil.rmtree('/content/kept', ignore_errors=True)
+os.makedirs('/content/kept')
+for k in KEEP:
+    if os.path.exists(f'/content/foveamap/{k}'):
+        shutil.move(f'/content/foveamap/{k}', f'/content/kept/{k}')
 shutil.rmtree('/content/foveamap', ignore_errors=True)
 !git clone -q --depth 1 $REPO /content/foveamap
+for root, _, files in os.walk('/content/kept'):              # put them back; the clone's own files win
+    for f in files:
+        dst = os.path.join('/content/foveamap', os.path.relpath(os.path.join(root, f), '/content/kept'))
+        if not os.path.exists(dst):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(os.path.join(root, f), dst)
 if not os.path.exists('/content/foveamap/foveamap/semantickitti.py'):
     raise FileNotFoundError('This copy of the code has no SemanticKITTI loader (foveamap/semantickitti.py).')
 for m in [m for m in list(sys.modules) if m == 'foveamap' or m.startswith('foveamap.')]:
@@ -117,13 +129,18 @@ for n, v in zero_shot['iou_by_class'].items():
 md("""
 ## 4. Fine-tune on the training sequences (about 15 minutes on a T4)
 
-Starts from the simulator checkpoint. Progress prints every 250 steps. `FLAGS` takes the recipe options from `scripts/train.py` (`--reset-head`, `--balance`, `--aug`).
+Starts from the simulator checkpoint. It first prepares the training frames (progress every 250 frames, a few minutes), then prints progress every 250 steps. The model and log are copied to Drive afterwards. `FLAGS` takes the recipe options from `scripts/train.py` (`--reset-head`, `--balance`, `--aug`).
 """)
 code("""
 EPOCHS = 20
 FLAGS = ''
 !python scripts/train.py --dataset semantickitti --cache $CACHE --init checkpoints/range_unet.pt \\
     --out checkpoints/range_unet_semantickitti.pt --epochs $EPOCHS $FLAGS 2>&1 | tee train_semantickitti.log | awk '!/^step/ || (++n % 10 == 0)'
+if USE_DRIVE and os.path.exists('checkpoints/range_unet_semantickitti_val.json'):    # keep the model past this runtime
+    drive.mount('/content/drive')
+    DRIVE_CKPT = f'/content/drive/MyDrive/foveamap_data/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" ", "")}'
+    !mkdir -p "$DRIVE_CKPT" && cp checkpoints/range_unet_semantickitti* train_semantickitti.log "$DRIVE_CKPT"/
+    print(f'Model saved to {DRIVE_CKPT}')
 """)
 
 md("""
