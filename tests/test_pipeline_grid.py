@@ -64,6 +64,24 @@ def test_torch_features_in_pipeline(drive):
         assert (ra.cls != rb.cls).mean() < 1e-3
 
 
+def test_device_transforms_match_host(drive):
+    from foveamap.frames import prev_in_ego, transform
+    from foveamap.pipeline import _prev_in_ego_dev
+    frames, _ = drive
+    pipe = FoveaMapPipeline(CKPT, SIM_INFO, device="cpu", grid="torch")
+    for fr in frames[:4]:
+        hist = [pipe.history[-k] if len(pipe.history) >= k else None for k in (1, 2)]
+        host = prev_in_ego(fr, [None if h is None else (to_host(h[0]), h[1]) for h in hist])
+        dev = _prev_in_ego_dev(fr, hist, pipe.device)
+        for a, b in zip(host, dev):
+            assert (a is None) == (b is None)
+            if a is not None:
+                np.testing.assert_allclose(a[0], to_host(b[0]), atol=1e-4)
+        r = pipe.step(fr)
+        assert torch.is_tensor(r["pw"]) and r["pw"].dtype == torch.float64
+        np.testing.assert_allclose(to_host(r["pw"]), transform(fr["pose"], fr["pts"].astype(np.float64)), atol=1e-9)
+
+
 def test_benchmark_writes_metrics_without_export(drive, tmp_path):
     frames, truth = drive
     run_benchmark(frames, SIM_INFO, CKPT, str(tmp_path), truth=truth, n_uniform=1,

@@ -53,6 +53,24 @@ def to_host(x):
     return x
 
 
+def _prev_in_ego_dev(frame, history, device):
+    """`frames.prev_in_ego` on the device: (pts float32 tensor, ring) entries."""
+    inv = torch.as_tensor(np.linalg.inv(frame["pose"]), device=device)
+    src = frame.get("prev")
+    if src is None:
+        src = history
+    out = []
+    for item in list(src or [])[:2]:
+        if item is None:
+            out.append(None)
+            continue
+        pw, ring = item
+        pw = torch.as_tensor(pw).to(device, torch.float64)
+        out.append(((pw @ inv[:3, :3].T + inv[:3, 3]).float(), ring))
+    out += [None] * (2 - len(out))
+    return out
+
+
 class FoveaMapPipeline:
     """sweep -> features -> network -> foveated grid, with per-stage timing."""
 
@@ -80,13 +98,21 @@ class FoveaMapPipeline:
         """One sweep. With the torch engine, predictions stay on the device through
         binning and fusion, and the per-point / per-cell outputs are tensors (see to_host)."""
         on_dev = self.grid_engine == "torch"
+        # torch features and grid: each sweep goes to the device once and every point transform
+        # runs there (float64, except on MPS, which has none)
+        dev_math = on_dev and self.features == "torch" and self.device.type != "mps"
         T = {}
         t0 = time.perf_counter()
         hist = [self.history[-k] if len(self.history) >= k else None for k in (1, 2)]
-        prev = prev_in_ego(frame, hist)
-        if self.features == "torch":
+        if dev_math:
+            pts = torch.as_tensor(frame["pts"]).to(self.device, torch.float32)
+            prev = _prev_in_ego_dev(frame, hist, self.device)
+            feats, idx, row, col = features_torch.make_features(dict(frame, pts=pts), self.info, prev, self.device)
+        elif self.features == "torch":
+            prev = prev_in_ego(frame, hist)
             feats, idx, row, col = features_torch.make_features(frame, self.info, prev, self.device)
         else:
+            prev = prev_in_ego(frame, hist)
             feats, idx, row, col = make_features(frame, self.info, prev)
         _sync(self.device)
         T["preprocess"] = time.perf_counter() - t0
@@ -104,7 +130,11 @@ class FoveaMapPipeline:
         P = probs[row, col]                                   # every point takes its pixel's prediction
         cls = P.argmax(1)
         moving = (pmove[row, col] > 0.5) & ((cls == VEHICLE) | (cls == PERSON))
-        pw = transform(frame["pose"], frame["pts"].astype(np.float64))
+        if dev_math:
+            pose = torch.as_tensor(frame["pose"], device=self.device)
+            pw = pts.double() @ pose[:3, :3].T + pose[:3, 3]
+        else:
+            pw = transform(frame["pose"], frame["pts"].astype(np.float64))
         ego_xy = frame["pose"][:2, 3]
         origins = self.grid.window_origins(ego_xy)
         stats = self.grid.bin_points(pw[:, :2], pw[:, 2], P, moving, origins)
@@ -232,7 +262,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         snap = pipe.grid.snapshot()
         dyn = to_host(r["dyn"])
         r["timing"]["publish"] = time.perf_counter() - t0
-        for k in ("cls_pts", "moving_pts", "stats"):          # benchmark bookkeeping, not timed
+        for k in ("cls_pts", "moving_pts", "stats", "pw"):    # benchmark bookkeeping, not timed
             r[k] = to_host(r[k])
 
         # ground truth grid for the same frame (benchmark only, not timed)
