@@ -86,3 +86,25 @@ def test_legacy_pipeline_step_source_stream():
     for out in outputs:
         assert "stats" in out
         assert "dyn" in out
+
+
+def test_factory_supported_aliases():
+    aliases = list_sources()
+    expected = [
+        "sim", "simulator",
+        "kitti", "semantickitti",
+        "nusc", "nuscenes",
+        "file", "bin", "pcd", "npy",
+        "sequence", "dir",
+    ]
+    for exp in expected:
+        assert exp in aliases, f"Expected alias '{exp}' not found in registered sources"
+
+
+def test_factory_invalid_source_registration():
+    class NotALiDARSource:
+        pass
+
+    with pytest.raises(TypeError, match="must subclass LiDARSource"):
+        register_source("invalid_cls", NotALiDARSource)  # type: ignore
+

@@ -24,7 +24,7 @@ class NuScenesSource(LiDARSource):
         version: str = "v1.0-mini",
         scene_name: str | None = None,
         split: str | None = None,
-        remove_close: float = 1.0,
+        remove_close: float = 0.0,
     ) -> None:
         self.root = root
         self.version = version
@@ -84,6 +84,10 @@ class NuScenesSource(LiDARSource):
                 remove_close=self.remove_close,
             )
             frame = LiDARFrame.from_legacy_dict(raw_dict)
+            meta = dict(frame.metadata, scene=self.scene_name)
+            meta["timestamp_provenance"] = "recorded_sensor_epoch"
+            meta["sensor_origin_provenance"] = "dataset_calibrated_mount"
+
             return LiDARFrame(
                 pts=frame.pts,
                 intensity=frame.intensity,
@@ -96,9 +100,11 @@ class NuScenesSource(LiDARSource):
                 label=frame.label,
                 moving=frame.moving,
                 prev_sweeps=frame.prev_sweeps,
-                metadata=dict(frame.metadata, scene=self.scene_name),
+                metadata=meta,
             )
         except Exception as exc:
+            if isinstance(exc, DataAdapterError):
+                raise
             raise DataAdapterError(
                 f"Failed to load nuScenes keyframe {sd_token} in scene {self.scene_name}: {exc}"
             ) from exc

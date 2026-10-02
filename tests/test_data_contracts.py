@@ -81,3 +81,89 @@ def test_lidar_frame_rejects_invalid_source_id():
             pose=pose,
             source_id=12345,  # type: ignore
         )
+
+
+def test_lidar_frame_rejects_invalid_shapes():
+    pts = np.ones((5, 3), dtype=np.float32)
+    intensity = np.zeros(5, dtype=np.float32)
+    ring = np.zeros(5, dtype=np.int16)
+    pose = np.eye(4, dtype=np.float64)
+
+    # Invalid pts shape (5, 4)
+    with pytest.raises(ContractError):
+        LiDARFrame(pts=np.ones((5, 4), dtype=np.float32), intensity=intensity, ring=ring, pose=pose)
+
+    # Invalid intensity shape (6,)
+    with pytest.raises(ContractError):
+        LiDARFrame(pts=pts, intensity=np.zeros(6, dtype=np.float32), ring=ring, pose=pose)
+
+    # Invalid ring shape (4,)
+    with pytest.raises(ContractError):
+        LiDARFrame(pts=pts, intensity=intensity, ring=np.zeros(4, dtype=np.int16), pose=pose)
+
+    # Non-integer ring
+    with pytest.raises(ContractError):
+        LiDARFrame(pts=pts, intensity=intensity, ring=np.zeros(5, dtype=np.float32), pose=pose)
+
+    # Invalid pose shape (3, 3)
+    with pytest.raises(ContractError):
+        LiDARFrame(pts=pts, intensity=intensity, ring=ring, pose=np.eye(3, dtype=np.float64))
+
+    # Invalid pose bottom row
+    bad_pose = np.eye(4, dtype=np.float64)
+    bad_pose[3, 0] = 0.5
+    with pytest.raises(ContractError):
+        LiDARFrame(pts=pts, intensity=intensity, ring=ring, pose=bad_pose)
+
+    # Invalid sensor_origin shape (4,)
+    with pytest.raises(ContractError):
+        LiDARFrame(pts=pts, intensity=intensity, ring=ring, pose=pose, sensor_origin=np.zeros(4, dtype=np.float32))
+
+
+def test_lidar_frame_finiteness_validation():
+    pts = np.ones((5, 3), dtype=np.float32)
+    intensity = np.zeros(5, dtype=np.float32)
+    ring = np.zeros(5, dtype=np.int16)
+    pose = np.eye(4, dtype=np.float64)
+
+    # NaN in pts
+    pts_nan = pts.copy()
+    pts_nan[2, 1] = np.nan
+    with pytest.raises(NumericalConsistencyError):
+        LiDARFrame(pts=pts_nan, intensity=intensity, ring=ring, pose=pose)
+
+    # Inf in pts
+    pts_inf = pts.copy()
+    pts_inf[0, 0] = np.inf
+    with pytest.raises(NumericalConsistencyError):
+        LiDARFrame(pts=pts_inf, intensity=intensity, ring=ring, pose=pose)
+
+    # NaN in intensity
+    inten_nan = intensity.copy()
+    inten_nan[1] = np.nan
+    with pytest.raises(NumericalConsistencyError):
+        LiDARFrame(pts=pts, intensity=inten_nan, ring=ring, pose=pose)
+
+    # NaN in pose
+    pose_nan = pose.copy()
+    pose_nan[0, 3] = np.nan
+    with pytest.raises(NumericalConsistencyError):
+        LiDARFrame(pts=pts, intensity=intensity, ring=ring, pose=pose_nan)
+
+    # NaN in sensor_origin
+    with pytest.raises(NumericalConsistencyError):
+        LiDARFrame(pts=pts, intensity=intensity, ring=ring, pose=pose, sensor_origin=np.array([0.0, np.nan, 1.73], dtype=np.float32))
+
+
+def test_lidar_frame_empty_cloud_is_valid():
+    pts = np.empty((0, 3), dtype=np.float32)
+    intensity = np.empty((0,), dtype=np.float32)
+    ring = np.empty((0,), dtype=np.int16)
+    pose = np.eye(4, dtype=np.float64)
+
+    frame = LiDARFrame(pts=pts, intensity=intensity, ring=ring, pose=pose)
+    assert frame.num_points == 0
+    assert len(frame.pts) == 0
+    assert len(frame.intensity) == 0
+    assert len(frame.ring) == 0
+

@@ -148,6 +148,8 @@ class LiDARFrame:
             raise NumericalConsistencyError("LiDARFrame.intensity contains NaN or Inf values")
         if not np.all(np.isfinite(self.pose)):
             raise NumericalConsistencyError("LiDARFrame.pose contains NaN or Inf values")
+        if not np.all(np.isfinite(self.sensor_origin)):
+            raise NumericalConsistencyError("LiDARFrame.sensor_origin contains NaN or Inf values")
 
     def to_legacy_dict(self) -> dict[str, Any]:
         """Convert to existing untyped Frame dictionary for complete backward compatibility."""

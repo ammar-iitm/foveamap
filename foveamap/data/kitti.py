@@ -25,7 +25,7 @@ class SemanticKITTISource(LiDARSource):
         sequence: str = "08",
         stride: int = 1,
         start: int = 0,
-        remove_close: float = 1.0,
+        remove_close: float = 0.0,
     ) -> None:
         self.root = root
         self.sequence = sequence
@@ -54,6 +54,19 @@ class SemanticKITTISource(LiDARSource):
                 f"Failed to load poses and calibration for sequence {sequence}: {exc}"
             ) from exc
 
+        # Check for recorded timestamps file (times.txt) in KITTI sequence dir
+        times_file = os.path.join(self._seq_dir, "times.txt")
+        if os.path.isfile(times_file):
+            try:
+                self.timestamps = np.loadtxt(times_file, dtype=np.float64)
+                self._timestamp_provenance = "recorded_sensor_times_txt"
+            except Exception:
+                self.timestamps = None
+                self._timestamp_provenance = "derived_from_scan_id_10hz"
+        else:
+            self.timestamps = None
+            self._timestamp_provenance = "derived_from_scan_id_10hz"
+
         # Find total scans
         bin_files = sorted([f for f in os.listdir(vel_dir) if f.endswith(".bin")])
         if not bin_files:
@@ -76,6 +89,10 @@ class SemanticKITTISource(LiDARSource):
             raise IndexError(f"Scan index {index} out of range [0, {len(self.scans)})")
 
         scan_id = self.scans[index]
+        scan_bin_path = self._ds.scan_path(self.sequence, scan_id)
+        if not os.path.isfile(scan_bin_path):
+            raise DataAdapterError(f"SemanticKITTI scan file missing: {scan_bin_path}")
+
         try:
             raw_dict = self._ds.frame(
                 self.sequence,
@@ -85,21 +102,33 @@ class SemanticKITTISource(LiDARSource):
                 remove_close=self.remove_close,
             )
             frame = LiDARFrame.from_legacy_dict(raw_dict)
+
+            if self.timestamps is not None and scan_id < len(self.timestamps):
+                ts = float(self.timestamps[scan_id])
+            else:
+                ts = float(scan_id * 0.1)
+
+            meta = dict(frame.metadata, sequence=self.sequence, scan_id=scan_id)
+            meta["timestamp_provenance"] = self._timestamp_provenance
+            meta["sensor_origin_provenance"] = "dataset_calibrated_mount"
+
             return LiDARFrame(
                 pts=frame.pts,
                 intensity=frame.intensity,
                 ring=frame.ring,
                 pose=frame.pose,
                 sensor_origin=frame.sensor_origin,
-                timestamp=float(scan_id * 0.1),
+                timestamp=ts,
                 frame_id=f"{self.sequence}_{scan_id:06d}",
                 source_id=self.source_id,
                 label=frame.label,
                 moving=frame.moving,
                 prev_sweeps=frame.prev_sweeps,
-                metadata=dict(frame.metadata, sequence=self.sequence, scan_id=scan_id),
+                metadata=meta,
             )
         except Exception as exc:
+            if isinstance(exc, DataAdapterError):
+                raise
             raise DataAdapterError(
                 f"Failed to read SemanticKITTI frame {scan_id} in sequence {self.sequence}: {exc}"
             ) from exc

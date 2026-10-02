@@ -146,3 +146,94 @@ def test_preprocessor_empty_result_handling():
     assert out.intensity.shape == (0,)
     assert out.ring.shape == (0,)
     assert out.metadata["preprocessing"]["retained_points"] == 0
+
+
+def test_preprocessor_edge_case_n0():
+    empty_frame = LiDARFrame(
+        pts=np.empty((0, 3), dtype=np.float32),
+        intensity=np.empty((0,), dtype=np.float32),
+        ring=np.empty((0,), dtype=np.int16),
+        pose=np.eye(4, dtype=np.float64),
+        frame_id="empty_frame",
+    )
+    pre = LiDARPreprocessor(PreprocessConfig(min_range_m=1.0, max_range_m=100.0))
+    out = pre.process(empty_frame)
+
+    assert out.num_points == 0
+    assert out.pts.shape == (0, 3)
+    assert out.metadata["preprocessing"]["original_points"] == 0
+    assert out.metadata["preprocessing"]["retained_points"] == 0
+
+
+def test_preprocessor_edge_case_n1():
+    single_pt_frame = LiDARFrame(
+        pts=np.array([[15.0, 0.0, 1.0]], dtype=np.float32),
+        intensity=np.array([0.5], dtype=np.float32),
+        ring=np.array([10], dtype=np.int16),
+        pose=np.eye(4, dtype=np.float64),
+        frame_id="single_pt",
+    )
+    pre = LiDARPreprocessor(PreprocessConfig(min_range_m=1.0, max_range_m=100.0))
+    out = pre.process(single_pt_frame)
+
+    assert out.num_points == 1
+    assert out.pts.shape == (1, 3)
+    np.testing.assert_allclose(out.pts[0], [15.0, 0.0, 1.0])
+
+
+def test_preprocessor_edge_case_large_n():
+    n_points = 100_000
+    rng = np.random.default_rng(42)
+    # Generate points uniformly between 0 and 150m
+    r = rng.uniform(0.1, 150.0, size=n_points).astype(np.float32)
+    theta = rng.uniform(-np.pi, np.pi, size=n_points).astype(np.float32)
+    pts = np.stack([
+        r * np.cos(theta),
+        r * np.sin(theta),
+        rng.uniform(-2.0, 5.0, size=n_points).astype(np.float32),
+    ], axis=1)
+
+    large_frame = LiDARFrame(
+        pts=pts,
+        intensity=rng.uniform(0.0, 1.0, size=n_points).astype(np.float32),
+        ring=(rng.integers(0, 64, size=n_points)).astype(np.int16),
+        pose=np.eye(4, dtype=np.float64),
+        frame_id="large_cloud",
+    )
+
+    pre = LiDARPreprocessor(PreprocessConfig(
+        min_range_m=2.0,
+        max_range_m=80.0,
+        remove_self_hits=True,
+        self_hit_radius_m=2.0,
+    ))
+    out = pre.process(large_frame)
+
+    assert isinstance(out, LiDARFrame)
+    assert 0 < out.num_points < n_points
+    # Verify all retained points are within [2.0, 80.0] range
+    d = np.linalg.norm(out.pts - out.sensor_origin, axis=1)
+    assert np.all(d >= 2.0)
+    assert np.all(d <= 80.0)
+    # Verify input was untouched
+    assert large_frame.num_points == n_points
+
+
+def test_preprocessor_all_points_in_self_hit():
+    # Points all within 0.5m of [0, 0, 1.73]
+    pts = np.array([
+        [0.1, 0.0, 1.73],
+        [0.0, 0.2, 1.73],
+        [-0.1, -0.1, 1.73],
+    ], dtype=np.float32)
+    frame = LiDARFrame(
+        pts=pts,
+        intensity=np.ones(3, dtype=np.float32),
+        ring=np.zeros(3, dtype=np.int16),
+        pose=np.eye(4, dtype=np.float64),
+    )
+    pre = LiDARPreprocessor(PreprocessConfig(min_range_m=0.01, self_hit_radius_m=1.0, remove_self_hits=True))
+    out = pre.process(frame)
+    assert out.num_points == 0
+    assert out.metadata["preprocessing"]["filtered_points"] == 3
+

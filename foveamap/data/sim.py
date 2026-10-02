@@ -59,23 +59,30 @@ class SimulatorSource(LiDARSource):
             self._frames = []
             for i, rf in enumerate(raw_frames):
                 frame = LiDARFrame.from_legacy_dict(rf)
-                # Assign canonical source_id and deterministic frame_id
+                t_val = float(rf.get("meta", {}).get("t", i * 0.1))
+                frame_meta = dict(frame.metadata)
+                frame_meta["timestamp_provenance"] = "synthetic"
+                frame_meta["sensor_origin_provenance"] = "simulated_model_mount"
+                frame_meta["evaluation_truth"] = self._truth
+
                 frame = LiDARFrame(
                     pts=frame.pts,
                     intensity=frame.intensity,
                     ring=frame.ring,
                     pose=frame.pose,
                     sensor_origin=frame.sensor_origin,
-                    timestamp=float(rf.get("meta", {}).get("t", i * 0.1)),
+                    timestamp=t_val,
                     frame_id=f"sim_{i:04d}",
                     source_id="simulator",
                     label=frame.label,
                     moving=frame.moving,
                     prev_sweeps=frame.prev_sweeps,
-                    metadata=dict(frame.metadata, truth=self._truth),
+                    metadata=frame_meta,
                 )
                 self._frames.append(frame)
         except Exception as exc:
+            if isinstance(exc, DataAdapterError):
+                raise
             raise DataAdapterError(f"Failed to load or generate simulator frames: {exc}") from exc
 
     def __iter__(self) -> Iterator[LiDARFrame]:
@@ -108,6 +115,11 @@ class SimulatorSource(LiDARSource):
             hz=10.0,
             source_description="Simulated 64-beam Velodyne LiDAR",
         )
+
+    @property
+    def evaluation_truth(self) -> dict[str, Any]:
+        """Ground truth scene features (potholes, crosswalk, trajectories) for evaluation."""
+        return self._truth
 
     @property
     def metadata(self) -> dict[str, Any]:
