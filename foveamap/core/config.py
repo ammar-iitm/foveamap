@@ -197,7 +197,12 @@ class TerrainConfig:
     depression_threshold_m: float = 0.05
     depression_window_m: float = 2.5
     roughness_threshold_m: float = 0.04
+    slope_threshold_rad: float = 0.25
+    slope_critical_rad: float = 0.40
     stale_age_threshold: int = 20
+    max_stale_age: int = 100
+    enable_ray_clearing: bool = False
+    free_clear_frames: int = 3
     cost_priors: tuple[int, ...] = field(default_factory=lambda: tuple(DEFAULT_COST_PRIOR))
 
     def __post_init__(self) -> None:
@@ -211,8 +216,16 @@ class TerrainConfig:
             raise ConfigurationError(f"depression_window_m must be positive, got {self.depression_window_m}")
         if self.roughness_threshold_m <= 0:
             raise ConfigurationError(f"roughness_threshold_m must be positive, got {self.roughness_threshold_m}")
+        if self.slope_threshold_rad <= 0:
+            raise ConfigurationError(f"slope_threshold_rad must be positive, got {self.slope_threshold_rad}")
+        if self.slope_critical_rad <= self.slope_threshold_rad:
+            raise ConfigurationError(f"slope_critical_rad ({self.slope_critical_rad}) must exceed slope_threshold_rad ({self.slope_threshold_rad})")
         if self.stale_age_threshold < 0:
             raise ConfigurationError(f"stale_age_threshold must be non-negative, got {self.stale_age_threshold}")
+        if self.max_stale_age <= self.stale_age_threshold:
+            raise ConfigurationError(f"max_stale_age ({self.max_stale_age}) must exceed stale_age_threshold ({self.stale_age_threshold})")
+        if self.free_clear_frames <= 0:
+            raise ConfigurationError(f"free_clear_frames must be positive, got {self.free_clear_frames}")
         if len(self.cost_priors) != 256:
             raise ConfigurationError("cost_priors must have length 256")
 

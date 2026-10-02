@@ -1,0 +1,39 @@
+{
+  "engine": "torch",
+  "device": "cpu",
+  "profile": "spec",
+  "total_frames": 1000,
+  "total_time_s": 323.776,
+  "fps": 3.1,
+  "latency_ms": {
+    "p50": 289.0,
+    "p90": 397.7,
+    "p95": 449.5,
+    "p99": 572.65,
+    "mean": 316.38,
+    "min": 123.87,
+    "max": 1129.51
+  },
+  "points": {
+    "total_points_in": 10000000,
+    "mean_points_per_frame": 10000,
+    "mean_points_assigned": 10000,
+    "mean_dropped_points": 0
+  },
+  "memory": {
+    "bytes_per_cell": 16,
+    "allocated_cells": 320000,
+    "allocated_bytes": 5120000,
+    "allocated_mb": 4.883,
+    "effective_bytes": 5094400,
+    "peak_rss_mb": 2.11,
+    "peak_vram_mb": 0.0,
+    "uniform_baseline_bytes": 256000000,
+    "reduction_ratio": 50.0,
+    "under_8mb_target": true
+  },
+  "state_dynamics": {
+    "mean_dynamic_cells": 11.6,
+    "final_stale_cells": 63193
+  }
+}

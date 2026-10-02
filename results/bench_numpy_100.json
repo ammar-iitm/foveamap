@@ -1,0 +1,39 @@
+{
+  "engine": "numpy",
+  "device": "cpu",
+  "profile": "spec",
+  "total_frames": 100,
+  "total_time_s": 44.425,
+  "fps": 2.3,
+  "latency_ms": {
+    "p50": 415.84,
+    "p90": 465.59,
+    "p95": 472.13,
+    "p99": 505.61,
+    "mean": 413.6,
+    "min": 300.81,
+    "max": 652.87
+  },
+  "points": {
+    "total_points_in": 5000000,
+    "mean_points_per_frame": 50000,
+    "mean_points_assigned": 50000,
+    "mean_dropped_points": 0
+  },
+  "memory": {
+    "bytes_per_cell": 16,
+    "allocated_cells": 320000,
+    "allocated_bytes": 5120000,
+    "allocated_mb": 4.883,
+    "effective_bytes": 5094400,
+    "peak_rss_mb": 49.47,
+    "peak_vram_mb": 0.0,
+    "uniform_baseline_bytes": 256000000,
+    "reduction_ratio": 50.0,
+    "under_8mb_target": true
+  },
+  "state_dynamics": {
+    "mean_dynamic_cells": 154.3,
+    "final_stale_cells": 33684
+  }
+}

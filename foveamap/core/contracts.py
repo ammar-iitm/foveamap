@@ -390,3 +390,75 @@ class MapSnapshot:
         if tier_idx < 0 or tier_idx >= len(self.tier_states):
             raise IndexError(f"Tier index {tier_idx} out of range [0, {len(self.tier_states)})")
         return self.tier_states[tier_idx]
+
+    def query_point(self, x: float, y: float) -> dict[str, Any]:
+        """Query spatial cell state at continuous world coordinate (x, y).
+
+        Searches from finest tier to coarsest tier, returning the highest-resolution
+        available cell covering the point.
+        """
+        for t_idx, tier in enumerate(self.tier_states):
+            ox, oy = self.origins[t_idx]
+            r = getattr(tier, "cell", getattr(tier, "r", None))
+            if r is None:
+                tier_cfgs = self.metadata.get("tier_configs")
+                if tier_cfgs and t_idx < len(tier_cfgs):
+                    r = tier_cfgs[t_idx].get("cell_size_m")
+            if r is None:
+                r = 0.05 * (2 ** t_idx)
+            n = getattr(tier, "n", 200)
+            cx = int(np.floor(x / r)) - int(ox)
+            cy = int(np.floor(y / r)) - int(oy)
+            if 0 <= cx < n and 0 <= cy < n:
+                cnt = int(tier.count[cx, cy])
+                age = int(tier.age[cx, cy])
+                dyn = bool(tier.dynamic[cx, cy])
+                if dyn:
+                    state = "OBSERVED_DYNAMIC"
+                elif cnt == 0:
+                    state = "UNKNOWN"
+                elif age >= 20:
+                    state = "STALE"
+                else:
+                    state = "OBSERVED_STATIC"
+                sec_c = int(tier.secondary_class[cx, cy]) if hasattr(tier, "secondary_class") else 255
+                sec_conf = float(tier.secondary_confidence[cx, cy]) if hasattr(tier, "secondary_confidence") else 0.0
+                return {
+                    "tier": t_idx,
+                    "resolution": float(r),
+                    "cell": (cx, cy),
+                    "state": state,
+                    "count": cnt,
+                    "min_z": float(tier.min_z[cx, cy]),
+                    "max_z": float(tier.max_z[cx, cy]),
+                    "ground": float(tier.ground[cx, cy]),
+                    "roughness": float(tier.roughness[cx, cy]),
+                    "dominant_class": int(tier.cls[cx, cy]),
+                    "confidence": float(tier.conf[cx, cy]),
+                    "secondary_class": sec_c,
+                    "secondary_confidence": sec_conf,
+                    "dynamic": dyn,
+                    "cost": int(tier.cost[cx, cy]),
+                    "clearance": float(tier.clearance[cx, cy]),
+                    "age": age,
+                }
+        return {"state": "OUT_OF_BOUNDS", "cost": 255, "traversable": False}
+
+    def is_traversable(self, x: float, y: float, clearance_req: float = 0.0) -> bool:
+        """Check whether continuous world coordinate (x, y) is safely traversable."""
+        info = self.query_point(x, y)
+        if info.get("state") in ("OUT_OF_BOUNDS", "UNKNOWN"):
+            return False
+        if info.get("dynamic", False):
+            return False
+        if info.get("cost", 255) == 255:
+            return False
+        if clearance_req > 0.0 and info.get("clearance", 0.0) < clearance_req:
+            return False
+        return True
+
+    def get_height(self, x: float, y: float) -> float:
+        """Query estimated ground height at continuous world coordinate (x, y)."""
+        info = self.query_point(x, y)
+        return float(info.get("ground", float("nan")))
+

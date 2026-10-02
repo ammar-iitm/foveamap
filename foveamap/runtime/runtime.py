@@ -159,7 +159,7 @@ class FoveaMapRuntime:
             if profile:
                 t0 = time.perf_counter()
             try:
-                dyn = self.grid.fuse_stats(stats, origins)
+                dyn = self.grid.fuse_stats(stats, origins, sensor_origin=ego_xy)
             except Exception as exc:
                 raise MappingError(f"Grid fusion stage failed: {exc}") from exc
             if profile:
@@ -195,7 +195,7 @@ class FoveaMapRuntime:
             if profile:
                 t0 = time.perf_counter()
             try:
-                dyn = self.grid.fuse_stats(stats, origins)
+                dyn = self.grid.fuse_stats(stats, origins, sensor_origin=ego_xy)
             except Exception as exc:
                 raise MappingError(f"Grid fusion stage failed: {exc}") from exc
             if profile:

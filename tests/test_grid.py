@@ -1,7 +1,7 @@
 """Grid-engine invariants from the PRD acceptance criteria."""
 import numpy as np
 from foveamap.grid import FoveatedGrid
-from foveamap.sim import NUM_CLASSES
+from foveamap.core.ontology import NUM_CLASSES
 
 
 def _rand(n=50000, seed=0, ego=(3.3, -2.5)):

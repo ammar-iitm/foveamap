@@ -124,6 +124,12 @@ def parse_pcd(path: str | Path, normalize_intensity_mode: str = "auto") -> tuple
     types = [t.upper() for t in header.get("TYPE", ["F"] * len(fields))]
     counts = [int(c) for c in header.get("COUNT", ["1"] * len(fields))]
 
+    if len(fields) != len(sizes) or len(fields) != len(types) or len(fields) != len(counts):
+        raise DataAdapterError(
+            f"Malformed PCD header in {path_str}: fields ({len(fields)}), sizes ({len(sizes)}), "
+            f"types ({len(types)}), and counts ({len(counts)}) length mismatch"
+        )
+
     if "x" not in fields or "y" not in fields or "z" not in fields:
         raise DataAdapterError(f"PCD file must contain x, y, and z fields: {fields}")
 
@@ -144,7 +150,13 @@ def parse_pcd(path: str | Path, normalize_intensity_mode: str = "auto") -> tuple
                     data = data.reshape(1, -1)
                 elif data.ndim == 1 and data.size == 0:
                     data = np.empty((0, len(fields)), dtype=np.float32)
+                if num_points > 0 and len(data) != num_points:
+                    raise DataAdapterError(
+                        f"Truncated ASCII PCD file {path_str}: expected {num_points} points, got {len(data)}"
+                    )
         except Exception as exc:
+            if isinstance(exc, DataAdapterError):
+                raise
             raise DataAdapterError(f"Failed to parse ASCII PCD points from {path_str}: {exc}") from exc
 
         if len(data) == 0:
@@ -213,7 +225,7 @@ def parse_pcd(path: str | Path, normalize_intensity_mode: str = "auto") -> tuple
 def parse_bin(
     path: str | Path,
     columns: int | None = None,
-    normalize_intensity_mode: str = "auto",
+    normalize_intensity_mode: str = "raw",
 ) -> tuple[dict[str, np.ndarray], str]:
     """Parse raw binary point cloud (.bin).
 
