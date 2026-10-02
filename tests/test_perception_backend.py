@@ -583,6 +583,66 @@ def test_runtime_with_perception_backend(test_frame):
     assert runtime.last_perception.num_points == test_frame.num_points
 
 
+def test_point_correspondence_gather_and_consistency():
+    """Verify that per-point semantic predictions, probabilities, and confidence correspond directly."""
+    p_cfg = PerceptionConfig(num_classes=9, fp16=False)
+    s_cfg = SensorConfig(name="sim", n_rows=64, n_cols=1024)
+    dev = torch.device("cpu")
+    backend = RangeUNetBackend(p_cfg, s_cfg, dev, allow_untrained=True)
+
+    # Construct frame with distinct points, including duplicates and boundary points
+    pts = np.array([
+        [10.0, 0.0, 0.0],    # directly forward
+        [10.0, 0.0, 0.0],    # duplicate forward point (should map to identical row/col)
+        [0.0, 10.0, 0.0],    # left 90 deg
+        [0.0, -10.0, 0.0],   # right -90 deg
+        [-10.0, 0.0, 0.0],   # behind 180 deg
+    ], dtype=np.float32)
+    n = len(pts)
+    frame = LiDARFrame(
+        pts=pts,
+        intensity=np.full(n, 0.5, dtype=np.float32),
+        ring=np.array([32, 32, 20, 45, 10], dtype=np.int16),
+        pose=np.eye(4, dtype=np.float64),
+        sensor_origin=np.array([0.0, 0.0, 1.73], dtype=np.float32),
+        timestamp=1.0,
+        frame_id="corr_test",
+    )
+
+    dev_res = backend.predict_device(frame)
+    assert dev_res.point_indices is not None
+    assert isinstance(dev_res.point_indices, tuple) and len(dev_res.point_indices) == 2
+    rows, cols = dev_res.point_indices
+    assert rows.shape == (n,)
+    assert cols.shape == (n,)
+
+    # Verify all coordinates are within sensor image dimensions
+    assert (rows >= 0).all() and (rows < s_cfg.n_rows).all()
+    assert (cols >= 0).all() and (cols < s_cfg.n_cols).all()
+
+    # Point 0 and Point 1 are identical in (x,y,z) and ring -> must have identical row/col
+    assert rows[0].item() == rows[1].item()
+    assert cols[0].item() == cols[1].item()
+    torch.testing.assert_close(dev_res.class_probabilities[0], dev_res.class_probabilities[1])
+
+    # Verify correspondence between probabilities, predictions, and confidence for every point
+    for i in range(n):
+        expected_cls = dev_res.class_probabilities[i].argmax()
+        assert dev_res.semantic_predictions[i] == expected_cls
+        expected_conf = dev_res.class_probabilities[i].max()
+        torch.testing.assert_close(dev_res.point_confidence[i], expected_conf)
+
+    # Verify to_host preserves correspondence arrays as numpy integer ndarrays
+    host_res = dev_res.to_host()
+    assert host_res.point_indices is not None
+    assert isinstance(host_res.point_indices, tuple) and len(host_res.point_indices) == 2
+    h_rows, h_cols = host_res.point_indices
+    assert isinstance(h_rows, np.ndarray) and isinstance(h_cols, np.ndarray)
+    assert h_rows.shape == (n,) and h_cols.shape == (n,)
+    np.testing.assert_array_equal(h_rows, rows.numpy())
+    np.testing.assert_array_equal(h_cols, cols.numpy())
+
+
 # ---------------------------------------------------------------------------
 # 10. Conditional CUDA Tests (Physically Verified when Available)
 # ---------------------------------------------------------------------------

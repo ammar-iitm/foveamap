@@ -223,7 +223,7 @@ class RuntimeConfig:
     device: str = "auto"
     grid_engine: str = "numpy"
     features_engine: str = "numpy"
-    enable_profiling: bool = True
+    enable_profiling: bool = False
 
     def __post_init__(self) -> None:
         if self.grid_engine not in ("numpy", "torch"):

@@ -155,8 +155,9 @@ Strictly validated frozen contract:
 
 ### `DevicePerceptionResult` (Device / PyTorch)
 On-device zero-copy tensor container:
-- Validates tensor types, device matching, shapes, finiteness, and bounds via device reductions without CPU synchronization.
-- `.to_host()` converts tensors to a validated host `PerceptionResult` when requested.
+- **Structural Validation (Production Default)**: Validates tensor types, device residency, shapes, and dimensions unconditionally with zero CPU synchronization and zero host stalls.
+- **Numerical Validation (Strict/Debug Mode)**: Full finiteness (NaN/Inf), probability bounds ($[0, 1]$), and semantic class bounds are gated behind `strict_validation=True` (or when running on CPU), avoiding per-frame CUDA synchronization stalls during production inference.
+- `.to_host()` converts tensors to a validated host `PerceptionResult` at the publication boundary when requested.
 
 ---
 

@@ -117,6 +117,24 @@ def test_lidar_frame_rejects_invalid_types_and_pose():
     with pytest.raises(ContractError):
         LiDARFrame(pts=pts, intensity=inten, ring=ring, pose=bad_pose, sensor_origin=sensor)
 
+    # Non-orthogonal 3x3 rotation block
+    bad_rot = pose.copy()
+    bad_rot[:3, :3] = [[1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    with pytest.raises(ContractError):
+        LiDARFrame(pts=pts, intensity=inten, ring=ring, pose=bad_rot, sensor_origin=sensor)
+
+    # Reflection matrix (det = -1)
+    refl_pose = pose.copy()
+    refl_pose[0, 0] = -1.0
+    with pytest.raises(ContractError):
+        LiDARFrame(pts=pts, intensity=inten, ring=ring, pose=refl_pose, sensor_origin=sensor)
+
+    # Negative intensity
+    bad_inten = inten.copy()
+    bad_inten[0] = -0.5
+    with pytest.raises(NumericalConsistencyError):
+        LiDARFrame(pts=pts, intensity=bad_inten, ring=ring, pose=pose, sensor_origin=sensor)
+
 
 def test_lidar_frame_rejects_nan_and_inf():
     pts, inten, ring, pose, sensor = _make_valid_frame_data(50)
@@ -303,6 +321,10 @@ def test_map_snapshot_detachment_and_immutability():
     assert snap.ego_pose[0, 3] == 0.0
     assert snap.origins[0] == (-200, -200)
     assert snap.metadata["run_id"] == "test_123"
+
+    # Mutating published snapshot's ego_pose directly must fail (write-protected array)
+    with pytest.raises(ValueError):
+        snap.ego_pose[0, 3] = 999.0
 
 
 # ----------------------------------------------------------------------------

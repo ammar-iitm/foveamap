@@ -52,3 +52,9 @@ def create_source(source_type: str, **kwargs) -> LiDARSource:
 def list_sources() -> list[str]:
     """Return list of all registered source types."""
     return sorted(list(_SOURCE_REGISTRY.keys()))
+
+
+# Explicit aliases for consistency with create_perception_backend
+create_lidar_source = create_source
+register_lidar_source = register_source
+list_lidar_sources = list_sources

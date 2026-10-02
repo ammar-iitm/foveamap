@@ -16,7 +16,14 @@ from .file import (
     parse_bin,
     parse_npy,
 )
-from .factory import create_source, register_source, list_sources
+from .factory import (
+    create_source,
+    register_source,
+    list_sources,
+    create_lidar_source,
+    register_lidar_source,
+    list_lidar_sources,
+)
 
 __all__ = [
     # Base abstractions
@@ -39,4 +46,7 @@ __all__ = [
     "create_source",
     "register_source",
     "list_sources",
+    "create_lidar_source",
+    "register_lidar_source",
+    "list_lidar_sources",
 ]

@@ -27,9 +27,12 @@ class LiDARFrame:
 
     Attributes:
         pts: (N, 3) float32 coordinates in the ego frame.
-        intensity: (N,) float32 calibrated remission/intensity in [0, 1].
+        intensity: (N,) float32 calibrated sensor remission or intensity (non-negative).
+                   Dataset adapters and file sources normalize raw values (e.g. 0..255, 0..65535)
+                   into [0, 1] using explicit normalization policies. For ingestion preservation,
+                   the contract accepts non-negative floating intensity.
         ring: (N,) int16 laser ring / range-image row index (0 = top beam).
-        pose: (4, 4) float64 rigid transformation from ego frame to world frame.
+        pose: (4, 4) float64 rigid transformation from ego frame to world frame (SE(3)).
         sensor_origin: (3,) float32 LiDAR origin in the ego frame (default [0, 0, 1.73]).
         timestamp: float timestamp in seconds (epoch or sequence-relative).
         frame_id: string identifier for tracking and diagnostics.
@@ -88,6 +91,8 @@ class LiDARFrame:
             raise ContractError(f"LiDARFrame.pts must be an (N, 3) ndarray; got shape {getattr(self.pts, 'shape', None)}")
         if not np.issubdtype(self.pts.dtype, np.floating):
             raise ContractError(f"LiDARFrame.pts must have floating dtype; got {self.pts.dtype}")
+        if not np.all(np.isfinite(self.pts)):
+            raise NumericalConsistencyError("LiDARFrame.pts contains NaN or Inf coordinates")
         n = len(self.pts)
 
         # 2. Intensity
@@ -95,6 +100,10 @@ class LiDARFrame:
             raise ContractError(f"LiDARFrame.intensity must be ({n},) ndarray; got shape {getattr(self.intensity, 'shape', None)}")
         if not np.issubdtype(self.intensity.dtype, np.floating):
             raise ContractError(f"LiDARFrame.intensity must have floating dtype; got {self.intensity.dtype}")
+        if not np.all(np.isfinite(self.intensity)):
+            raise NumericalConsistencyError("LiDARFrame.intensity contains NaN or Inf values")
+        if n > 0 and np.any(self.intensity < -1e-4):
+            raise NumericalConsistencyError("LiDARFrame.intensity contains negative values")
 
         # 3. Ring / laser beam indices
         if not isinstance(self.ring, np.ndarray) or self.ring.shape != (n,):
@@ -107,12 +116,22 @@ class LiDARFrame:
             raise ContractError(f"LiDARFrame.pose must be (4, 4) ndarray; got shape {getattr(self.pose, 'shape', None)}")
         if not np.issubdtype(self.pose.dtype, np.floating):
             raise ContractError(f"LiDARFrame.pose must have floating dtype; got {self.pose.dtype}")
+        if not np.all(np.isfinite(self.pose)):
+            raise NumericalConsistencyError("LiDARFrame.pose contains NaN or Inf values")
         if not np.allclose(self.pose[3, :], [0.0, 0.0, 0.0, 1.0], atol=1e-4):
             raise ContractError(f"LiDARFrame.pose must have bottom row [0, 0, 0, 1]; got {self.pose[3, :]}")
+        R = self.pose[:3, :3]
+        if not np.allclose(R.T @ R, np.eye(3), atol=1e-3):
+            raise ContractError("LiDARFrame.pose 3x3 rotation block is not orthogonal (R.T @ R != I)")
+        det_R = float(np.linalg.det(R))
+        if abs(det_R - 1.0) > 1e-3:
+            raise ContractError(f"LiDARFrame.pose 3x3 rotation block determinant must be ~1.0; got {det_R:.4f}")
 
         # 5. Sensor origin and source ID
         if not isinstance(self.sensor_origin, np.ndarray) or self.sensor_origin.shape != (3,):
             raise ContractError(f"LiDARFrame.sensor_origin must be (3,) ndarray; got shape {getattr(self.sensor_origin, 'shape', None)}")
+        if not np.all(np.isfinite(self.sensor_origin)):
+            raise NumericalConsistencyError("LiDARFrame.sensor_origin contains NaN or Inf values")
         if not isinstance(self.source_id, str):
             raise ContractError(f"LiDARFrame.source_id must be a string; got {type(self.source_id)}")
 
@@ -140,16 +159,6 @@ class LiDARFrame:
                         raise ContractError(f"prev_sweeps[{idx}][0] must be (M, 3) ndarray; got {getattr(pw, 'shape', None)}")
                     if not isinstance(r, np.ndarray) or r.shape != (len(pw),):
                         raise ContractError(f"prev_sweeps[{idx}][1] must be ({len(pw)},) ndarray; got {getattr(r, 'shape', None)}")
-
-        # 8. Numerical finiteness check
-        if not np.all(np.isfinite(self.pts)):
-            raise NumericalConsistencyError("LiDARFrame.pts contains NaN or Inf coordinates")
-        if not np.all(np.isfinite(self.intensity)):
-            raise NumericalConsistencyError("LiDARFrame.intensity contains NaN or Inf values")
-        if not np.all(np.isfinite(self.pose)):
-            raise NumericalConsistencyError("LiDARFrame.pose contains NaN or Inf values")
-        if not np.all(np.isfinite(self.sensor_origin)):
-            raise NumericalConsistencyError("LiDARFrame.sensor_origin contains NaN or Inf values")
 
     def to_legacy_dict(self) -> dict[str, Any]:
         """Convert to existing untyped Frame dictionary for complete backward compatibility."""
@@ -323,12 +332,14 @@ class MapSnapshot:
     """Published snapshot of the multi-tier foveated 2.5D map.
 
     Ownership & Immutability Semantics:
-        - `MapSnapshot` itself is a frozen dataclass container preventing attribute reassignment.
+        - `MapSnapshot` is a frozen outer dataclass container preventing attribute reassignment.
+        - `ego_pose` is a detached, write-protected (read-only) NumPy array.
+        - `origins` is converted to an immutable tuple of tuples.
         - `tier_states` contains host `TierLayers` instances produced by the grid engine (`snapshot()`).
         - The internal NumPy arrays inside `TierLayers` are newly allocated host copies, completely
           detached from live grid memory updates (the grid can proceed updating without altering this snapshot).
-        - However, because standard NumPy arrays in Python are mutable by default, consumers must
-          treat `tier_states` arrays as READ-ONLY to avoid corrupting shared downstream consumer state.
+        - Consumers must treat published `tier_states` arrays as read-only by ownership convention to
+          avoid corrupting downstream consumers.
         - Deeper zero-copy / buffer-locking mechanics are deferred to the transport layer.
 
     Attributes:
@@ -353,7 +364,9 @@ class MapSnapshot:
             raise ContractError(f"ego_pose must be (4, 4) ndarray; got {getattr(self.ego_pose, 'shape', None)}")
         if len(self.origins) != len(self.tier_states):
             raise ContractError(f"Number of origins ({len(self.origins)}) must match tier_states ({len(self.tier_states)})")
-        object.__setattr__(self, "ego_pose", self.ego_pose.copy())
+        copied_pose = self.ego_pose.copy()
+        copied_pose.flags.writeable = False
+        object.__setattr__(self, "ego_pose", copied_pose)
         detached_origins = tuple(
             tuple(int(c) for c in o) if isinstance(o, (list, tuple, np.ndarray)) else o
             for o in self.origins
