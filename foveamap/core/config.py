@@ -231,6 +231,75 @@ class TerrainConfig:
 
 
 @dataclass(frozen=True)
+class DynamicConfig:
+    """Temporal dynamic world-model thresholds (Phase 6).
+
+    All frame counts are in processed-frame units. Confidence lives in [0, 1].
+    Distances are metres in the world frame; correspondence operates on
+    post-scroll grid coordinates and world positions, so ego motion is already
+    compensated by the foveated window scroll.
+
+    Attributes:
+        activation_frames: consecutive observed frames required to promote
+            OBSERVED -> ACTIVE_DYNAMIC.
+        missing_tolerance_frames: frames a confirmed track may go unobserved
+            while remaining TEMPORARILY_MISSING (still dynamic-occupied).
+        stale_frames: missing frames after which a track becomes STALE
+            (released, static fallback) and beyond which it is REMOVED.
+        confidence_threshold: dynamic confidence required alongside
+            activation_frames for ACTIVE_DYNAMIC promotion.
+        initial_confidence: confidence assigned to a newly created track.
+        hit_increment: confidence added per observed frame (capped at 1.0).
+        decay_factor: multiplicative confidence decay per missing frame.
+        correspondence_distance_m: max world-frame distance for associating a
+            dynamic observation with an existing track. Association is
+            cross-tier by world proximity: the foveated engines report the
+            same physical object in several tiers (integer-lattice mip-up),
+            and all of those observations feed one track anchored at the
+            finest reporting tier.
+        dynamic_classes: semantic class IDs treated as dynamic evidence
+            (default vehicle/person, matching the perception motion gate).
+        max_tracks: hard bound on live dynamic tracks (deterministic eviction
+            of stalest tracks when exceeded).
+    """
+    activation_frames: int = 2
+    missing_tolerance_frames: int = 2
+    stale_frames: int = 4
+    confidence_threshold: float = 0.5
+    initial_confidence: float = 0.5
+    hit_increment: float = 0.3
+    decay_factor: float = 0.75
+    correspondence_distance_m: float = 1.5
+    dynamic_classes: tuple[int, ...] = (7, 8)
+    max_tracks: int = 20000
+
+    def __post_init__(self) -> None:
+        if self.activation_frames < 1:
+            raise ConfigurationError(f"activation_frames must be >= 1, got {self.activation_frames}")
+        if self.missing_tolerance_frames < 0:
+            raise ConfigurationError(f"missing_tolerance_frames must be >= 0, got {self.missing_tolerance_frames}")
+        if self.stale_frames <= self.missing_tolerance_frames:
+            raise ConfigurationError(
+                f"stale_frames ({self.stale_frames}) must exceed "
+                f"missing_tolerance_frames ({self.missing_tolerance_frames})"
+            )
+        if not (0.0 < self.confidence_threshold <= 1.0):
+            raise ConfigurationError(f"confidence_threshold must be in (0, 1], got {self.confidence_threshold}")
+        if not (0.0 <= self.initial_confidence <= 1.0):
+            raise ConfigurationError(f"initial_confidence must be in [0, 1], got {self.initial_confidence}")
+        if not (0.0 < self.hit_increment <= 1.0):
+            raise ConfigurationError(f"hit_increment must be in (0, 1], got {self.hit_increment}")
+        if not (0.0 < self.decay_factor < 1.0):
+            raise ConfigurationError(f"decay_factor must be in (0, 1), got {self.decay_factor}")
+        if self.correspondence_distance_m <= 0:
+            raise ConfigurationError(f"correspondence_distance_m must be positive, got {self.correspondence_distance_m}")
+        if not self.dynamic_classes:
+            raise ConfigurationError("dynamic_classes must be non-empty")
+        if self.max_tracks < 1:
+            raise ConfigurationError(f"max_tracks must be >= 1, got {self.max_tracks}")
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     """Execution backend and runtime parameters."""
     device: str = "auto"
@@ -288,3 +357,4 @@ class FoveaMapConfig:
     terrain: TerrainConfig = field(default_factory=TerrainConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
+    dynamic: DynamicConfig = field(default_factory=DynamicConfig)

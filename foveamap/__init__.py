@@ -4,7 +4,7 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 from .core.contracts import LiDARFrame, PerceptionResult, MapSnapshot
-from .core.config import FoveaMapConfig, GridConfig, TierConfig, PreprocessConfig
+from .core.config import FoveaMapConfig, GridConfig, TierConfig, PreprocessConfig, DynamicConfig
 from .core.ontology import (
     SemanticOntology,
     CANONICAL_CLASSES,
@@ -40,6 +40,7 @@ __all__ = [
     "GridConfig",
     "TierConfig",
     "PreprocessConfig",
+    "DynamicConfig",
     "LiDARSource",
     "LiDARPreprocessor",
     "create_source",

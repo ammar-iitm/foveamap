@@ -349,6 +349,9 @@ class MapSnapshot:
         origins: list of (2,) int64 window origin coordinates per tier in tier cell units.
         tier_states: tuple of TierLayers objects (one per tier).
         dynamic_cells: tuple of dynamic observation dicts per tier.
+        dynamic_tracks: tuple of detached Phase 6 temporal track dicts
+            (track_id, tier, cell, world_xy, cls, confidence, state, ...).
+        temporal_metadata: plain-value temporal statistics for this frame.
         metadata: optional dict containing cell counts, memory bytes, and latency stats.
     """
     timestamp: float
@@ -357,6 +360,8 @@ class MapSnapshot:
     origins: Sequence[tuple[int, int] | np.ndarray]
     tier_states: tuple[Any, ...]
     dynamic_cells: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    dynamic_tracks: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    temporal_metadata: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -373,6 +378,27 @@ class MapSnapshot:
         )
         object.__setattr__(self, "origins", detached_origins)
         object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "temporal_metadata", dict(self.temporal_metadata))
+        # Detached copies of temporal tracks (fresh plain-value containers;
+        # the grid-level snapshot already builds new dicts, this guards
+        # against callers passing live/mutable structures).
+        detached_tracks = tuple(
+            {
+                k: (list(v) if isinstance(v, list) else (tuple(v) if isinstance(v, tuple) else v))
+                for k, v in (t.items() if isinstance(t, dict) else {})
+            }
+            for t in (self.dynamic_tracks or ())
+        )
+        object.__setattr__(self, "dynamic_tracks", detached_tracks)
+        # Exact-cell track index for query enrichment (private, derived).
+        index: dict[tuple[int, int, int], dict[str, Any]] = {}
+        for t in detached_tracks:
+            try:
+                cell = t.get("cell", None)
+                index[(int(t["tier"]), int(cell[0]), int(cell[1]))] = t
+            except (KeyError, TypeError, IndexError):
+                continue
+        object.__setattr__(self, "_track_index", index)
 
     @property
     def num_tiers(self) -> int:
@@ -423,14 +449,30 @@ class MapSnapshot:
                 cnt = int(tier.count[cx, cy])
                 age = int(tier.age[cx, cy])
                 cls_v = int(tier.cls[cx, cy])
-                dyn = bool(tier.dynamic[cx, cy])
+                mask_dyn = bool(tier.dynamic[cx, cy])
+                # Phase 6 temporal overlay from detached snapshot tracks.
+                track = getattr(self, "_track_index", {}).get((t_idx, cx, cy))
+                temporal_occupied = bool(
+                    track is not None and track.get("state") in ("OBSERVED", "ACTIVE_DYNAMIC", "TEMPORARILY_MISSING")
+                )
+                dyn = mask_dyn or temporal_occupied
+                dyn_state = track.get("state") if track is not None else None
                 if dyn:
-                    state = "OBSERVED_DYNAMIC"
+                    if dyn_state == "TEMPORARILY_MISSING":
+                        state = "TEMPORARILY_MISSING"
+                    elif dyn_state == "ACTIVE_DYNAMIC":
+                        state = "ACTIVE_DYNAMIC"
+                    else:
+                        state = "OBSERVED_DYNAMIC"
                 elif cnt == 0 or cls_v == 255:
-                    state = "UNKNOWN"
+                    if track is not None and dyn_state == "STALE":
+                        state = "STALE"
+                    else:
+                        state = "UNKNOWN"
                 elif age >= int(stale_thresh):
                     state = "STALE"
                 else:
+                    # Fresh static geometry wins over an expired dynamic track.
                     state = "OBSERVED_STATIC"
                 sec_c = int(tier.secondary_class[cx, cy]) if hasattr(tier, "secondary_class") else 255
                 sec_conf = float(tier.secondary_confidence[cx, cy]) if hasattr(tier, "secondary_confidence") else 0.0
@@ -452,6 +494,9 @@ class MapSnapshot:
                     "cost": int(tier.cost[cx, cy]),
                     "clearance": float(tier.clearance[cx, cy]),
                     "age": age,
+                    "dynamic_state": dyn_state,
+                    "dynamic_confidence": float(track.get("confidence", 0.0)) if track is not None else 0.0,
+                    "velocity": track.get("velocity") if track is not None else None,
                 }
         return {"state": "OUT_OF_BOUNDS", "cost": 255, "traversable": False}
 

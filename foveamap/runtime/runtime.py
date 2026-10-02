@@ -63,12 +63,14 @@ class FoveaMapRuntime:
                 fuse=self.config.grid.fuse,
                 device=self.device_ctx.device,
                 terrain_config=self.config.terrain,
+                dynamic_config=self.config.dynamic,
             )
         else:
             self.grid = FoveatedGrid(
                 profile=self.config.grid,
                 fuse=self.config.grid.fuse,
                 terrain_config=self.config.terrain,
+                dynamic_config=self.config.dynamic,
             )
 
         self.last_snapshot: MapSnapshot | None = None
@@ -156,10 +158,15 @@ class FoveaMapRuntime:
                 timing["projection"] = time.perf_counter() - t0
 
             # 4. Temporal fusion & traversability derivation (on device)
+            # Phase 6: static fusion -> dynamic lifecycle -> terrain ->
+            # coherent world-state snapshot (see docs/DYNAMIC_WORLD_MODEL.md).
             if profile:
                 t0 = time.perf_counter()
             try:
-                dyn = self.grid.fuse_stats(stats, origins, sensor_origin=ego_xy)
+                dyn = self.grid.fuse_stats(
+                    stats, origins, sensor_origin=ego_xy,
+                    timestamp=float(canonical_frame.timestamp),
+                )
             except Exception as exc:
                 raise MappingError(f"Grid fusion stage failed: {exc}") from exc
             if profile:
@@ -195,7 +202,10 @@ class FoveaMapRuntime:
             if profile:
                 t0 = time.perf_counter()
             try:
-                dyn = self.grid.fuse_stats(stats, origins, sensor_origin=ego_xy)
+                dyn = self.grid.fuse_stats(
+                    stats, origins, sensor_origin=ego_xy,
+                    timestamp=float(canonical_frame.timestamp),
+                )
             except Exception as exc:
                 raise MappingError(f"Grid fusion stage failed: {exc}") from exc
             if profile:
@@ -208,7 +218,12 @@ class FoveaMapRuntime:
         self.last_timing = timing
 
         # 5. Publication of canonical MapSnapshot (intentional host copy of grid state)
+        # Phase 6: the snapshot is a coherent world state — static layers plus
+        # the bounded temporal dynamic lifecycle, published atomically after
+        # all per-frame updates complete.
         tier_states = tuple(self.grid.snapshot())
+        temporal_tracks = tuple(self.grid.temporal_snapshot())
+        temporal_stats = dict(self.grid.temporal_stats())
         snapshot = MapSnapshot(
             timestamp=float(canonical_frame.timestamp),
             frame_id=str(canonical_frame.frame_id),
@@ -216,6 +231,8 @@ class FoveaMapRuntime:
             origins=tuple(tuple(int(c) for c in o) for o in origins),
             tier_states=tier_states,
             dynamic_cells=tuple(dyn) if dyn is not None else (),
+            dynamic_tracks=temporal_tracks,
+            temporal_metadata=temporal_stats,
             metadata={
                 "frame_count": self.frame_count,
                 "grid_engine": self.config.runtime.grid_engine,
@@ -230,6 +247,14 @@ class FoveaMapRuntime:
                 "profile_name": getattr(self.config.grid, "profile_name", ""),
                 "stale_age_threshold": int(self.config.terrain.stale_age_threshold),
                 "max_stale_age": int(self.config.terrain.max_stale_age),
+                "dynamic_config": {
+                    "activation_frames": int(self.config.dynamic.activation_frames),
+                    "missing_tolerance_frames": int(self.config.dynamic.missing_tolerance_frames),
+                    "stale_frames": int(self.config.dynamic.stale_frames),
+                    "confidence_threshold": float(self.config.dynamic.confidence_threshold),
+                    "correspondence_distance_m": float(self.config.dynamic.correspondence_distance_m),
+                    "max_tracks": int(self.config.dynamic.max_tracks),
+                },
                 "timing": timing if self.config.runtime.enable_profiling else {},
             },
         )
@@ -260,12 +285,14 @@ class FoveaMapRuntime:
                 fuse=self.config.grid.fuse,
                 device=self.device_ctx.device,
                 terrain_config=self.config.terrain,
+                dynamic_config=self.config.dynamic,
             )
         else:
             self.grid = FoveatedGrid(
                 profile=self.config.grid,
                 fuse=self.config.grid.fuse,
                 terrain_config=self.config.terrain,
+                dynamic_config=self.config.dynamic,
             )
         self.perception.reset()
         self.last_snapshot = None

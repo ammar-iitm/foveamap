@@ -43,7 +43,12 @@ from .grid import (
     SLOPE_CRIT,
 )
 from .core.ontology import PERSON, VEHICLE, NUM_CLASSES, GROUND_CLASSES
-from .core.config import GridConfig, TerrainConfig
+from .core.config import GridConfig, TerrainConfig, DynamicConfig
+from .temporal import (
+    ACTIVE_DYNAMIC as DYN_ACTIVE,
+    TEMPORARILY_MISSING as DYN_MISSING,
+    STALE as DYN_STALE,
+)
 
 # clearance thresholds evaluated in float64 on the stored 2 cm code, exactly as the NumPy engine does
 _CLEAR_CODES = np.arange(256) * 0.02
@@ -198,8 +203,10 @@ class TorchFoveatedGrid(FoveatedGrid):
     def __init__(self, profile: str | GridConfig | Sequence[tuple[float, float]] = "spec",
                  fuse: bool = True, device: Any = None,
                  dtype: torch.dtype = torch.float32,
-                 terrain_config: TerrainConfig | None = None):
-        super().__init__(profile, fuse=fuse, terrain_config=terrain_config)
+                 terrain_config: TerrainConfig | None = None,
+                 dynamic_config: DynamicConfig | None = None):
+        super().__init__(profile, fuse=fuse, terrain_config=terrain_config,
+                         dynamic_config=dynamic_config)
         self.device = torch.device(device) if device is not None else default_device()
         self.dtype = dtype
         dev = self.device
@@ -841,7 +848,7 @@ class TorchFoveatedGrid(FoveatedGrid):
                     s.free_passes[c_i, c_j] = 0
 
     def reset(self) -> None:
-        """Reset internal grid state completely."""
+        """Reset internal grid state completely (including temporal dynamics)."""
         for s in self.state:
             s.count.zero_()
             s.z_min.fill_(float("nan"))
@@ -858,6 +865,9 @@ class TorchFoveatedGrid(FoveatedGrid):
             s.free_passes.zero_()
             s._eff_cls = None
         self.origins = None
+        self.temporal.reset()
+        self.frame_index = -1
+        self._last_timestamp = None
 
     def query_point(self, x: float, y: float) -> dict[str, Any]:
         """Query spatial cell state at continuous world coordinate (x, y) on device."""
@@ -875,15 +885,30 @@ class TorchFoveatedGrid(FoveatedGrid):
                 cost = int(s.cost[i, j].item())
                 cnt = int(s.count16[i, j].item())
                 age = int(s.age[i, j].item())
-                dyn = bool(s.dynamic[i, j].item())
+                mask_dyn = bool(s.dynamic[i, j].item())
+                # Phase 6 temporal overlay (host-side bounded store; the cell
+                # indices above are already host ints, so no device sync here).
+                enrich = self.temporal.query_enrichment(k, i, j)
+                temporal_occupied = bool(enrich["dynamic_occupied"]) if enrich else False
+                dyn = mask_dyn or temporal_occupied
+                dyn_state = enrich["dynamic_state"] if enrich else None
                 stale_thresh = self.terrain.stale_age_threshold if self.terrain is not None else 20
                 if dyn:
-                    state = "OBSERVED_DYNAMIC"
+                    if dyn_state == DYN_MISSING:
+                        state = "TEMPORARILY_MISSING"
+                    elif dyn_state == DYN_ACTIVE:
+                        state = "ACTIVE_DYNAMIC"
+                    else:
+                        state = "OBSERVED_DYNAMIC"
                 elif cnt == 0 or cls == UNKNOWN:
-                    state = "UNKNOWN"
+                    if enrich is not None and dyn_state == DYN_STALE:
+                        state = "STALE"
+                    else:
+                        state = "UNKNOWN"
                 elif age >= stale_thresh:
                     state = "STALE"
                 else:
+                    # Fresh static geometry wins over an expired dynamic track.
                     state = "OBSERVED_STATIC"
                 ground_v = s.ground[i, j].item()
                 z_min_v = s.z_min[i, j].item()
@@ -913,6 +938,10 @@ class TorchFoveatedGrid(FoveatedGrid):
                     "flags": int(s.flags[i, j].item()),
                     "is_unknown": state == "UNKNOWN",
                     "is_traversable": (cost < 180) and (state != "UNKNOWN") and not dyn,
+                    "dynamic_state": dyn_state,
+                    "dynamic_confidence": float(enrich["dynamic_confidence"]) if enrich else 0.0,
+                    "dynamic_age_frames": int(enrich["dynamic_age_frames"]) if enrich else 0,
+                    "velocity": enrich["velocity"] if enrich else None,
                 }
         return {"tier": -1, "state": "OUT_OF_BOUNDS", "is_unknown": True, "is_traversable": False}
 
@@ -968,6 +997,11 @@ class TorchFoveatedGrid(FoveatedGrid):
             "reduction_ratio": reduction,
             "memory_reduction_ratio": reduction,
             "under_8mb_target": total_allocated <= 8 * 1024 * 1024,
+            # Phase 6 bounded temporal state (reported separately; see grid.py).
+            "temporal_tracks": len(self.temporal),
+            "temporal_tracks_capacity": int(self.dynamic_config.max_tracks),
+            "temporal_bytes_estimate": len(self.temporal) * 192,
+            "temporal_stats": self.temporal.stats(),
         }
 
 

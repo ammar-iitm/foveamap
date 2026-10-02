@@ -59,7 +59,14 @@ from .core.ontology import (
     VEHICLE,
     PERSON,
 )
-from .core.config import GridConfig, TerrainConfig, DEFAULT_COST_PRIOR
+from .core.config import GridConfig, TerrainConfig, DynamicConfig, DEFAULT_COST_PRIOR
+from .temporal import (
+    DynamicWorldModel,
+    DynamicObservation,
+    ACTIVE_DYNAMIC as DYN_ACTIVE,
+    TEMPORARILY_MISSING as DYN_MISSING,
+    STALE as DYN_STALE,
+)
 
 UNKNOWN = 255
 F_SLOPE, F_OVERHANG, F_STEP, F_DEPRESSION = 1, 2, 4, 8
@@ -237,7 +244,8 @@ class TierLayers:
 
 class FoveatedGrid:
     def __init__(self, profile: str | GridConfig | Sequence[tuple[float, float]] = "spec",
-                 fuse: bool = True, terrain_config: TerrainConfig | None = None):
+                 fuse: bool = True, terrain_config: TerrainConfig | None = None,
+                 dynamic_config: DynamicConfig | None = None):
         if isinstance(profile, GridConfig):
             spec = tuple((t.cell_size_m, t.half_extent_m) for t in profile.tiers)
             fuse = profile.fuse
@@ -271,6 +279,12 @@ class FoveatedGrid:
         self.state = [TierLayers(t.n, cell_size_m=t.cell, half_extent_m=t.half) for t in self.tiers]
         self.origins: list[np.ndarray] | None = None
         self.last_diagnostics: dict[str, Any] = {}
+        # Phase 6 temporal dynamic world model (bounded lifecycle over the
+        # per-frame dynamic observation masks; never writes static arrays).
+        self.dynamic_config = dynamic_config if dynamic_config is not None else DynamicConfig()
+        self.temporal = DynamicWorldModel(self.dynamic_config)
+        self.frame_index = -1
+        self._last_timestamp: float | None = None
 
     # ------------------------------------------------------------------ utils
     @property
@@ -538,11 +552,12 @@ class FoveatedGrid:
     # --------------------------------------------------------------- update
     def update(self, xy_world: np.ndarray, z: np.ndarray, probs: np.ndarray,
                moving: np.ndarray, ego_xy: Sequence[float] | np.ndarray,
-               sensor_origin: Sequence[float] | np.ndarray | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+               sensor_origin: Sequence[float] | np.ndarray | None = None,
+               timestamp: float | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Process one frame. Returns (dynamic_cells_per_tier, frame_stats_per_tier)."""
         origins = self.window_origins(ego_xy)
         stats = self.bin_points(xy_world, z, probs, moving, origins)
-        dyn = self.fuse_stats(stats, origins, sensor_origin=sensor_origin)
+        dyn = self.fuse_stats(stats, origins, sensor_origin=sensor_origin, timestamp=timestamp)
         return dyn, stats
 
     def _new_layers(self, t: Tier) -> TierLayers:
@@ -553,23 +568,96 @@ class FoveatedGrid:
         return [s.copy() for s in self.state]
 
     def fuse_stats(self, stats: list[dict[str, Any]], origins: list[np.ndarray],
-                   sensor_origin: Sequence[float] | np.ndarray | None = None) -> list[dict[str, Any]]:
-        """Scroll state to origins and fuse stats. Returns structured dynamic observations."""
+                   sensor_origin: Sequence[float] | np.ndarray | None = None,
+                   timestamp: float | None = None) -> list[dict[str, Any]]:
+        """Scroll state to origins and fuse stats. Returns structured dynamic observations.
+
+        Temporal order per frame: scroll (ego compensation) -> static fusion
+        -> dynamic lifecycle update -> terrain derivation -> ray clearing.
+        ``timestamp`` feeds world-frame velocity evidence; when omitted, a
+        deterministic 10 Hz clock derived from the frame counter is used.
+        """
         if self.origins is not None and self.fuse:
+            deltas = [tuple(int(a) - int(b) for a, b in zip(o, oo)) for o, oo in zip(origins, self.origins)]
             self.state = [s.shifted(o - oo) for s, o, oo in zip(self.state, origins, self.origins)]
+            self.temporal.on_scroll(deltas, [t.n for t in self.tiers])
         elif not self.fuse:
             self.state = [self._new_layers(t) for t in self.tiers]
+            # Unfused operation is frame-independent: no cross-frame lifecycle.
+            self.temporal.reset()
         self.origins = origins
         dyn = []
         for t, s, st in zip(self.tiers, self.state, stats):
             dyn.append(self._fuse_tier(t, s, st))
             self._derive(t, s)
 
+        # Phase 6 temporal dynamic update from frame-isolated observations.
+        # Static arrays are untouched here; only the bounded lifecycle store
+        # advances. Torch dyn dicts carry device tensors: the sparse
+        # host conversion below is an intentional per-tier boundary over
+        # dynamic cells only (never per-point data).
+        self.frame_index += 1
+        if timestamp is None:
+            ts = (self._last_timestamp + 0.1) if self._last_timestamp is not None else float(self.frame_index) * 0.1
+        else:
+            ts = float(timestamp)
+        self._last_timestamp = ts
+        if self.fuse:
+            self.temporal.update(
+                self._dynamic_observations(dyn, origins),
+                frame_idx=self.frame_index,
+                timestamp=ts,
+            )
+
         # Conservative ray clearing if enabled and sensor origin provided
         if getattr(self.terrain, "enable_ray_clearing", False) and sensor_origin is not None:
             self._clear_rays(sensor_origin, stats)
 
         return dyn
+
+    def _dynamic_observations(
+        self, dyn: list[dict[str, Any]], origins: list[np.ndarray]
+    ) -> list[DynamicObservation]:
+        """Convert per-tier dynamic observation dicts to world-frame evidence.
+
+        Accepts both NumPy arrays (NumPy engine) and torch tensors (Torch
+        engine; converted sparsely to host here as a documented boundary).
+        """
+        import torch as _torch
+
+        obs: list[DynamicObservation] = []
+        for k, (t, d, org) in enumerate(zip(self.tiers, dyn, origins)):
+            ii = d.get("i")
+            jj = d.get("j")
+            if ii is None or jj is None or len(ii) == 0:
+                continue
+            if _torch.is_tensor(ii):
+                # Intentional sparse host boundary: dynamic cells only.
+                ii_h = ii.detach().cpu().numpy().ravel()
+                jj_h = jj.detach().cpu().numpy().ravel()
+                cls_h = d["cls"].detach().cpu().numpy().ravel()
+                conf_h = (d["conf"].detach().cpu().numpy().ravel().astype(np.float64) / 255.0)
+                cnt_h = d["count"].detach().cpu().numpy().ravel()
+            else:
+                ii_h = np.asarray(ii).ravel()
+                jj_h = np.asarray(jj).ravel()
+                cls_h = np.asarray(d["cls"]).ravel()
+                conf_h = np.asarray(d["conf"]).ravel().astype(np.float64) / 255.0
+                cnt_h = np.asarray(d["count"]).ravel()
+            org_h = np.asarray(org)
+            for ci, cj, cc, cf, cn in zip(ii_h, jj_h, cls_h, conf_h, cnt_h):
+                ci_i, cj_i = int(ci), int(cj)
+                obs.append(DynamicObservation(
+                    tier=k,
+                    i=ci_i,
+                    j=cj_i,
+                    x=float((int(org_h[0]) + ci_i + 0.5) * t.cell),
+                    y=float((int(org_h[1]) + cj_i + 0.5) * t.cell),
+                    cls=int(cc),
+                    conf=float(min(1.0, max(0.0, cf))),
+                    count=int(cn),
+                ))
+        return obs
 
     def _fuse_tier(self, t: Tier, s: TierLayers, st: dict[str, Any]) -> dict[str, Any]:
         n = t.n
@@ -913,14 +1001,32 @@ class FoveatedGrid:
                 cost = int(s.cost[i, j])
                 cnt = int(s.count[i, j])
                 age = int(s.age[i, j])
-                dyn = bool(s.dynamic[i, j])
+                mask_dyn = bool(s.dynamic[i, j])
+                # Phase 6: overlay the bounded temporal lifecycle. The mask is
+                # frame-isolated observation; OBSERVED/ACTIVE/MISSING tracks
+                # keep a region dynamically occupied after the observation
+                # frame. Static arrays are only read here, never written.
+                enrich = self.temporal.query_enrichment(k, i, j)
+                temporal_occupied = bool(enrich["dynamic_occupied"]) if enrich else False
+                dyn = mask_dyn or temporal_occupied
+                dyn_state = enrich["dynamic_state"] if enrich else None
                 if dyn:
-                    state = "OBSERVED_DYNAMIC"
+                    if dyn_state == DYN_MISSING:
+                        state = "TEMPORARILY_MISSING"
+                    elif dyn_state == DYN_ACTIVE:
+                        state = "ACTIVE_DYNAMIC"
+                    else:
+                        state = "OBSERVED_DYNAMIC"
                 elif cnt == 0 or cls == UNKNOWN:
-                    state = "UNKNOWN"
+                    if enrich is not None and dyn_state == DYN_STALE:
+                        # Recently disappeared dynamic object, no static geometry.
+                        state = "STALE"
+                    else:
+                        state = "UNKNOWN"
                 elif age >= self.terrain.stale_age_threshold:
                     state = "STALE"
                 else:
+                    # Fresh static geometry wins over an expired dynamic track.
                     state = "OBSERVED_STATIC"
                 return {
                     "tier": k,
@@ -945,6 +1051,10 @@ class FoveatedGrid:
                     "flags": int(s.flags[i, j]),
                     "is_unknown": state == "UNKNOWN",
                     "is_traversable": (cost < 180) and (state != "UNKNOWN") and not dyn,
+                    "dynamic_state": dyn_state,
+                    "dynamic_confidence": float(enrich["dynamic_confidence"]) if enrich else 0.0,
+                    "dynamic_age_frames": int(enrich["dynamic_age_frames"]) if enrich else 0,
+                    "velocity": enrich["velocity"] if enrich else None,
                 }
         return {"tier": -1, "state": "OUT_OF_BOUNDS", "is_unknown": True, "is_traversable": False}
 
@@ -989,7 +1099,7 @@ class FoveatedGrid:
         }
 
     def reset(self) -> None:
-        """Reset internal grid state completely."""
+        """Reset internal grid state completely (including temporal dynamics)."""
         for s in self.state:
             s.count.fill(0)
             s.z_min.fill(np.nan)
@@ -1006,6 +1116,17 @@ class FoveatedGrid:
             s.free_passes.fill(0)
             s._eff_cls = None
         self.origins = None
+        self.temporal.reset()
+        self.frame_index = -1
+        self._last_timestamp = None
+
+    def temporal_snapshot(self) -> tuple[dict[str, Any], ...]:
+        """Detached copy of live dynamic tracks (world-state publication)."""
+        return self.temporal.snapshot_tracks()
+
+    def temporal_stats(self) -> dict[str, Any]:
+        """Bounded temporal-model statistics (plain values)."""
+        return self.temporal.stats()
 
     def memory_report(self) -> dict[str, Any]:
         """Produce honest memory accounting matching PRD acceptance criteria."""
@@ -1043,4 +1164,10 @@ class FoveatedGrid:
             "reduction_ratio": reduction,
             "memory_reduction_ratio": reduction,
             "under_8mb_target": total_allocated <= 8 * 1024 * 1024,
+            # Phase 6 bounded temporal state (runtime overhead, reported
+            # separately from PRD grid-layer map memory above).
+            "temporal_tracks": len(self.temporal),
+            "temporal_tracks_capacity": int(self.dynamic_config.max_tracks),
+            "temporal_bytes_estimate": len(self.temporal) * 192,
+            "temporal_stats": self.temporal.stats(),
         }
