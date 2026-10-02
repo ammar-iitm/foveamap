@@ -15,6 +15,8 @@ from .core.exceptions import (
     NumericalConsistencyError,
 )
 
+from .runtime import FoveaMapRuntime, resolve_device, RangeUNetBackend
+
 __all__ = [
     "__version__",
     "LiDARFrame",
@@ -23,6 +25,9 @@ __all__ = [
     "FoveaMapConfig",
     "GridConfig",
     "TierConfig",
+    "FoveaMapRuntime",
+    "resolve_device",
+    "RangeUNetBackend",
     "FoveaMapError",
     "ConfigurationError",
     "ContractError",
@@ -31,3 +36,4 @@ __all__ = [
     "MappingError",
     "NumericalConsistencyError",
 ]
+

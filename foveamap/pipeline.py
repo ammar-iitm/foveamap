@@ -74,13 +74,37 @@ def _prev_in_ego_dev(frame, history, device):
 class FoveaMapPipeline:
     """sweep -> features -> network -> foveated grid, with per-stage timing."""
 
-    def __init__(self, ckpt, info: DatasetInfo, profile="spec", fuse=True, device=None, grid="numpy",
-                 features=None):
+    def __init__(self, ckpt=None, info: DatasetInfo | None = None, profile="spec", fuse=True, device=None, grid="numpy",
+                 features=None, config=None):
         """grid / features: "numpy" (CPU) or "torch" (on the model's device); features follows grid by default."""
+        if config is not None:
+            ckpt = ckpt or config.perception.checkpoint_path
+            if info is None:
+                from .sim import CLASSES as SIM_CLASSES
+                info = DatasetInfo(
+                    name=config.sensor.name,
+                    n_rows=config.sensor.n_rows,
+                    n_cols=config.sensor.n_cols,
+                    class_names=list(SIM_CLASSES),
+                    active=np.asarray(config.perception.active_classes, bool),
+                    source=config.sensor.source_description,
+                    hz=config.sensor.hz,
+                )
+            profile = config.grid
+            fuse = config.grid.fuse
+            grid = config.runtime.grid_engine
+            features = config.runtime.features_engine
+            if device is None and config.runtime.device != "auto":
+                device = config.runtime.device
+
         if not torch.cuda.is_available():
             torch.set_num_threads(max(1, os.cpu_count() or 1))
         self.device = pick_device(device)
-        self.model = load_model(ckpt, self.device)
+        if ckpt is not None:
+            self.model = load_model(ckpt, self.device)
+        else:
+            from .model import RangeUNet
+            self.model = RangeUNet().to(self.device).eval()
         self.info = info
         self.grid_engine = grid
         self.features = features or grid
@@ -94,9 +118,15 @@ class FoveaMapPipeline:
             raise ValueError(f"unknown grid engine {grid!r}")
         self.history = []          # last 2 sweeps as (pts_world, ring), newest last
 
+    @classmethod
+    def from_config(cls, config) -> FoveaMapPipeline:
+        return cls(config=config)
+
     def step(self, frame):
         """One sweep. With the torch engine, predictions stay on the device through
         binning and fusion, and the per-point / per-cell outputs are tensors (see to_host)."""
+        if hasattr(frame, "to_legacy_dict"):
+            frame = frame.to_legacy_dict()
         on_dev = self.grid_engine == "torch"
         # torch features and grid: each sweep goes to the device once and every point transform
         # runs there (float64, except on MPS, which has none)

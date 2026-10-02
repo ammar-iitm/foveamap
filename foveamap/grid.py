@@ -111,8 +111,18 @@ class TierLayers:
 
 
 class FoveatedGrid:
-    def __init__(self, profile="spec", fuse=True):
-        spec = PROFILES[profile] if isinstance(profile, str) else profile
+    def __init__(self, profile="spec", fuse=True, terrain_config=None):
+        if hasattr(profile, "tiers"):  # GridConfig instance
+            spec = tuple((t.cell_size_m, t.half_extent_m) for t in profile.tiers)
+            fuse = profile.fuse
+            alphas = tuple(t.alpha for t in profile.tiers)
+        elif isinstance(profile, str):
+            spec = PROFILES[profile]
+            alphas = None
+        else:
+            spec = profile
+            alphas = None
+
         base, coarse = spec[0][0], spec[-1][0]
         self.base, self.coarse = base, coarse
         self.tiers: list[Tier] = []
@@ -123,9 +133,11 @@ class FoveatedGrid:
             assert abs(round(2 * half / coarse) * coarse - 2 * half) < 1e-9, "tier extent must be whole coarse cells"
             if k:
                 assert cell > spec[k - 1][0] and half > spec[k - 1][1]
-            self.tiers.append(Tier(cell, half, ratio, round(2 * half / cell), 0.3 if k == 0 else 0.5))
+            alpha = alphas[k] if alphas is not None else (0.3 if k == 0 else 0.5)
+            self.tiers.append(Tier(cell, half, ratio, round(2 * half / cell), alpha))
         self.coarse_ratio = round(coarse / base)
         self.fuse = fuse
+        self.terrain = terrain_config
         self.state = [TierLayers(t.n) for t in self.tiers]
         self.origins = None
 
@@ -279,6 +291,14 @@ class FoveatedGrid:
 
     def _derive(self, t, s: TierLayers):
         """Flags + traversability cost from the fused layers (vectorised over the tier)."""
+        veh_clearance = self.terrain.vehicle_clearance_m if self.terrain is not None else VEHICLE_CLEARANCE
+        step_thresh = self.terrain.step_threshold_m if self.terrain is not None else STEP_THRESH
+        dep_thresh = self.terrain.depression_threshold_m if self.terrain is not None else DEPRESSION_THRESH
+        dep_win = self.terrain.depression_window_m if self.terrain is not None else DEPRESSION_WIN
+        cost_prior_arr = np.asarray(self.terrain.cost_priors, dtype=np.int32) if self.terrain is not None else COST_PRIOR
+        rough_thresh = self.terrain.roughness_threshold_m if self.terrain is not None else 0.04
+        stale_thresh = self.terrain.stale_age_threshold if self.terrain is not None else 20
+
         cls = s.cls.astype(np.int32)
         gcls = (s.flags >> 4).astype(np.int32)
         ground = s.ground.astype(np.float32)
@@ -288,7 +308,7 @@ class FoveatedGrid:
         clear_m = np.where(s.clear != UNKNOWN, s.clear * 0.02, np.nan)
         overhang = np.isfinite(clear_m) & (clear_m > 0.5) & valid_g
         flags |= np.where(overhang, F_OVERHANG, 0).astype(np.uint8)
-        passable_under = overhang & (clear_m >= VEHICLE_CLEARANCE) & (gcls != 0xF)
+        passable_under = overhang & (clear_m >= veh_clearance) & (gcls != 0xF)
         eff_cls = np.where(passable_under, gcls, cls)
         # step edges: height jump to a neighbour 1 or 2 cells away
         gz = np.where(valid_g, ground, np.nan)
@@ -304,26 +324,26 @@ class FoveatedGrid:
                 step = np.fmax(step, np.nan_to_num(diff, nan=0.0))
                 b = np.roll(diff, -d, ax)
                 step = np.fmax(step, np.nan_to_num(b, nan=0.0))
-        stepf = step > STEP_THRESH
+        stepf = step > step_thresh
         flags |= np.where(stepf & valid_g, F_STEP, 0).astype(np.uint8)
         # depressions (potholes): below the local mean of drivable ground
         drv = DRIVABLE[np.clip(eff_cls, 0, 255)] & valid_g
-        win = max(3, int(round(DEPRESSION_WIN / t.cell)) | 1)
+        win = max(3, int(round(dep_win / t.cell)) | 1)
         num = uniform_filter(np.where(drv, gz, 0.0), win, mode="constant")
         den = uniform_filter(drv.astype(np.float32), win, mode="constant")
         ref = np.where(den > 0.05, num / np.maximum(den, 1e-6), np.nan)
-        dep = drv & (gz < ref - DEPRESSION_THRESH)
+        dep = drv & (gz < ref - dep_thresh)
         flags |= np.where(dep, F_DEPRESSION, 0).astype(np.uint8)
         # cost
-        cost = COST_PRIOR[np.clip(eff_cls, 0, 255)].copy()
+        cost = cost_prior_arr[np.clip(eff_cls, 0, 255)].copy()
         cost = np.where(passable_under, cost + 20, cost)
         cost = np.where(stepf & DRIVABLE[np.clip(eff_cls, 0, 255)], np.maximum(cost, 180), cost)
         cost = np.where(stepf & (cost < 180), np.maximum(cost, 140), cost)
         cost = np.where(dep, np.maximum(cost, 170), cost)
         rough = s.rough.astype(np.float32)
-        cost = np.where(np.isfinite(rough) & (rough > 0.04), cost + 30, cost)
+        cost = np.where(np.isfinite(rough) & (rough > rough_thresh), cost + 30, cost)
         cost = np.where(s.conf < 150, cost + 25, cost)
-        stale = (s.age != UNKNOWN) & (s.age > 20)
+        stale = (s.age != UNKNOWN) & (s.age > stale_thresh)
         cost = np.where(stale, cost + 20, cost)
         cost = np.clip(cost, 0, 254)
         cost = np.where(cls == UNKNOWN, UNKNOWN, cost)

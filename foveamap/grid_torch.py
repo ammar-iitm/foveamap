@@ -93,16 +93,21 @@ def default_device():
 
 
 class TorchFoveatedGrid(FoveatedGrid):
-    def __init__(self, profile="spec", fuse=True, device=None, dtype=torch.float32):
-        super().__init__(profile, fuse=fuse)
+    def __init__(self, profile="spec", fuse=True, device=None, dtype=torch.float32, terrain_config=None):
+        super().__init__(profile, fuse=fuse, terrain_config=terrain_config)
         self.device = torch.device(device) if device is not None else default_device()
         self.dtype = dtype
         dev = self.device
         self._ground_mask = torch.as_tensor(GROUND_MASK, device=dev)
-        self._cost_prior = torch.as_tensor(COST_PRIOR, device=dev)
+        if self.terrain is not None:
+            self._cost_prior = torch.as_tensor(self.terrain.cost_priors, dtype=torch.int32, device=dev)
+            pass_under = OVERHANG_LUT & (_CLEAR_CODES >= self.terrain.vehicle_clearance_m)
+            self._pass_under = torch.as_tensor(pass_under, device=dev)
+        else:
+            self._cost_prior = torch.as_tensor(COST_PRIOR, device=dev)
+            self._pass_under = torch.as_tensor(PASS_UNDER_LUT, device=dev)
         self._drivable = torch.as_tensor(DRIVABLE, device=dev)
         self._overhang = torch.as_tensor(OVERHANG_LUT, device=dev)
-        self._pass_under = torch.as_tensor(PASS_UNDER_LUT, device=dev)
         self.state = [self._new_layers(t.n) for t in self.tiers]
 
     # ------------------------------------------------------------------ utils
@@ -257,6 +262,12 @@ class TorchFoveatedGrid(FoveatedGrid):
 
     def _derive(self, t, s: TorchTierLayers):
         """Flags + traversability cost from the fused layers (vectorised over the tier)."""
+        step_thresh = self.terrain.step_threshold_m if self.terrain is not None else STEP_THRESH
+        dep_thresh = self.terrain.depression_threshold_m if self.terrain is not None else DEPRESSION_THRESH
+        dep_win = self.terrain.depression_window_m if self.terrain is not None else DEPRESSION_WIN
+        rough_thresh = self.terrain.roughness_threshold_m if self.terrain is not None else 0.04
+        stale_thresh = self.terrain.stale_age_threshold if self.terrain is not None else 20
+
         cls = s.cls.long()
         gcls = (s.flags >> 4).long()
         ground = s.ground.float()
@@ -278,15 +289,15 @@ class TorchFoveatedGrid(FoveatedGrid):
                     diff[:, :d] = float("nan")
                 step = torch.fmax(step, diff.nan_to_num(nan=0.0))
                 step = torch.fmax(step, diff.roll(-d, ax).nan_to_num(nan=0.0))
-        stepf = step > STEP_THRESH
+        stepf = step > step_thresh
         # depressions (potholes): below the local mean of drivable ground
         drv_cls = self._drivable[eff_cls]
         drv = drv_cls & valid_g
-        win = max(3, int(round(DEPRESSION_WIN / t.cell)) | 1)
+        win = max(3, int(round(dep_win / t.cell)) | 1)
         num = _box(torch.where(drv, gz, 0.0), win)
         den = _box(drv.float(), win)
         ref = torch.where(den > 0.05, num / den.clamp(min=1e-6), float("nan"))
-        dep = drv & (gz < ref - DEPRESSION_THRESH)
+        dep = drv & (gz < ref - dep_thresh)
         flags = (torch.where(overhang, F_OVERHANG, 0) | torch.where(stepf & valid_g, F_STEP, 0)
                  | torch.where(dep, F_DEPRESSION, 0))
         # cost
@@ -296,9 +307,9 @@ class TorchFoveatedGrid(FoveatedGrid):
         cost = torch.where(stepf & (cost < 180), cost.clamp(min=140), cost)
         cost = torch.where(dep, cost.clamp(min=170), cost)
         rough = s.rough.float()
-        cost = torch.where(rough.isfinite() & (rough > 0.04), cost + 30, cost)
+        cost = torch.where(rough.isfinite() & (rough > rough_thresh), cost + 30, cost)
         cost = torch.where(s.conf < 150, cost + 25, cost)
-        stale = (s.age != UNKNOWN) & (s.age > 20)
+        stale = (s.age != UNKNOWN) & (s.age > stale_thresh)
         cost = torch.where(stale, cost + 20, cost).clamp(0, 254)
         unknown = cls == UNKNOWN
         s.cost[:] = torch.where(unknown, UNKNOWN, cost).to(torch.uint8)
