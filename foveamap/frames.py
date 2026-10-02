@@ -110,9 +110,13 @@ def make_features(frame, info: DatasetInfo, prev_ego=None):
     pts, sensor = frame["pts"], frame["sensor"]
     rimg, idx, row, col = range_image(pts, frame["ring"], sensor, H, W)
     valid = idx >= 0
-    sel = np.where(valid, idx, 0)
-    xyz = np.where(valid[..., None], pts[sel], 0.0)
-    inten = np.where(valid, frame["inten"][sel], 0.0)
+    if len(pts) == 0:
+        xyz = np.zeros((H, W, 3), np.float32)
+        inten = np.zeros((H, W), np.float32)
+    else:
+        sel = np.where(valid, idx, 0)
+        xyz = np.where(valid[..., None], pts[sel], 0.0)
+        inten = np.where(valid, frame["inten"][sel], 0.0)
     feats = [rimg / 50.0, xyz[..., 0] / 50.0, xyz[..., 1] / 50.0, xyz[..., 2] / 3.0, inten, valid.astype(np.float32)]
     elev_of_row = row_elevations(pts, row, sensor, H)
     for p in (prev_ego or [None, None])[:2]:

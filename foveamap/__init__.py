@@ -15,7 +15,14 @@ from .core.exceptions import (
     NumericalConsistencyError,
 )
 
-from .runtime import FoveaMapRuntime, resolve_device, RangeUNetBackend
+from .runtime import (
+    FoveaMapRuntime,
+    resolve_device,
+    PerceptionBackend,
+    RangeUNetBackend,
+    ClassicalFallbackBackend,
+    create_perception_backend,
+)
 from .data import LiDARSource, LiDARPreprocessor, create_source
 
 __all__ = [
@@ -32,7 +39,10 @@ __all__ = [
     "create_source",
     "FoveaMapRuntime",
     "resolve_device",
+    "PerceptionBackend",
     "RangeUNetBackend",
+    "ClassicalFallbackBackend",
+    "create_perception_backend",
     "FoveaMapError",
     "ConfigurationError",
     "ContractError",

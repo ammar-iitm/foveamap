@@ -211,16 +211,18 @@ class PerceptionResult:
     Attributes:
         class_probabilities: (N, C) float32 per-point class probabilities in [0, 1].
         moving_probabilities: (N,) float32 per-point probability of being dynamic in [0, 1].
-        semantic_predictions: (N,) int64 class prediction (e.g. argmax of probabilities).
+        semantic_predictions: (N,) int64 class prediction (0 <= class_id < C).
         is_moving: (N,) bool binary motion decision.
-        point_indices: optional (row, col) mapping points to 2D range image.
+        confidence: optional (N,) float32 classification confidence scores in [0, 1].
+        point_indices: optional (N,) or (row, col) mapping points to 2D range image.
         metadata: optional diagnostics (e.g. inference_time_ms, model_name).
     """
     class_probabilities: np.ndarray
     moving_probabilities: np.ndarray
     semantic_predictions: np.ndarray
     is_moving: np.ndarray
-    point_indices: tuple[np.ndarray, np.ndarray] | None = None
+    confidence: np.ndarray | None = None
+    point_indices: tuple[np.ndarray, np.ndarray] | np.ndarray | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -230,8 +232,17 @@ class PerceptionResult:
     def num_points(self) -> int:
         return len(self.semantic_predictions)
 
+    @property
+    def point_confidence(self) -> np.ndarray:
+        """Per-point classification confidence (explicit or max class probability)."""
+        if self.confidence is not None:
+            return self.confidence
+        if len(self.class_probabilities) == 0:
+            return np.empty((0,), dtype=np.float32)
+        return self.class_probabilities.max(axis=-1).astype(np.float32)
+
     def validate(self) -> None:
-        """Validate shapes, probability bounds, and numerical consistency."""
+        """Validate shapes, probability bounds, class IDs, and numerical consistency."""
         n = self.num_points
         if not isinstance(self.class_probabilities, np.ndarray) or self.class_probabilities.ndim != 2 or self.class_probabilities.shape[0] != n:
             raise ContractError(f"class_probabilities shape {getattr(self.class_probabilities, 'shape', None)} mismatch with point count {n}")
@@ -239,6 +250,8 @@ class PerceptionResult:
             raise ContractError(f"moving_probabilities shape {getattr(self.moving_probabilities, 'shape', None)} mismatch with point count {n}")
         if not isinstance(self.semantic_predictions, np.ndarray) or self.semantic_predictions.shape != (n,):
             raise ContractError(f"semantic_predictions shape {getattr(self.semantic_predictions, 'shape', None)} mismatch with point count {n}")
+        if not np.issubdtype(self.semantic_predictions.dtype, np.integer):
+            raise ContractError(f"semantic_predictions must have integer dtype; got {self.semantic_predictions.dtype}")
         if not isinstance(self.is_moving, np.ndarray) or self.is_moving.shape != (n,):
             raise ContractError(f"is_moving shape {getattr(self.is_moving, 'shape', None)} mismatch with point count {n}")
 
@@ -253,6 +266,37 @@ class PerceptionResult:
             raise NumericalConsistencyError("class_probabilities has values outside [0, 1]")
         if np.any(self.moving_probabilities < -1e-5) or np.any(self.moving_probabilities > 1.0 + 1e-4):
             raise NumericalConsistencyError("moving_probabilities has values outside [0, 1]")
+
+        # Check class index bounds
+        num_classes = self.class_probabilities.shape[1]
+        if n > 0 and num_classes > 0:
+            if np.any(self.semantic_predictions < 0) or np.any(self.semantic_predictions >= num_classes):
+                raise ContractError(
+                    f"semantic_predictions contains class IDs outside [0, {num_classes - 1}]"
+                )
+
+        # Check optional confidence
+        if self.confidence is not None:
+            if not isinstance(self.confidence, np.ndarray) or self.confidence.shape != (n,):
+                raise ContractError(f"confidence shape {getattr(self.confidence, 'shape', None)} mismatch with point count {n}")
+            if not np.all(np.isfinite(self.confidence)):
+                raise NumericalConsistencyError("confidence contains NaN or Inf")
+            if np.any(self.confidence < -1e-5) or np.any(self.confidence > 1.0 + 1e-4):
+                raise NumericalConsistencyError("confidence has values outside [0, 1]")
+
+        # Check optional point_indices
+        if self.point_indices is not None:
+            if isinstance(self.point_indices, (tuple, list)):
+                if len(self.point_indices) != 2:
+                    raise ContractError("point_indices tuple must contain exactly 2 elements (row, col)")
+                r, c = self.point_indices
+                if not isinstance(r, np.ndarray) or r.shape != (n,) or not isinstance(c, np.ndarray) or c.shape != (n,):
+                    raise ContractError(f"point_indices (row, col) elements must both have shape ({n},)")
+            elif isinstance(self.point_indices, np.ndarray):
+                if self.point_indices.shape[0] != n:
+                    raise ContractError(f"point_indices shape {self.point_indices.shape} mismatch with point count {n}")
+            else:
+                raise ContractError(f"point_indices must be tuple, list, or ndarray; got {type(self.point_indices)}")
 
 
 @dataclass(frozen=True)

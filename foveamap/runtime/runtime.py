@@ -16,7 +16,12 @@ from ..core.contracts import LiDARFrame, PerceptionResult, MapSnapshot
 from ..core.config import FoveaMapConfig
 from ..core.exceptions import ContractError, PerceptionError, MappingError
 from .device import DeviceContext, resolve_device, sync_device
-from .perception import PerceptionBackend, RangeUNetBackend, DevicePerceptionResult
+from .perception import (
+    PerceptionBackend,
+    RangeUNetBackend,
+    DevicePerceptionResult,
+    create_perception_backend,
+)
 from ..grid import FoveatedGrid
 from ..grid_torch import TorchFoveatedGrid
 from ..frames import transform
@@ -45,7 +50,7 @@ class FoveaMapRuntime:
         if perception_backend is not None:
             self.perception = perception_backend
         else:
-            self.perception = RangeUNetBackend(
+            self.perception = create_perception_backend(
                 config=self.config.perception,
                 sensor_config=self.config.sensor,
                 device=self.device_ctx.device,
