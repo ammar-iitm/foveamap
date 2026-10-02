@@ -178,6 +178,7 @@ class PerceptionConfig:
     fp16: bool = True
     confidence_threshold: float = 0.5
     active_classes: tuple[bool, ...] = field(default_factory=lambda: (True,) * 9)
+    strict_validation: bool = False
 
     def __post_init__(self) -> None:
         if self.num_classes <= 0:

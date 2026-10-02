@@ -448,6 +448,53 @@ def test_device_perception_result_validation():
         DevicePerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp_bad, is_moving=mv, device=dev)
 
 
+def test_device_perception_result_structural_vs_strict():
+    """Verify that structural validation runs unconditionally, while numerical checks are gated."""
+    dev = torch.device("cpu")
+    n = 10
+    cp = torch.full((n, 9), 1.0 / 9.0, device=dev, dtype=torch.float32)
+    mp = torch.zeros(n, device=dev, dtype=torch.float32)
+    sp = torch.zeros(n, device=dev, dtype=torch.long)
+    mv = torch.zeros(n, device=dev, dtype=torch.bool)
+
+    # 1. Structural failure: shape mismatch always raises even with strict=False
+    cp_mismatch = torch.full((n + 2, 9), 1.0 / 9.0, device=dev, dtype=torch.float32)
+    res_mismatch = DevicePerceptionResult.__new__(DevicePerceptionResult)
+    res_mismatch.class_probabilities = cp_mismatch
+    res_mismatch.moving_probabilities = mp
+    res_mismatch.semantic_predictions = sp
+    res_mismatch.is_moving = mv
+    res_mismatch.device = dev
+    res_mismatch.confidence = None
+    res_mismatch.pts_world = None
+    res_mismatch.point_indices = None
+    res_mismatch.metadata = {}
+    res_mismatch.strict_validation = False
+    with pytest.raises(ContractError):
+        res_mismatch.validate(strict=False)
+
+    # 2. Structural pass with non-strict mode: numerical out-of-bounds does NOT raise when strict=False
+    sp_bad = sp.clone()
+    sp_bad[0] = 15
+    res_num = DevicePerceptionResult.__new__(DevicePerceptionResult)
+    res_num.class_probabilities = cp
+    res_num.moving_probabilities = mp
+    res_num.semantic_predictions = sp_bad
+    res_num.is_moving = mv
+    res_num.device = dev
+    res_num.confidence = None
+    res_num.pts_world = None
+    res_num.point_indices = None
+    res_num.metadata = {}
+    res_num.strict_validation = False
+    # Calling validate(strict=False) should pass structural checks without numerical failure
+    res_num.validate(strict=False)
+
+    # But calling validate(strict=True) must raise ContractError on numerical violation
+    with pytest.raises(ContractError):
+        res_num.validate(strict=True)
+
+
 # ---------------------------------------------------------------------------
 # 6. Latency Timing Instrumentation
 # ---------------------------------------------------------------------------

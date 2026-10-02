@@ -127,6 +127,7 @@ class DevicePerceptionResult:
     pts_world: torch.Tensor | None = None
     point_indices: tuple[torch.Tensor, torch.Tensor] | torch.Tensor | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    strict_validation: bool = False
 
     def __post_init__(self) -> None:
         self.validate()
@@ -144,8 +145,14 @@ class DevicePerceptionResult:
             return torch.empty((0,), dtype=torch.float32, device=self.device)
         return self.class_probabilities.max(dim=-1).values
 
-    def validate(self, num_classes: int | None = None) -> None:
-        """Validate tensor types, device residency, dimensions, finiteness, and bounds."""
+    def validate(self, num_classes: int | None = None, strict: bool | None = None) -> None:
+        """Validate tensor types, device residency, dimensions, finiteness, and bounds.
+
+        Structural validation (tensors, devices, shapes, dimensions) is always executed
+        with zero CPU synchronization. Expensive numerical checks (NaN/Inf, probability
+        bounds, index ranges) require device reductions and CPU transfers (.item());
+        these are executed when `strict=True` (or defaulted to True on CPU, False on CUDA).
+        """
         for name, t in [
             ("class_probabilities", self.class_probabilities),
             ("moving_probabilities", self.moving_probabilities),
@@ -170,25 +177,7 @@ class DevicePerceptionResult:
         if num_classes is not None and self.class_probabilities.shape[1] != num_classes:
             raise ContractError(f"class_probabilities channels ({self.class_probabilities.shape[1]}) != expected num_classes ({num_classes})")
 
-        # Finiteness checks (fast device reductions)
-        if not torch.all(torch.isfinite(self.class_probabilities)).item():
-            raise NumericalConsistencyError("class_probabilities contains non-finite values (NaN or Inf)")
-        if not torch.all(torch.isfinite(self.moving_probabilities)).item():
-            raise NumericalConsistencyError("moving_probabilities contains non-finite values (NaN or Inf)")
-
-        # Probability bounds [0, 1]
-        if (self.class_probabilities < -1e-4).any().item() or (self.class_probabilities > 1.0 + 1e-4).any().item():
-            raise NumericalConsistencyError("class_probabilities has values outside [0, 1]")
-        if (self.moving_probabilities < -1e-4).any().item() or (self.moving_probabilities > 1.0 + 1e-4).any().item():
-            raise NumericalConsistencyError("moving_probabilities has values outside [0, 1]")
-
-        # Semantic class index bounds
-        c_dim = self.class_probabilities.shape[1]
-        if n > 0 and c_dim > 0:
-            if (self.semantic_predictions < 0).any().item() or (self.semantic_predictions >= c_dim).any().item():
-                raise ContractError(f"semantic_predictions contains class IDs outside [0, {c_dim - 1}]")
-
-        # Optional confidence
+        # Optional confidence structural checks
         if self.confidence is not None:
             if not torch.is_tensor(self.confidence):
                 raise ContractError(f"confidence must be torch.Tensor; got {type(self.confidence).__name__}")
@@ -196,12 +185,8 @@ class DevicePerceptionResult:
                 raise ContractError(f"confidence device ({self.confidence.device}) mismatch with {self.device}")
             if self.confidence.shape != (n,):
                 raise ContractError(f"confidence shape {tuple(self.confidence.shape)} mismatch with point count {n}")
-            if not torch.all(torch.isfinite(self.confidence)).item():
-                raise NumericalConsistencyError("confidence contains non-finite values")
-            if (self.confidence < -1e-4).any().item() or (self.confidence > 1.0 + 1e-4).any().item():
-                raise NumericalConsistencyError("confidence has values outside [0, 1]")
 
-        # Optional pts_world
+        # Optional pts_world structural checks
         if self.pts_world is not None:
             if not torch.is_tensor(self.pts_world):
                 raise ContractError(f"pts_world must be torch.Tensor; got {type(self.pts_world).__name__}")
@@ -210,7 +195,7 @@ class DevicePerceptionResult:
             if self.pts_world.ndim != 2 or self.pts_world.shape != (n, 3):
                 raise ContractError(f"pts_world shape {tuple(self.pts_world.shape)} mismatch with (N, 3)")
 
-        # Optional point_indices
+        # Optional point_indices structural checks
         if self.point_indices is not None:
             if isinstance(self.point_indices, (tuple, list)):
                 if len(self.point_indices) != 2:
@@ -222,17 +207,52 @@ class DevicePerceptionResult:
                     raise ContractError("point_indices tensors must be on the result device")
                 if r.shape != (n,) or c.shape != (n,):
                     raise ContractError(f"point_indices tensors must have shape ({n},)")
-                if n > 0 and ((r < -1).any().item() or (c < -1).any().item()):
-                    raise ContractError("point_indices coordinates cannot be less than -1")
             elif torch.is_tensor(self.point_indices):
                 if self.point_indices.device != self.device:
                     raise ContractError("point_indices tensor must be on the result device")
                 if self.point_indices.shape != (n,):
                     raise ContractError(f"point_indices tensor must have shape ({n},)")
-                if n > 0 and (self.point_indices < -1).any().item():
-                    raise ContractError("point_indices values cannot be less than -1")
             else:
                 raise ContractError(f"point_indices must be tuple of tensors or tensor; got {type(self.point_indices).__name__}")
+
+        # Strict numerical validation (finiteness, value bounds, range checks)
+        # On GPU devices, these reductions + .item() force a synchronous host stall.
+        do_strict = (self.strict_validation or (self.device.type == "cpu")) if strict is None else strict
+        if do_strict:
+            # Finiteness checks
+            if not torch.all(torch.isfinite(self.class_probabilities)).item():
+                raise NumericalConsistencyError("class_probabilities contains non-finite values (NaN or Inf)")
+            if not torch.all(torch.isfinite(self.moving_probabilities)).item():
+                raise NumericalConsistencyError("moving_probabilities contains non-finite values (NaN or Inf)")
+
+            # Probability bounds [0, 1]
+            if (self.class_probabilities < -1e-4).any().item() or (self.class_probabilities > 1.0 + 1e-4).any().item():
+                raise NumericalConsistencyError("class_probabilities has values outside [0, 1]")
+            if (self.moving_probabilities < -1e-4).any().item() or (self.moving_probabilities > 1.0 + 1e-4).any().item():
+                raise NumericalConsistencyError("moving_probabilities has values outside [0, 1]")
+
+            # Semantic class index bounds
+            c_dim = self.class_probabilities.shape[1]
+            if n > 0 and c_dim > 0:
+                if (self.semantic_predictions < 0).any().item() or (self.semantic_predictions >= c_dim).any().item():
+                    raise ContractError(f"semantic_predictions contains class IDs outside [0, {c_dim - 1}]")
+
+            # Optional confidence numerical bounds
+            if self.confidence is not None:
+                if not torch.all(torch.isfinite(self.confidence)).item():
+                    raise NumericalConsistencyError("confidence contains non-finite values")
+                if (self.confidence < -1e-4).any().item() or (self.confidence > 1.0 + 1e-4).any().item():
+                    raise NumericalConsistencyError("confidence has values outside [0, 1]")
+
+            # Optional point_indices numerical bounds
+            if self.point_indices is not None and n > 0:
+                if isinstance(self.point_indices, (tuple, list)):
+                    r, c = self.point_indices
+                    if (r < -1).any().item() or (c < -1).any().item():
+                        raise ContractError("point_indices coordinates cannot be less than -1")
+                elif torch.is_tensor(self.point_indices):
+                    if (self.point_indices < -1).any().item():
+                        raise ContractError("point_indices values cannot be less than -1")
 
     def to_host(self) -> PerceptionResult:
         """Convert device tensors to canonical host PerceptionResult contract."""
@@ -600,10 +620,12 @@ class RangeUNetBackend(PerceptionBackend):
         inference_ms = (time.perf_counter() - t0) * 1000.0
 
         # Finiteness validation on network outputs
-        if not torch.all(torch.isfinite(probs_img)):
-            raise PerceptionError("RangeUNet model produced non-finite class probabilities")
-        if not torch.all(torch.isfinite(pmove_img)):
-            raise PerceptionError("RangeUNet model produced non-finite motion probabilities")
+        # In production CUDA mode (profiling=False and strict_validation=False), avoid blocking host sync.
+        if profiling or dev.type == "cpu" or getattr(self.config, "strict_validation", False):
+            if not torch.all(torch.isfinite(probs_img)).item():
+                raise PerceptionError("RangeUNet model produced non-finite class probabilities")
+            if not torch.all(torch.isfinite(pmove_img)).item():
+                raise PerceptionError("RangeUNet model produced non-finite motion probabilities")
 
         # -------------------------------------------------------------
         # Stage 3: Per-point Correspondence Gather & Motion Decision
@@ -650,6 +672,7 @@ class RangeUNetBackend(PerceptionBackend):
             confidence=conf,
             pts_world=pw_dev,
             point_indices=(r_clamped, c_clamped),
+            strict_validation=bool(profiling or getattr(self.config, "strict_validation", False)),
             metadata={
                 "backend": self.name,
                 "model_name": self.model_name,
