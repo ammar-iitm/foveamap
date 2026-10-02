@@ -106,6 +106,9 @@ class FoveaMapPipeline:
             from .model import RangeUNet
             self.model = RangeUNet().to(self.device).eval()
         self.info = info
+        if self.info is None:
+            from .frames import SIM_INFO
+            self.info = SIM_INFO
         self.grid_engine = grid
         self.features = features or grid
         if self.features not in ("numpy", "torch"):
@@ -124,6 +127,22 @@ class FoveaMapPipeline:
     @classmethod
     def from_config(cls, config) -> FoveaMapPipeline:
         return cls(config=config)
+
+    @classmethod
+    def from_source(cls, source: Any, config: Any | None = None, **kwargs) -> FoveaMapPipeline:
+        """Create a pipeline configured for a specific LiDARSource."""
+        from .core.config import FoveaMapConfig
+        sensor_cfg = getattr(source, "sensor_config", None)
+        if config is None and sensor_cfg is not None:
+            config = FoveaMapConfig(sensor=sensor_cfg)
+        return cls(config=config, **kwargs)
+
+    def step_source(self, source: Any, max_frames: int | None = None):
+        """Process frames sequentially from a LiDARSource."""
+        for i, frame in enumerate(source):
+            if max_frames is not None and i >= max_frames:
+                break
+            yield self.step(frame)
 
     def step(self, frame):
         """One sweep. With the torch engine, predictions stay on the device through

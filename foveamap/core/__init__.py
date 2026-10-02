@@ -9,6 +9,7 @@ from .config import (
     PerceptionConfig,
     TerrainConfig,
     RuntimeConfig,
+    PreprocessConfig,
     FoveaMapConfig,
 )
 from .exceptions import (
@@ -33,6 +34,7 @@ __all__ = [
     "PerceptionConfig",
     "TerrainConfig",
     "RuntimeConfig",
+    "PreprocessConfig",
     "FoveaMapConfig",
     # Exceptions
     "FoveaMapError",

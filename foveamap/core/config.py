@@ -220,6 +220,40 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class PreprocessConfig:
+    """Configuration for raw LiDAR point cloud preprocessing.
+
+    Attributes:
+        enabled: whether preprocessing filtering is active.
+        min_range_m: minimum radial range from sensor in metres.
+        max_range_m: maximum radial range from sensor in metres.
+        z_min_m: optional minimum Z height in ego frame in metres.
+        z_max_m: optional maximum Z height in ego frame in metres.
+        remove_invalid: whether to discard non-finite points (NaN, Inf).
+        remove_self_hits: whether to filter out points near the vehicle ego center.
+        self_hit_radius_m: radius in metres in ego XY plane to consider vehicle self-hits.
+    """
+    enabled: bool = True
+    min_range_m: float = 0.5
+    max_range_m: float = 100.0
+    z_min_m: float | None = None
+    z_max_m: float | None = None
+    remove_invalid: bool = True
+    remove_self_hits: bool = True
+    self_hit_radius_m: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.min_range_m < 0:
+            raise ConfigurationError(f"min_range_m must be non-negative, got {self.min_range_m}")
+        if self.max_range_m <= self.min_range_m:
+            raise ConfigurationError(f"max_range_m ({self.max_range_m}) must exceed min_range_m ({self.min_range_m})")
+        if self.z_min_m is not None and self.z_max_m is not None and self.z_max_m <= self.z_min_m:
+            raise ConfigurationError(f"z_max_m ({self.z_max_m}) must exceed z_min_m ({self.z_min_m})")
+        if self.self_hit_radius_m < 0:
+            raise ConfigurationError(f"self_hit_radius_m must be non-negative, got {self.self_hit_radius_m}")
+
+
+@dataclass(frozen=True)
 class FoveaMapConfig:
     """Top-level unified system configuration."""
     sensor: SensorConfig = field(default_factory=SensorConfig)
@@ -227,3 +261,4 @@ class FoveaMapConfig:
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
     terrain: TerrainConfig = field(default_factory=TerrainConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)

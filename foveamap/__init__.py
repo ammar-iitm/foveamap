@@ -4,7 +4,7 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 from .core.contracts import LiDARFrame, PerceptionResult, MapSnapshot
-from .core.config import FoveaMapConfig, GridConfig, TierConfig
+from .core.config import FoveaMapConfig, GridConfig, TierConfig, PreprocessConfig
 from .core.exceptions import (
     FoveaMapError,
     ConfigurationError,
@@ -16,6 +16,7 @@ from .core.exceptions import (
 )
 
 from .runtime import FoveaMapRuntime, resolve_device, RangeUNetBackend
+from .data import LiDARSource, LiDARPreprocessor, create_source
 
 __all__ = [
     "__version__",
@@ -25,6 +26,10 @@ __all__ = [
     "FoveaMapConfig",
     "GridConfig",
     "TierConfig",
+    "PreprocessConfig",
+    "LiDARSource",
+    "LiDARPreprocessor",
+    "create_source",
     "FoveaMapRuntime",
     "resolve_device",
     "RangeUNetBackend",

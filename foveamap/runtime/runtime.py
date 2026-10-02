@@ -20,6 +20,7 @@ from .perception import PerceptionBackend, RangeUNetBackend, DevicePerceptionRes
 from ..grid import FoveatedGrid
 from ..grid_torch import TorchFoveatedGrid
 from ..frames import transform
+from ..data.preprocess import LiDARPreprocessor
 
 
 class FoveaMapRuntime:
@@ -29,9 +30,17 @@ class FoveaMapRuntime:
         self,
         config: FoveaMapConfig | None = None,
         perception_backend: PerceptionBackend | None = None,
+        preprocessor: LiDARPreprocessor | None = None,
     ) -> None:
         self.config = config if config is not None else FoveaMapConfig()
         self.device_ctx: DeviceContext = resolve_device(self.config.runtime, self.config.perception)
+
+        if preprocessor is not None:
+            self.preprocessor = preprocessor
+        elif getattr(self.config, "preprocess", None) is not None and self.config.preprocess.enabled:
+            self.preprocessor = LiDARPreprocessor(self.config.preprocess)
+        else:
+            self.preprocessor = None
 
         if perception_backend is not None:
             self.perception = perception_backend
@@ -92,6 +101,9 @@ class FoveaMapRuntime:
             canonical_frame = frame
         else:
             raise ContractError(f"Expected LiDARFrame or legacy dict, got {type(frame).__name__}")
+
+        if self.preprocessor is not None:
+            canonical_frame = self.preprocessor.process(canonical_frame)
 
         t_start = time.perf_counter()
         timing: dict[str, float] = {}
@@ -200,6 +212,13 @@ class FoveaMapRuntime:
     def step(self, frame: LiDARFrame | dict[str, Any]) -> MapSnapshot:
         """Alias for process(frame)."""
         return self.process(frame)
+
+    def process_source(self, source: Any, max_frames: int | None = None) -> Iterator[MapSnapshot]:
+        """Sequentially process frames from a LiDARSource and yield published MapSnapshots."""
+        for i, frame in enumerate(source):
+            if max_frames is not None and i >= max_frames:
+                break
+            yield self.process(frame)
 
     def snapshot(self) -> MapSnapshot | None:
         """Return the most recently generated MapSnapshot."""

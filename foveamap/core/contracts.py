@@ -46,6 +46,7 @@ class LiDARFrame:
     sensor_origin: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 1.73], dtype=np.float32))
     timestamp: float = 0.0
     frame_id: str = ""
+    source_id: str = ""
     label: np.ndarray | None = None
     moving: np.ndarray | None = None
     prev_sweeps: list[tuple[np.ndarray, np.ndarray] | None] | None = None
@@ -57,6 +58,28 @@ class LiDARFrame:
     @property
     def num_points(self) -> int:
         return len(self.pts)
+
+    @property
+    def has_annotations(self) -> bool:
+        """True if ground-truth semantic or motion annotations are attached."""
+        return self.label is not None or self.moving is not None
+
+    def without_annotations(self) -> LiDARFrame:
+        """Return a copy of this frame stripped of all ground-truth annotations."""
+        return LiDARFrame(
+            pts=self.pts,
+            intensity=self.intensity,
+            ring=self.ring,
+            pose=self.pose,
+            sensor_origin=self.sensor_origin,
+            timestamp=self.timestamp,
+            frame_id=self.frame_id,
+            source_id=self.source_id,
+            label=None,
+            moving=None,
+            prev_sweeps=self.prev_sweeps,
+            metadata=dict(self.metadata),
+        )
 
     def validate(self) -> None:
         """Validate invariant shapes, dtypes, and numerical integrity."""
@@ -87,9 +110,11 @@ class LiDARFrame:
         if not np.allclose(self.pose[3, :], [0.0, 0.0, 0.0, 1.0], atol=1e-4):
             raise ContractError(f"LiDARFrame.pose must have bottom row [0, 0, 0, 1]; got {self.pose[3, :]}")
 
-        # 5. Sensor origin
+        # 5. Sensor origin and source ID
         if not isinstance(self.sensor_origin, np.ndarray) or self.sensor_origin.shape != (3,):
             raise ContractError(f"LiDARFrame.sensor_origin must be (3,) ndarray; got shape {getattr(self.sensor_origin, 'shape', None)}")
+        if not isinstance(self.source_id, str):
+            raise ContractError(f"LiDARFrame.source_id must be a string; got {type(self.source_id)}")
 
         # 6. Optional annotations
         if self.label is not None:
@@ -131,6 +156,8 @@ class LiDARFrame:
             legacy_meta["timestamp"] = self.timestamp
         if "frame_id" not in legacy_meta:
             legacy_meta["frame_id"] = self.frame_id
+        if "source_id" not in legacy_meta and self.source_id:
+            legacy_meta["source_id"] = self.source_id
 
         return {
             "pts": self.pts,
@@ -155,6 +182,7 @@ class LiDARFrame:
         meta = dict(frame_dict.get("meta") or {})
         timestamp = float(meta.get("timestamp", meta.get("t", 0.0)))
         frame_id = str(meta.get("token", meta.get("scan", meta.get("frame_id", f"frame_{int(timestamp * 1000)}"))))
+        source_id = str(meta.get("source_id", meta.get("source", "")))
         label = np.asarray(frame_dict["label"], dtype=np.int8) if "label" in frame_dict and frame_dict["label"] is not None else None
         moving = np.asarray(frame_dict["moving"], dtype=bool) if "moving" in frame_dict and frame_dict["moving"] is not None else None
         prev = frame_dict.get("prev")
@@ -166,6 +194,7 @@ class LiDARFrame:
             sensor_origin=sensor,
             timestamp=timestamp,
             frame_id=frame_id,
+            source_id=source_id,
             label=label,
             moving=moving,
             prev_sweeps=prev,

@@ -36,6 +36,10 @@ def test_package_metadata():
     assert foveamap.__version__ == "0.1.0"
     assert foveamap.LiDARFrame is LiDARFrame
     assert foveamap.FoveaMapConfig is FoveaMapConfig
+    assert hasattr(foveamap, "PreprocessConfig")
+    assert hasattr(foveamap, "LiDARSource")
+    assert hasattr(foveamap, "LiDARPreprocessor")
+    assert hasattr(foveamap, "create_source")
 
 
 # ----------------------------------------------------------------------------
