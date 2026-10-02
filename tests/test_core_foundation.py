@@ -282,6 +282,29 @@ def test_map_snapshot_construction_and_semantics():
         )
 
 
+def test_map_snapshot_detachment_and_immutability():
+    s0 = TierLayers(400)
+    external_pose = np.eye(4)
+    external_origins = [(-200, -200)]
+    external_meta = {"run_id": "test_123"}
+    snap = MapSnapshot(
+        timestamp=10.0,
+        frame_id="frame_100",
+        ego_pose=external_pose,
+        origins=external_origins,
+        tier_states=(s0,),
+        metadata=external_meta,
+    )
+    # Mutating external inputs must NOT mutate published snapshot
+    external_pose[0, 3] = 999.0
+    external_origins[0] = (0, 0)
+    external_meta["run_id"] = "corrupted"
+
+    assert snap.ego_pose[0, 3] == 0.0
+    assert snap.origins[0] == (-200, -200)
+    assert snap.metadata["run_id"] == "test_123"
+
+
 # ----------------------------------------------------------------------------
 # Configuration & Validation
 # ----------------------------------------------------------------------------

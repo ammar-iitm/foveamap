@@ -3,13 +3,11 @@
 Extracts all hardcoded parameters and magic numbers into explicit,
 composable, and type-checked configuration objects.
 
-NOTE ON RUNTIME WIRING:
-    At this stage (Phase 1), these configuration dataclasses establish the
-    formal schemas and invariant validation rules for the production system.
-    Existing legacy runtime modules (pipeline.py, grid.py, model.py, etc.)
-    continue to operate using their existing internal defaults.
-    Active migration of the runtime execution loop to consume these configuration
-    objects directly is scheduled for Phase 2.
+RUNTIME INTEGRATION:
+    These configuration dataclasses establish formal schemas, defaults, and invariant
+    validation rules for the entire FoveaMap pipeline. The canonical runtime
+    (`FoveaMapRuntime`) directly consumes `FoveaMapConfig` to configure sensors,
+    grid resolution tiers, neural network perception backends, and traversability heuristics.
 """
 from __future__ import annotations
 

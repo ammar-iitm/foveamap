@@ -48,13 +48,13 @@ All perception and mapping components reference a single authoritative semantic 
 - **Canonical Class IDs**:
   - `0`: `ROAD`
   - `1`: `SIDEWALK`
-  - `2`: `BUILDING`
-  - `3`: `VEHICLE`
-  - `4`: `PERSON`
-  - `5`: `POLE`
-  - `6`: `TREE`
-  - `7`: `TERRAIN`
-  - `8`: `OTHER`
+  - `2`: `PARKING`
+  - `3`: `TERRAIN`
+  - `4`: `VEGETATION`
+  - `5`: `BUILDING`
+  - `6`: `POLE`
+  - `7`: `VEHICLE`
+  - `8`: `PERSON`
 - **Ontology Decoupling**: Dataset loaders (e.g. `SemanticKITTI`, `nuScenes`, `sim`) map dataset-specific labels into this canonical ontology. The perception backend does not couple to any dataset-specific ontology. Incompatible `num_classes` configurations are strictly rejected at initialization time with `ConfigurationError`.
 
 ---

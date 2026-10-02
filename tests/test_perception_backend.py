@@ -286,6 +286,42 @@ def test_temporal_state_100_frames_longevity():
         assert sw.pts_world.requires_grad is False
 
 
+def test_explicit_prev_sweeps_precedence():
+    """Verify that dataset-supplied prev_sweeps take precedence over internal temporal state."""
+    backend = RangeUNetBackend(
+        config=PerceptionConfig(num_classes=9),
+        sensor_config=SensorConfig(n_rows=64, n_cols=1024),
+        device=torch.device("cpu"),
+        features_engine="torch",
+    )
+    source = SimulatorSource(n_steps=2, seed=123)
+    f0 = source[0]
+    f1 = source[1]
+
+    pw0 = (f0.pts.astype(np.float64) @ f0.pose[:3, :3].T + f0.pose[:3, 3]).astype(np.float64)
+    r0 = f0.ring.copy()
+    explicit_prev = [(pw0, r0), None]
+
+    frame_with_prev = LiDARFrame(
+        pts=f1.pts,
+        intensity=f1.intensity,
+        ring=f1.ring,
+        pose=f1.pose,
+        sensor_origin=f1.sensor_origin,
+        timestamp=f1.timestamp,
+        frame_id="frame_with_explicit_prev",
+        prev_sweeps=explicit_prev,
+    )
+
+    res_dev = backend.predict_device(frame_with_prev, dev_math=True)
+    assert isinstance(res_dev, DevicePerceptionResult)
+    assert res_dev.num_points == len(f1.pts)
+
+    res_host = backend.predict(frame_with_prev)
+    assert isinstance(res_host, PerceptionResult)
+    assert res_host.num_points == len(f1.pts)
+
+
 def test_predict_device_argument_validation(test_frame):
     """Verify that backend.predict() validates requested device matching backend device."""
     backend = RangeUNetBackend(

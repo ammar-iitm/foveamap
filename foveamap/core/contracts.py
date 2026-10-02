@@ -353,6 +353,13 @@ class MapSnapshot:
             raise ContractError(f"ego_pose must be (4, 4) ndarray; got {getattr(self.ego_pose, 'shape', None)}")
         if len(self.origins) != len(self.tier_states):
             raise ContractError(f"Number of origins ({len(self.origins)}) must match tier_states ({len(self.tier_states)})")
+        object.__setattr__(self, "ego_pose", self.ego_pose.copy())
+        detached_origins = tuple(
+            tuple(int(c) for c in o) if isinstance(o, (list, tuple, np.ndarray)) else o
+            for o in self.origins
+        )
+        object.__setattr__(self, "origins", detached_origins)
+        object.__setattr__(self, "metadata", dict(self.metadata))
 
     @property
     def num_tiers(self) -> int:

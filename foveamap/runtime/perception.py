@@ -284,6 +284,7 @@ class PerceptionBackend(ABC):
         self,
         frame: LiDARFrame,
         dev_math: bool = False,
+        profiling: bool = False,
     ) -> DevicePerceptionResult:
         """Run perception inference and retain tensors on the active computing device."""
         ...
@@ -468,7 +469,12 @@ class RangeUNetBackend(PerceptionBackend):
         self._device_temporal_state.clear()
 
     @torch.inference_mode()
-    def predict_device(self, frame: LiDARFrame, dev_math: bool = False) -> DevicePerceptionResult:
+    def predict_device(
+        self,
+        frame: LiDARFrame,
+        dev_math: bool = False,
+        profiling: bool = False,
+    ) -> DevicePerceptionResult:
         """Run range-image inference and retain result tensors on-device.
 
         When dev_math=True or features_engine='torch', all geometric transforms,
@@ -570,7 +576,7 @@ class RangeUNetBackend(PerceptionBackend):
             col_dev = torch.as_tensor(col, device=dev)
             pw_dev = None
 
-        if dev.type == "cuda":
+        if profiling and dev.type == "cuda":
             torch.cuda.synchronize(dev)
         feature_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -589,7 +595,7 @@ class RangeUNetBackend(PerceptionBackend):
         except Exception as exc:
             raise PerceptionError(f"RangeUNet forward pass failed: {exc}") from exc
 
-        if dev.type == "cuda":
+        if profiling and dev.type == "cuda":
             torch.cuda.synchronize(dev)
         inference_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -630,7 +636,7 @@ class RangeUNetBackend(PerceptionBackend):
                 frame_id=frame.frame_id,
             )
 
-        if dev.type == "cuda":
+        if profiling and dev.type == "cuda":
             torch.cuda.synchronize(dev)
         postprocess_ms = (time.perf_counter() - t0) * 1000.0
         total_ms = (time.perf_counter() - t_start) * 1000.0
@@ -720,7 +726,12 @@ class ClassicalFallbackBackend(PerceptionBackend):
     def device(self) -> torch.device:
         return self._device
 
-    def predict_device(self, frame: LiDARFrame, dev_math: bool = False) -> DevicePerceptionResult:
+    def predict_device(
+        self,
+        frame: LiDARFrame,
+        dev_math: bool = False,
+        profiling: bool = False,
+    ) -> DevicePerceptionResult:
         if not isinstance(frame, LiDARFrame):
             raise ContractError(f"Expected LiDARFrame, got {type(frame).__name__}")
 

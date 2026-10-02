@@ -4,6 +4,7 @@ Wraps synthetic drives and simulated LiDAR sequences into canonical LiDARFrame c
 """
 from __future__ import annotations
 
+import copy
 from typing import Iterator, Any
 import numpy as np
 
@@ -63,7 +64,7 @@ class SimulatorSource(LiDARSource):
                 frame_meta = dict(frame.metadata)
                 frame_meta["timestamp_provenance"] = "synthetic"
                 frame_meta["sensor_origin_provenance"] = "simulated_model_mount"
-                frame_meta["evaluation_truth"] = self._truth
+                frame_meta["evaluation_truth"] = copy.deepcopy(self._truth)
 
                 frame = LiDARFrame(
                     pts=frame.pts,
@@ -119,7 +120,7 @@ class SimulatorSource(LiDARSource):
     @property
     def evaluation_truth(self) -> dict[str, Any]:
         """Ground truth scene features (potholes, crosswalk, trajectories) for evaluation."""
-        return self._truth
+        return copy.deepcopy(self._truth)
 
     @property
     def metadata(self) -> dict[str, Any]:

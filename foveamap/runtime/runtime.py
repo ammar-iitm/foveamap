@@ -116,17 +116,23 @@ class FoveaMapRuntime:
         on_dev = (self.config.runtime.grid_engine == "torch")
         dev_math = on_dev and (self.config.runtime.features_engine == "torch") and (self.device_ctx.device.type != "mps")
 
+        profile = self.config.runtime.enable_profiling
+        dev = self.device_ctx.device
         t0 = time.perf_counter()
         if on_dev:
             # 1. Device-resident perception (no CPU host conversion)
-            dev_perception = self.perception.predict_device(canonical_frame, dev_math=dev_math)
-            sync_device(self.device_ctx.device)
-            timing["perception"] = time.perf_counter() - t0
+            dev_perception = self.perception.predict_device(
+                canonical_frame, dev_math=dev_math, profiling=profile
+            )
+            if profile:
+                sync_device(dev)
+                timing["perception"] = time.perf_counter() - t0
             self._last_device_perception = dev_perception
             self._last_perception = None  # Lazily converted to host if requested
 
             # 2. Transform points to world coordinates (stays on device if dev_math)
-            t0 = time.perf_counter()
+            if profile:
+                t0 = time.perf_counter()
             if dev_perception.pts_world is not None:
                 pw = dev_perception.pts_world
             else:
@@ -145,26 +151,30 @@ class FoveaMapRuntime:
                 )
             except Exception as exc:
                 raise MappingError(f"Grid binning stage failed: {exc}") from exc
-            sync_device(self.device_ctx.device)
-            timing["projection"] = time.perf_counter() - t0
+            if profile:
+                sync_device(dev)
+                timing["projection"] = time.perf_counter() - t0
 
             # 4. Temporal fusion & traversability derivation (on device)
-            t0 = time.perf_counter()
+            if profile:
+                t0 = time.perf_counter()
             try:
                 dyn = self.grid.fuse_stats(stats, origins)
             except Exception as exc:
                 raise MappingError(f"Grid fusion stage failed: {exc}") from exc
-            sync_device(self.device_ctx.device)
-            timing["fusion"] = time.perf_counter() - t0
+            if profile:
+                sync_device(dev)
+                timing["fusion"] = time.perf_counter() - t0
         else:
             # CPU NumPy execution path
             host_perception = self.perception.predict(canonical_frame)
-            sync_device(self.device_ctx.device)
-            timing["perception"] = time.perf_counter() - t0
+            if profile:
+                timing["perception"] = time.perf_counter() - t0
             self._last_perception = host_perception
             self._last_device_perception = None
 
-            t0 = time.perf_counter()
+            if profile:
+                t0 = time.perf_counter()
             pw = transform(canonical_frame.pose, canonical_frame.pts.astype(np.float64))
             ego_xy = canonical_frame.pose[:2, 3]
 
@@ -179,18 +189,22 @@ class FoveaMapRuntime:
                 )
             except Exception as exc:
                 raise MappingError(f"Grid binning stage failed: {exc}") from exc
-            sync_device(self.device_ctx.device)
-            timing["projection"] = time.perf_counter() - t0
+            if profile:
+                timing["projection"] = time.perf_counter() - t0
 
-            t0 = time.perf_counter()
+            if profile:
+                t0 = time.perf_counter()
             try:
                 dyn = self.grid.fuse_stats(stats, origins)
             except Exception as exc:
                 raise MappingError(f"Grid fusion stage failed: {exc}") from exc
-            sync_device(self.device_ctx.device)
-            timing["fusion"] = time.perf_counter() - t0
+            if profile:
+                timing["fusion"] = time.perf_counter() - t0
 
-        timing["total"] = time.perf_counter() - t_start
+        if profile:
+            if on_dev:
+                sync_device(dev)
+            timing["total"] = time.perf_counter() - t_start
         self.last_timing = timing
 
         # 5. Publication of canonical MapSnapshot (intentional host copy of grid state)

@@ -363,3 +363,56 @@ def test_legacy_pipeline_forwards_terrain_config():
     assert pipe.grid.terrain is not None
     assert pipe.grid.terrain.vehicle_clearance_m == 3.0
     assert pipe.grid.terrain.cost_priors[0] == 240
+
+
+def test_runtime_profiling_enabled_vs_disabled():
+    frame = _make_synthetic_frame(n=64)
+
+    # 1. Profiling disabled (asynchronous production path)
+    cfg_prod = FoveaMapConfig(
+        runtime=RuntimeConfig(device="cpu", grid_engine="torch", features_engine="torch", enable_profiling=False)
+    )
+    runtime_prod = FoveaMapRuntime(cfg_prod)
+    snap_prod = runtime_prod.process(frame)
+    assert snap_prod.metadata["timing"] == {}
+    assert runtime_prod.last_timing == {}
+
+    # 2. Profiling enabled (synchronized timing path)
+    cfg_prof = FoveaMapConfig(
+        runtime=RuntimeConfig(device="cpu", grid_engine="torch", features_engine="torch", enable_profiling=True)
+    )
+    runtime_prof = FoveaMapRuntime(cfg_prof)
+    snap_prof = runtime_prof.process(frame)
+    assert "perception" in snap_prof.metadata["timing"]
+    assert "projection" in snap_prof.metadata["timing"]
+    assert "fusion" in snap_prof.metadata["timing"]
+    assert "total" in snap_prof.metadata["timing"]
+
+
+def test_runtime_reset_clears_all_temporal_and_grid_state():
+    cfg = FoveaMapConfig(
+        runtime=RuntimeConfig(device="cpu", grid_engine="torch", features_engine="torch")
+    )
+    runtime = FoveaMapRuntime(cfg)
+    frame = _make_synthetic_frame(n=64)
+
+    # Process 3 frames
+    runtime.process(frame)
+    runtime.process(frame)
+    snap3 = runtime.process(frame)
+    assert runtime.frame_count == 3
+    assert runtime.last_snapshot is not None
+    assert len(runtime.perception._device_temporal_state) > 0
+
+    # Reset
+    runtime.reset()
+    assert runtime.frame_count == 0
+    assert runtime.last_snapshot is None
+    assert runtime.last_perception is None
+    assert runtime.last_device_perception is None
+    assert len(runtime.perception._device_temporal_state) == 0
+
+    # Fresh process after reset should behave like initial frame
+    snap_fresh = runtime.process(frame)
+    assert runtime.frame_count == 1
+    assert snap_fresh.frame_id == frame.frame_id
