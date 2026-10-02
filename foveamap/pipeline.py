@@ -110,10 +110,13 @@ class FoveaMapPipeline:
         self.features = features or grid
         if self.features not in ("numpy", "torch"):
             raise ValueError(f"unknown features engine {self.features!r}")
+        self.confidence_threshold = config.perception.confidence_threshold if config else 0.5
+        self.fp16 = config.perception.fp16 if config else True
+        terrain_cfg = config.terrain if config else None
         if grid == "torch":
-            self.grid = TorchFoveatedGrid(profile, fuse=fuse, device=self.device)
+            self.grid = TorchFoveatedGrid(profile, fuse=fuse, device=self.device, terrain_config=terrain_cfg)
         elif grid == "numpy":
-            self.grid = FoveatedGrid(profile, fuse=fuse)
+            self.grid = FoveatedGrid(profile, fuse=fuse, terrain_config=terrain_cfg)
         else:
             raise ValueError(f"unknown grid engine {grid!r}")
         self.history = []          # last 2 sweeps as (pts_world, ring), newest last
@@ -148,7 +151,7 @@ class FoveaMapPipeline:
         T["preprocess"] = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        probs, pmove = predict(self.model, feats, self.info.active, to_host=not on_dev)
+        probs, pmove = predict(self.model, feats, self.info.active, fp16=self.fp16, to_host=not on_dev)
         _sync(self.device)
         T["inference"] = time.perf_counter() - t0
 
@@ -159,7 +162,7 @@ class FoveaMapPipeline:
             row, col = to_host(row), to_host(col)
         P = probs[row, col]                                   # every point takes its pixel's prediction
         cls = P.argmax(1)
-        moving = (pmove[row, col] > 0.5) & ((cls == VEHICLE) | (cls == PERSON))
+        moving = (pmove[row, col] > self.confidence_threshold) & ((cls == VEHICLE) | (cls == PERSON))
         if dev_math:
             pose = torch.as_tensor(frame["pose"], device=self.device)
             pw = pts.double() @ pose[:3, :3].T + pose[:3, 3]

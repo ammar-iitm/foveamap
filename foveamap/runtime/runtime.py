@@ -2,6 +2,7 @@
 
 Coordinates LiDAR frame ingestion, preprocessing, perception inference,
 foveated 2.5D projection, temporal fusion, and canonical MapSnapshot publication.
+Maintains full device-resident execution for Torch/CUDA without GPU->CPU->GPU round-trips.
 """
 from __future__ import annotations
 
@@ -9,12 +10,13 @@ import time
 from typing import Any
 
 import numpy as np
+import torch
 
 from ..core.contracts import LiDARFrame, PerceptionResult, MapSnapshot
 from ..core.config import FoveaMapConfig
 from ..core.exceptions import ContractError, PerceptionError, MappingError
 from .device import DeviceContext, resolve_device, sync_device
-from .perception import PerceptionBackend, RangeUNetBackend
+from .perception import PerceptionBackend, RangeUNetBackend, DevicePerceptionResult
 from ..grid import FoveatedGrid
 from ..grid_torch import TorchFoveatedGrid
 from ..frames import transform
@@ -56,9 +58,25 @@ class FoveaMapRuntime:
             )
 
         self.last_snapshot: MapSnapshot | None = None
-        self.last_perception: PerceptionResult | None = None
+        self._last_perception: PerceptionResult | None = None
+        self._last_device_perception: DevicePerceptionResult | None = None
         self.last_timing: dict[str, float] = {}
         self.frame_count: int = 0
+
+    @property
+    def last_perception(self) -> PerceptionResult | None:
+        """Return canonical host PerceptionResult from the latest frame."""
+        if self._last_perception is not None:
+            return self._last_perception
+        if self._last_device_perception is not None:
+            self._last_perception = self._last_device_perception.to_host()
+            return self._last_perception
+        return None
+
+    @property
+    def last_device_perception(self) -> DevicePerceptionResult | None:
+        """Return device-resident perception result (tensors) if Torch engine was active."""
+        return self._last_device_perception
 
     def process(self, frame: LiDARFrame | dict[str, Any]) -> MapSnapshot:
         """Process a single LiDAR frame and publish a canonical MapSnapshot.
@@ -78,48 +96,87 @@ class FoveaMapRuntime:
         t_start = time.perf_counter()
         timing: dict[str, float] = {}
 
-        # 1. Perception inference
-        t0 = time.perf_counter()
-        try:
-            perception_result = self.perception.predict(canonical_frame)
-        except Exception as exc:
-            raise PerceptionError(f"Perception stage failed: {exc}") from exc
-        sync_device(self.device_ctx.device)
-        timing["perception"] = time.perf_counter() - t0
-        self.last_perception = perception_result
+        on_dev = (self.config.runtime.grid_engine == "torch")
+        dev_math = on_dev and (self.config.runtime.features_engine == "torch") and (self.device_ctx.device.type != "mps")
 
-        # 2. Transform points to world coordinates
         t0 = time.perf_counter()
-        pts_world = transform(canonical_frame.pose, canonical_frame.pts.astype(np.float64))
-        ego_xy = canonical_frame.pose[:2, 3]
+        if on_dev:
+            # 1. Device-resident perception (no CPU host conversion)
+            dev_perception = self.perception.predict_device(canonical_frame, dev_math=dev_math)
+            sync_device(self.device_ctx.device)
+            timing["perception"] = time.perf_counter() - t0
+            self._last_device_perception = dev_perception
+            self._last_perception = None  # Lazily converted to host if requested
 
-        # 3. Binning into foveated grid
-        origins = self.grid.window_origins(ego_xy)
-        try:
-            stats = self.grid.bin_points(
-                pts_world[:, :2],
-                pts_world[:, 2],
-                perception_result.class_probabilities,
-                perception_result.is_moving,
-                origins,
-            )
-        except Exception as exc:
-            raise MappingError(f"Grid binning stage failed: {exc}") from exc
-        sync_device(self.device_ctx.device)
-        timing["projection"] = time.perf_counter() - t0
+            # 2. Transform points to world coordinates (stays on device if dev_math)
+            t0 = time.perf_counter()
+            if dev_perception.pts_world is not None:
+                pw = dev_perception.pts_world
+            else:
+                pw = transform(canonical_frame.pose, canonical_frame.pts.astype(np.float64))
+            ego_xy = canonical_frame.pose[:2, 3]
 
-        # 4. Temporal fusion & traversability derivation
-        t0 = time.perf_counter()
-        try:
-            dyn = self.grid.fuse_stats(stats, origins)
-        except Exception as exc:
-            raise MappingError(f"Grid fusion stage failed: {exc}") from exc
-        sync_device(self.device_ctx.device)
-        timing["fusion"] = time.perf_counter() - t0
+            # 3. Binning into Torch foveated grid (consumed directly on device)
+            origins = self.grid.window_origins(ego_xy)
+            try:
+                stats = self.grid.bin_points(
+                    pw[:, :2],
+                    pw[:, 2],
+                    dev_perception.class_probabilities,
+                    dev_perception.is_moving,
+                    origins,
+                )
+            except Exception as exc:
+                raise MappingError(f"Grid binning stage failed: {exc}") from exc
+            sync_device(self.device_ctx.device)
+            timing["projection"] = time.perf_counter() - t0
+
+            # 4. Temporal fusion & traversability derivation (on device)
+            t0 = time.perf_counter()
+            try:
+                dyn = self.grid.fuse_stats(stats, origins)
+            except Exception as exc:
+                raise MappingError(f"Grid fusion stage failed: {exc}") from exc
+            sync_device(self.device_ctx.device)
+            timing["fusion"] = time.perf_counter() - t0
+        else:
+            # CPU NumPy execution path
+            host_perception = self.perception.predict(canonical_frame)
+            sync_device(self.device_ctx.device)
+            timing["perception"] = time.perf_counter() - t0
+            self._last_perception = host_perception
+            self._last_device_perception = None
+
+            t0 = time.perf_counter()
+            pw = transform(canonical_frame.pose, canonical_frame.pts.astype(np.float64))
+            ego_xy = canonical_frame.pose[:2, 3]
+
+            origins = self.grid.window_origins(ego_xy)
+            try:
+                stats = self.grid.bin_points(
+                    pw[:, :2],
+                    pw[:, 2],
+                    host_perception.class_probabilities,
+                    host_perception.is_moving,
+                    origins,
+                )
+            except Exception as exc:
+                raise MappingError(f"Grid binning stage failed: {exc}") from exc
+            sync_device(self.device_ctx.device)
+            timing["projection"] = time.perf_counter() - t0
+
+            t0 = time.perf_counter()
+            try:
+                dyn = self.grid.fuse_stats(stats, origins)
+            except Exception as exc:
+                raise MappingError(f"Grid fusion stage failed: {exc}") from exc
+            sync_device(self.device_ctx.device)
+            timing["fusion"] = time.perf_counter() - t0
+
         timing["total"] = time.perf_counter() - t_start
         self.last_timing = timing
 
-        # 5. Publication of MapSnapshot contract
+        # 5. Publication of canonical MapSnapshot (intentional host copy of grid state)
         tier_states = tuple(self.grid.snapshot())
         snapshot = MapSnapshot(
             timestamp=float(canonical_frame.timestamp),
@@ -132,6 +189,7 @@ class FoveaMapRuntime:
                 "frame_count": self.frame_count,
                 "grid_engine": self.config.runtime.grid_engine,
                 "device": str(self.device_ctx.device),
+                "device_resident": on_dev,
                 "timing": timing if self.config.runtime.enable_profiling else {},
             },
         )
@@ -164,6 +222,7 @@ class FoveaMapRuntime:
             )
         self.perception.reset()
         self.last_snapshot = None
-        self.last_perception = None
+        self._last_perception = None
+        self._last_device_perception = None
         self.last_timing = {}
         self.frame_count = 0

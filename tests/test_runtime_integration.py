@@ -1,20 +1,22 @@
-"""Phase 2 tests: Core Runtime Integration.
+"""Phase 2 tests: Core Runtime Integration & Hardening.
 
 Validates:
 - FoveaMapRuntime construction from FoveaMapConfig
 - DeviceContext resolution and CUDA/CPU fallback policies
-- PerceptionBackend boundary and PerceptionResult generation
+- PerceptionBackend boundary, DevicePerceptionResult, and PerceptionResult generation
+- Zero-copy device-resident execution for Torch/CUDA pipelines (no GPU->CPU->GPU round-trips)
 - FoveatedGrid and TorchFoveatedGrid configuration wiring
 - Canonical LiDARFrame ingestion and legacy dict compatibility
 - MapSnapshot generation, memory reporting, and ownership semantics
 - Immutability of input contracts
 - Authoritative configuration affecting runtime terrain cost output
-- FoveaMapPipeline backward compatibility with FoveaMapConfig and LiDARFrame
+- SensorConfig and PerceptionConfig propagation
+- FoveaMapPipeline backward compatibility with FoveaMapConfig, TerrainConfig, and LiDARFrame
 """
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import numpy as np
 import pytest
 import torch
@@ -35,7 +37,7 @@ from foveamap.core.exceptions import (
     PerceptionError,
 )
 from foveamap.runtime.device import resolve_device, sync_device
-from foveamap.runtime.perception import RangeUNetBackend
+from foveamap.runtime.perception import RangeUNetBackend, DevicePerceptionResult
 from foveamap.runtime.runtime import FoveaMapRuntime
 from foveamap.grid import FoveatedGrid, UNKNOWN
 from foveamap.grid_torch import TorchFoveatedGrid
@@ -118,7 +120,7 @@ def test_runtime_construction_default():
 
 def test_runtime_construction_torch_cpu_engine():
     cfg = FoveaMapConfig(
-        runtime=RuntimeConfig(device="cpu", grid_engine="torch", features_engine="numpy")
+        runtime=RuntimeConfig(device="cpu", grid_engine="torch", features_engine="torch")
     )
     runtime = FoveaMapRuntime(cfg)
     assert isinstance(runtime.grid, TorchFoveatedGrid)
@@ -132,7 +134,7 @@ def test_runtime_rejects_invalid_inputs():
 
 
 # ----------------------------------------------------------------------------
-# 3. Perception Backend Boundary Tests
+# 3. Perception Backend Boundary Tests (Host and Device Resident)
 # ----------------------------------------------------------------------------
 def test_perception_backend_produces_valid_result():
     device = torch.device("cpu")
@@ -151,6 +153,32 @@ def test_perception_backend_produces_valid_result():
     assert result.is_moving.shape == (80,)
     assert result.is_moving.dtype == bool
     assert len(backend.history) == 1
+
+
+def test_perception_backend_device_resident_tensors():
+    device = torch.device("cpu")
+    backend = RangeUNetBackend(
+        config=PerceptionConfig(num_classes=9, confidence_threshold=0.5),
+        sensor_config=SensorConfig(n_rows=64, n_cols=1024),
+        device=device,
+        features_engine="torch",
+    )
+    frame = _make_synthetic_frame(n=80)
+    dev_result = backend.predict_device(frame, dev_math=True)
+
+    assert isinstance(dev_result, DevicePerceptionResult)
+    assert torch.is_tensor(dev_result.class_probabilities)
+    assert torch.is_tensor(dev_result.moving_probabilities)
+    assert torch.is_tensor(dev_result.semantic_predictions)
+    assert torch.is_tensor(dev_result.is_moving)
+    assert torch.is_tensor(dev_result.pts_world)
+    assert dev_result.class_probabilities.device == device
+    assert dev_result.pts_world.device == device
+
+    # Verify to_host produces valid canonical PerceptionResult
+    host_res = dev_result.to_host()
+    assert isinstance(host_res, PerceptionResult)
+    assert isinstance(host_res.class_probabilities, np.ndarray)
 
 
 def test_perception_backend_rejects_missing_checkpoint():
@@ -195,6 +223,29 @@ def test_runtime_process_legacy_dict():
     assert runtime.frame_count == 1
 
 
+def test_runtime_device_resident_torch_execution():
+    """Verify that when grid_engine='torch' and features_engine='torch',
+    perception outputs are device-resident and pass directly to Torch grid."""
+    cfg = FoveaMapConfig(
+        runtime=RuntimeConfig(device="cpu", grid_engine="torch", features_engine="torch")
+    )
+    runtime = FoveaMapRuntime(cfg)
+    frame = _make_synthetic_frame(n=60)
+
+    snapshot = runtime.process(frame)
+    assert isinstance(snapshot, MapSnapshot)
+    assert snapshot.metadata.get("device_resident") is True
+
+    # Check that device-resident result was retained
+    assert runtime.last_device_perception is not None
+    assert torch.is_tensor(runtime.last_device_perception.class_probabilities)
+
+    # Check lazy to_host() conversion on last_perception property
+    host_perc = runtime.last_perception
+    assert isinstance(host_perc, PerceptionResult)
+    assert isinstance(host_perc.class_probabilities, np.ndarray)
+
+
 def test_runtime_reset_cycle():
     runtime = FoveaMapRuntime()
     frame = _make_synthetic_frame(n=50)
@@ -205,6 +256,7 @@ def test_runtime_reset_cycle():
     assert runtime.frame_count == 0
     assert runtime.last_snapshot is None
     assert runtime.last_perception is None
+    assert runtime.last_device_perception is None
     assert len(runtime.perception.history) == 0
 
 
@@ -233,7 +285,7 @@ def test_snapshot_immutability_semantics():
 
 
 # ----------------------------------------------------------------------------
-# 5. Authoritative Configuration Verification Tests
+# 5. Authoritative Configuration Propagation Tests
 # ----------------------------------------------------------------------------
 def test_terrain_config_influences_grid_cost():
     # Verify that TerrainConfig custom cost priors directly alter grid cost computation
@@ -269,8 +321,20 @@ def test_terrain_config_influences_grid_cost():
     assert np.all(cost_cust[valid_cells] >= cost_def[valid_cells])
 
 
+def test_sensor_and_perception_config_propagation():
+    sensor_cfg = SensorConfig(name="custom_sensor", n_rows=32, n_cols=512, hz=20.0)
+    perception_cfg = PerceptionConfig(confidence_threshold=0.85, fp16=False)
+    cfg = FoveaMapConfig(sensor=sensor_cfg, perception=perception_cfg)
+
+    runtime = FoveaMapRuntime(cfg)
+    assert runtime.perception.dataset_info.n_rows == 32
+    assert runtime.perception.dataset_info.n_cols == 512
+    assert runtime.perception.config.confidence_threshold == 0.85
+    assert runtime.perception.config.fp16 is False
+
+
 # ----------------------------------------------------------------------------
-# 6. Legacy Pipeline Backward Compatibility
+# 6. Legacy Pipeline Backward Compatibility & Configuration Forwarding
 # ----------------------------------------------------------------------------
 def test_legacy_pipeline_from_config_and_lidar_frame():
     cfg = FoveaMapConfig(
@@ -287,3 +351,15 @@ def test_legacy_pipeline_from_config_and_lidar_frame():
     assert "dyn" in out
     assert "stats" in out
     assert len(out["cls_pts"]) == 70
+
+
+def test_legacy_pipeline_forwards_terrain_config():
+    custom_cost = tuple([240] * 256)
+    cfg = FoveaMapConfig(
+        terrain=TerrainConfig(cost_priors=custom_cost, vehicle_clearance_m=3.0),
+        runtime=RuntimeConfig(device="cpu", grid_engine="numpy")
+    )
+    pipe = FoveaMapPipeline.from_config(cfg)
+    assert pipe.grid.terrain is not None
+    assert pipe.grid.terrain.vehicle_clearance_m == 3.0
+    assert pipe.grid.terrain.cost_priors[0] == 240
