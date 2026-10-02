@@ -2,6 +2,14 @@
 
 Extracts all hardcoded parameters and magic numbers into explicit,
 composable, and type-checked configuration objects.
+
+NOTE ON RUNTIME WIRING:
+    At this stage (Phase 1), these configuration dataclasses establish the
+    formal schemas and invariant validation rules for the production system.
+    Existing legacy runtime modules (pipeline.py, grid.py, model.py, etc.)
+    continue to operate using their existing internal defaults.
+    Active migration of the runtime execution loop to consume these configuration
+    objects directly is scheduled for Phase 2.
 """
 from __future__ import annotations
 
@@ -145,6 +153,8 @@ class SensorConfig:
             raise ConfigurationError(f"fov_up_deg ({self.fov_up_deg}) must exceed fov_down_deg ({self.fov_down_deg})")
         if self.min_range_m < 0 or self.max_range_m <= self.min_range_m:
             raise ConfigurationError(f"Invalid range bounds: [{self.min_range_m}, {self.max_range_m}]")
+        if self.hz <= 0:
+            raise ConfigurationError(f"hz must be positive, got {self.hz}")
 
 
 @dataclass(frozen=True)
@@ -162,6 +172,8 @@ class PerceptionConfig:
             raise ConfigurationError(f"num_classes must be positive, got {self.num_classes}")
         if len(self.active_classes) != self.num_classes:
             raise ConfigurationError(f"active_classes length ({len(self.active_classes)}) != num_classes ({self.num_classes})")
+        if not (0.0 <= self.confidence_threshold <= 1.0):
+            raise ConfigurationError(f"confidence_threshold must be in [0, 1], got {self.confidence_threshold}")
 
 
 @dataclass(frozen=True)
@@ -182,6 +194,12 @@ class TerrainConfig:
             raise ConfigurationError(f"step_threshold_m must be positive, got {self.step_threshold_m}")
         if self.depression_threshold_m <= 0:
             raise ConfigurationError(f"depression_threshold_m must be positive, got {self.depression_threshold_m}")
+        if self.depression_window_m <= 0:
+            raise ConfigurationError(f"depression_window_m must be positive, got {self.depression_window_m}")
+        if self.roughness_threshold_m <= 0:
+            raise ConfigurationError(f"roughness_threshold_m must be positive, got {self.roughness_threshold_m}")
+        if self.stale_age_threshold < 0:
+            raise ConfigurationError(f"stale_age_threshold must be non-negative, got {self.stale_age_threshold}")
         if len(self.cost_priors) != 256:
             raise ConfigurationError("cost_priors must have length 256")
 
