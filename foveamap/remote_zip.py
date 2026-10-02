@@ -4,6 +4,14 @@ The KITTI odometry Lidar zip is ~85 GB, more than a Colab disk holds next to
 its contents, but training only needs a subsample of scans. `zipfile` works on
 any seekable file object, so `HTTPRangeFile` serves its reads with HTTP range
 requests: the central directory once, then each wanted member's bytes.
+
+Trust boundary: this is an internal research data-loader helper, NOT a public
+API. The ``url`` argument is trusted operator configuration (e.g. a known
+dataset mirror), not externally controlled user input. To prevent accidental
+SSRF/resource abuse if wired to untrusted input, only ``http``/``https`` URLs
+are accepted and ``file://``, ``ftp://``, ``gopher://`` etc. are rejected.
+Callers exposing URLs to untrusted users must add their own allow-list,
+authentication, and size/timeout budgeting on top.
 """
 from __future__ import annotations
 
@@ -11,6 +19,7 @@ import http.client
 import io
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -18,11 +27,24 @@ import zipfile
 RETRYABLE = (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException)
 
 
+def _validate_url(url: str) -> str:
+    """Reject non-HTTP(S) URLs so this helper cannot become a file/SSRF boundary."""
+    parsed = urllib.parse.urlparse(str(url))
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"Refusing to open non-HTTP(S) URL {url!r}: only http/https dataset URLs are allowed "
+            "(this helper must not be wired directly to untrusted user input)."
+        )
+    if not parsed.hostname:
+        raise ValueError(f"Refusing to open URL with no host: {url!r}")
+    return str(url)
+
+
 class HTTPRangeFile(io.RawIOBase):
     """Seekable, read-only view of a URL (the server must honour Range requests)."""
 
     def __init__(self, url, block=1 << 20, timeout=60, retries=6, backoff=2.0):
-        self.url, self.block, self.timeout = url, block, timeout
+        self.url, self.block, self.timeout = _validate_url(url), block, timeout
         self.retries, self.backoff = retries, backoff
         self.pos = 0
         size = self._retry(lambda: self._open("bytes=0-0").headers["Content-Range"])
@@ -97,4 +119,4 @@ class HTTPRangeFile(io.RawIOBase):
 
 def open_remote_zip(url, **kw):
     """zipfile.ZipFile over HTTP. Use one per thread: the file object keeps a position."""
-    return zipfile.ZipFile(HTTPRangeFile(url, **kw))
+    return zipfile.ZipFile(HTTPRangeFile(_validate_url(url), **kw))

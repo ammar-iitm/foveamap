@@ -396,28 +396,39 @@ class MapSnapshot:
 
         Searches from finest tier to coarsest tier, returning the highest-resolution
         available cell covering the point.
+
+        Tier resolution is authoritative: the live tier's ``cell``/``r``
+        attribute is used first, then ``metadata["tier_configs"]`` (populated
+        by :class:`FoveaMapRuntime` from the active ``GridConfig``). No
+        inferred ``0.05 * 2**tier`` fallback is used — a tier whose resolution
+        is unknown is skipped rather than misinterpreted under another
+        profile's geometry.
         """
+        stale_thresh = self.metadata.get("stale_age_threshold", 20)
         for t_idx, tier in enumerate(self.tier_states):
             ox, oy = self.origins[t_idx]
             r = getattr(tier, "cell", getattr(tier, "r", None))
             if r is None:
                 tier_cfgs = self.metadata.get("tier_configs")
                 if tier_cfgs and t_idx < len(tier_cfgs):
-                    r = tier_cfgs[t_idx].get("cell_size_m")
+                    cfg = tier_cfgs[t_idx]
+                    r = cfg.get("cell_size_m") if isinstance(cfg, dict) else getattr(cfg, "cell_size_m", None)
             if r is None:
-                r = 0.05 * (2 ** t_idx)
+                # Authoritative resolution unknown: skip instead of guessing.
+                continue
             n = getattr(tier, "n", 200)
-            cx = int(np.floor(x / r)) - int(ox)
-            cy = int(np.floor(y / r)) - int(oy)
+            cx = int(np.floor(x / float(r))) - int(ox)
+            cy = int(np.floor(y / float(r))) - int(oy)
             if 0 <= cx < n and 0 <= cy < n:
                 cnt = int(tier.count[cx, cy])
                 age = int(tier.age[cx, cy])
+                cls_v = int(tier.cls[cx, cy])
                 dyn = bool(tier.dynamic[cx, cy])
                 if dyn:
                     state = "OBSERVED_DYNAMIC"
-                elif cnt == 0:
+                elif cnt == 0 or cls_v == 255:
                     state = "UNKNOWN"
-                elif age >= 20:
+                elif age >= int(stale_thresh):
                     state = "STALE"
                 else:
                     state = "OBSERVED_STATIC"
@@ -433,7 +444,7 @@ class MapSnapshot:
                     "max_z": float(tier.max_z[cx, cy]),
                     "ground": float(tier.ground[cx, cy]),
                     "roughness": float(tier.roughness[cx, cy]),
-                    "dominant_class": int(tier.cls[cx, cy]),
+                    "dominant_class": cls_v,
                     "confidence": float(tier.conf[cx, cy]),
                     "secondary_class": sec_c,
                     "secondary_confidence": sec_conf,

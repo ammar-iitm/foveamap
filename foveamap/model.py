@@ -58,7 +58,15 @@ def pick_device(pref: str | None = None):
 def load_model(ckpt, device=None):
     device = pick_device(device) if not isinstance(device, torch.device) else device
     m = RangeUNet()
-    m.load_state_dict(torch.load(ckpt, map_location="cpu"))
+    # Safe weights-only load: checkpoint must contain only tensors. Untrusted
+    # or legacy pickle payloads are rejected instead of executed.
+    try:
+        state = torch.load(ckpt, map_location="cpu", weights_only=True)
+    except FileNotFoundError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Failed to safely load checkpoint '{ckpt}': {exc}") from exc
+    m.load_state_dict(state)
     return m.to(device).eval()
 
 

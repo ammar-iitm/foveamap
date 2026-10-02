@@ -156,7 +156,8 @@ def main():
 
     model = RangeUNet()
     if args.init:
-        model.load_state_dict(torch.load(args.init, map_location="cpu"))
+        # weights_only=True prevents arbitrary pickle execution from init checkpoints.
+        model.load_state_dict(torch.load(args.init, map_location="cpu", weights_only=True))
         print("initialised from", args.init)
         if args.reset_head:
             model.sem.reset_parameters()

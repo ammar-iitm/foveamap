@@ -221,6 +221,15 @@ class FoveaMapRuntime:
                 "grid_engine": self.config.runtime.grid_engine,
                 "device": str(self.device_ctx.device),
                 "device_resident": on_dev,
+                # Authoritative tier geometry so MapSnapshot.query_point cannot
+                # misinterpret this snapshot under another profile.
+                "tier_configs": [
+                    {"cell_size_m": float(t.cell), "half_extent_m": float(t.half), "n": int(t.n)}
+                    for t in self.grid.tiers
+                ],
+                "profile_name": getattr(self.config.grid, "profile_name", ""),
+                "stale_age_threshold": int(self.config.terrain.stale_age_threshold),
+                "max_stale_age": int(self.config.terrain.max_stale_age),
                 "timing": timing if self.config.runtime.enable_profiling else {},
             },
         )

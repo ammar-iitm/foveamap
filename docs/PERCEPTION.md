@@ -166,7 +166,8 @@ On-device zero-copy tensor container:
 1. **Mandatory Checkpoint**: `backend_type="range_unet"` requires a valid checkpoint path. If `checkpoint_path is None`, initialization raises `ConfigurationError`. If the file does not exist, initialization raises `CheckpointNotFoundError`.
 2. **No Silent Random Inference**: Randomly initialized neural network weights are prohibited in production pipelines.
 3. **Opt-in Untrained Mode**: An explicit flag `allow_untrained=True` is provided solely for headless unit testing.
-4. **Lifecycle**: Weights are loaded once during initialization. Model parameters are frozen in `model.eval()`, and all inference runs under `@torch.inference_mode()`.
+4. **Safe deserialization**: all checkpoint loads use `torch.load(..., weights_only=True)` so only tensor payloads are accepted; legacy pickle/object payloads are rejected instead of executed. Class-count mismatch (`sem.weight` rows != 9) and missing/invalid files fail clearly. The same policy applies to `foveamap.model.load_model` and `scripts/train.py --init`.
+5. **Lifecycle**: Weights are loaded once during initialization. Model parameters are frozen in `model.eval()`, and all inference runs under `@torch.inference_mode()`.
 
 ---
 

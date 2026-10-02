@@ -21,7 +21,7 @@ Dynamic Observation Layer (isolated per-frame rebuild, zero ghost trails)
               ↓
 2.5D Terrain & Cost Derivation (slope, step edges, depressions, clearance)
               ↓
-Published MapSnapshot Contract (detached, frozen, immutable)
+Published MapSnapshot Contract (detached snapshot-owned data)
 ```
 
 Both reference **NumPy** (`foveamap.grid.FoveatedGrid`) and device **PyTorch** (`foveamap.grid_torch.TorchFoveatedGrid`) implementations enforce exact numerical and structural equivalence across CPU and GPU devices.
@@ -115,8 +115,9 @@ $$\text{UNKNOWN} \xrightarrow{\text{point return}} \text{OBSERVED} \xrightarrow[
 When `enable_ray_clearing` is enabled:
 * LiDAR beams from the sensor origin to observed obstacle returns traverse free-space cells before the return.
 * Cells traversed by beams increment a conservative `free_passes` counter.
-* If a cell has no observation in the current frame and receives $\ge \text{free\_clear\_frames}$ (default 3), its previous static obstacle occupancy is cleared back to `UNKNOWN`.
-* **Safety Invariant**: Cells behind the obstacle return are strictly protected and never cleared.
+* If a cell has no observation in the current frame and receives $\ge \text{free\_clear\_frames}$ (default 3) **consecutive** frames, its previous static obstacle occupancy is cleared back to `UNKNOWN`. Any frame without traversal resets the streak.
+* **Safety Invariants**: cells behind the obstacle return are never cleared; ground classes are never cleared; dynamic-obstacle cells are never cleared; occluded regions are never cleared.
+* Both engines enforce identical guards: NumPy (`FoveatedGrid._clear_rays`) and Torch (`TorchFoveatedGrid._clear_rays` device override with explicit host-boundary ray sampling).
 
 ---
 
@@ -149,13 +150,25 @@ Each tier allocates a compact Structure-of-Arrays (SoA) layout:
 | `z_max` | `float16` | 2 | Maximum elevation |
 | `ground` | `float16` | 2 | Estimated ground elevation |
 | `rough` | `float16` | 2 | Ground surface roughness ($\sigma$) |
-| `cls` | `uint8` | 1 | Dominant semantic class |
-| `conf` | `uint8` | 1 | Classification confidence $[0, 255]$ |
-| `flags` | `uint8` | 1 | Feature flags (overhang, step, slope, gcls) |
+| `cls` | `uint8` | 1 | Dominant semantic class (255=UNKNOWN) |
+| `conf` | `uint8` | 1 | Packed confidence: upper nibble primary conf, lower nibble secondary conf (each /15) |
+| `flags` | `uint8` | 1 | Low nibble terrain flags (overhang/step/slope/depression); high nibble secondary-evidence class (0xF=none, else 0..8) |
 | `clear` | `uint8` | 1 | Overhang clearance in 2 cm units |
 | `cost` | `uint8` | 1 | Traversability cost $[0, 255]$ |
 | `age` | `uint8` | 1 | Frames since last direct observation |
 | **Total** | | **16** | **Bytes per persistent cell** |
+
+### Secondary-evidence semantics (flags high nibble + conf low nibble)
+
+The pair stores the most relevant non-dominant class **with its own matching
+confidence** (never mixed). A distinct ground class
+(road/sidewalk/parking/terrain) is preferred when confidently present
+(overhang/underpass case); otherwise the fused runner-up (top-2) is stored.
+`secondary_class` maps the `0xF` sentinel to `UNKNOWN` (255) for parity
+between NumPy, Torch, and the query API. Effective class
+(`eff_cls`, passable-under) uses the stored class **only when it is a ground
+class** and clearance >= `vehicle_clearance_m` (2.5 m); a non-ground
+runner-up (pole/vegetation/building) never becomes effective.
 
 ### Memory Reduction Benchmark vs. Uniform 5 cm Baseline
 

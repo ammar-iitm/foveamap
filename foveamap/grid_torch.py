@@ -42,13 +42,16 @@ from .grid import (
     SLOPE_THRESH,
     SLOPE_CRIT,
 )
-from .core.ontology import PERSON, VEHICLE, NUM_CLASSES
+from .core.ontology import PERSON, VEHICLE, NUM_CLASSES, GROUND_CLASSES
 from .core.config import GridConfig, TerrainConfig
 
 # clearance thresholds evaluated in float64 on the stored 2 cm code, exactly as the NumPy engine does
 _CLEAR_CODES = np.arange(256) * 0.02
 OVERHANG_LUT = (_CLEAR_CODES > 0.5) & (np.arange(256) != UNKNOWN)
 PASS_UNDER_LUT = OVERHANG_LUT & (_CLEAR_CODES >= VEHICLE_CLEARANCE)
+
+# Ground-class lookup on device (road/sidewalk/parking/terrain only).
+_GROUND_IDS = torch.tensor(list(GROUND_CLASSES), dtype=torch.long)
 
 
 class TorchTierLayers:
@@ -79,7 +82,11 @@ class TorchTierLayers:
 
     @property
     def eff_cls(self) -> torch.Tensor:
-        """Effective class view (passable under overhangs)."""
+        """Effective class view (passable under overhangs).
+
+        Uses the stored secondary-evidence class only when it is a ground
+        class; a non-ground runner-up never becomes effective.
+        """
         if self._eff_cls is not None:
             return self._eff_cls
         cls = self.cls.long()
@@ -88,7 +95,8 @@ class TorchTierLayers:
         valid_g = ground.isfinite()
         clear = self.clear.long()
         pass_under = torch.as_tensor(PASS_UNDER_LUT, device=self.device)
-        passable = pass_under[clear.clamp(0, 255)] & valid_g & (gcls != 0xF)
+        is_ground = torch.isin(gcls, _GROUND_IDS.to(self.device))
+        passable = pass_under[clear.clamp(0, 255)] & valid_g & is_ground
         eff = torch.where(passable, gcls, cls)
         return torch.where(cls == UNKNOWN, UNKNOWN, eff).to(torch.uint8)
 
@@ -531,21 +539,36 @@ class TorchFoveatedGrid(FoveatedGrid):
         new_c = q.argmax(1).to(torch.uint8)
         s.cls[i, j] = new_c
         q_sum = q.sum(1).clamp(min=1e-9)
-        # Persistent top-2 secondary class evidence & confidences
+        # Persistent secondary evidence (flags upper nibble + conf lower nibble).
+        # Same unambiguous semantics as the NumPy engine: prefer a distinct
+        # confident ground class, else the fused runner-up; confidence always
+        # belongs to the stored class.
         q_sec = q.clone()
         q_sec[torch.arange(len(new_c), device=q.device), new_c.long()] = -1.0
         sec_c = q_sec.argmax(dim=1)
-        sec_conf = q_sec.max(dim=1).values.clamp(min=0.0) / q_sum
-        has_sec = sec_conf > 0.02
-        sec_c_id = torch.where(has_sec, sec_c.to(torch.uint8), torch.tensor(0xF, dtype=torch.uint8, device=q.device))
-        sec_conf_4bit = (sec_conf * 15.0).round().clamp(0, 15).to(torch.uint8)
+        sec_conf_runner = q_sec.max(dim=1).values.clamp(min=0.0) / q_sum
+        has_runner = sec_conf_runner > 0.02
+        pg = torch.where(self._ground_mask[None, :], q, 0)
+        pg_sum = pg.sum(1)
+        gcls = torch.where(pg_sum > 0.05 * q_sum, pg.argmax(1), 0xF)
+        gconf = torch.where(pg_sum > 0, pg.max(dim=1).values / q_sum, 0.0)
+        use_ground = (gcls != 0xF) & (gcls != new_c.long()) & (gconf > 0.02)
+        final_sec = torch.where(
+            use_ground, gcls,
+            torch.where(has_runner, sec_c, torch.tensor(0xF, dtype=torch.long, device=q.device)),
+        )
+        final_sec_conf = torch.where(
+            use_ground, gconf,
+            torch.where(has_runner, sec_conf_runner, torch.tensor(0.0, dtype=q.dtype, device=q.device)),
+        )
+        has_sec = use_ground | has_runner
+        sec_c_id = torch.where(has_sec, final_sec.to(torch.uint8), torch.tensor(0xF, dtype=torch.uint8, device=q.device))
+        sec_conf_4bit = (final_sec_conf * 15.0).round().clamp(0, 15).to(torch.uint8)
         prim_conf_4bit = ((q.max(1).values / q_sum) * 15.0).round().clamp(0, 15).to(torch.uint8)
         s.conf[i, j] = (prim_conf_4bit << 4) | (sec_conf_4bit & 0x0F)
 
-        # ground class in flags high nibble
-        pg = torch.where(self._ground_mask[None, :], p, 0)
-        gcls = torch.where(pg.sum(1) > 0.05, pg.argmax(1), 0xF)
-        keep_sec = torch.where((gcls != 0xF) & (gcls != new_c.long()), gcls, sec_c_id.long())
+        # Secondary-evidence nibble stores the class selected above.
+        keep_sec = sec_c_id.long()
 
         # ---- heights
         g_new = st["ground"][obs]
@@ -624,9 +647,10 @@ class TorchFoveatedGrid(FoveatedGrid):
         valid_g = ground.isfinite()
         clear = s.clear.long()
 
-        # 1. Overhang
+        # 1. Overhang (passable only for ground-class secondary evidence)
         overhang = self._overhang[clear] & valid_g
-        passable_under = self._pass_under[clear] & valid_g & (gcls != 0xF)
+        is_ground = torch.isin(gcls, _GROUND_IDS.to(s.cls.device))
+        passable_under = self._pass_under[clear] & valid_g & is_ground
         eff_cls = torch.where(passable_under, gcls, cls)
 
         # 2. Steps
@@ -708,6 +732,113 @@ class TorchFoveatedGrid(FoveatedGrid):
         s.cost[:] = torch.where(unknown, UNKNOWN, cost).to(torch.uint8)
         s.flags[:] = (s.flags & 0xF0) | flags.to(torch.uint8)
         s._eff_cls = torch.where(unknown, UNKNOWN, eff_cls).to(torch.uint8)
+
+    def _clear_rays(self, sensor_origin: Any, stats: list[dict[str, Any]]) -> None:
+        """Conservative 2.5D ray clearing on device (Torch override).
+
+        Mirrors :meth:`FoveatedGrid._clear_rays` semantics with identical
+        consecutive-frame, ground-class, and dynamic-obstacle guards. Ray
+        geometry uses a small host-side sampling loop (explicit host boundary;
+        ray clearing is disabled by default and not part of the production CUDA
+        hot path), while state updates remain on-device.
+        """
+        import numpy as _np
+
+        so = _np.asarray(
+            sensor_origin.cpu().numpy() if torch.is_tensor(sensor_origin) else sensor_origin,
+            dtype=_np.float64,
+        )
+        free_thresh = self.terrain.free_clear_frames if self.terrain is not None else 3
+        ground_ids = set(int(v) for v in GROUND_CLASSES)
+
+        for tier_idx, (t, s, st) in enumerate(zip(self.tiers, self.state, stats)):
+            key = st["key"]
+            n_static = st["n_static"]
+            if torch.is_tensor(key):
+                obs_mask = (n_static > 0).cpu().numpy()
+                k_obs = key.detach().cpu().numpy()[obs_mask]
+            else:
+                k_obs = _np.asarray(key)[_np.asarray(n_static) > 0]
+            if len(k_obs) == 0:
+                s.free_passes.zero_()
+                continue
+            obs_set = set(int(v) for v in k_obs.tolist())
+            step_sz = max(1, len(k_obs) // 500)
+            sample_keys = k_obs[::step_sz]
+            ci = sample_keys // t.n
+            cj = sample_keys % t.n
+            org = _np.asarray(
+                self.origins[tier_idx].cpu().numpy()
+                if torch.is_tensor(self.origins[tier_idx])
+                else self.origins[tier_idx]
+            )
+            target_xy = (_np.stack([ci, cj], 1) + org + 0.5) * t.cell
+            vec = target_xy - so[:2]
+            dist = _np.hypot(vec[:, 0], vec[:, 1])
+            valid = (dist > 1.0) & (dist < 80.0)
+            if not valid.any():
+                s.free_passes.zero_()
+                continue
+            vec = vec[valid]
+            dist = dist[valid]
+            u = vec / dist[:, None]
+
+            traversed: set[tuple[int, int]] = set()
+            for d_ray, u_ray in zip(dist, u):
+                n_samples = max(1, int((d_ray - 1.5 * t.cell - 1.0) / t.cell))
+                if n_samples <= 0:
+                    continue
+                samples = _np.linspace(1.0, d_ray - 1.5 * t.cell, n_samples)
+                pts_ray = so[:2] + samples[:, None] * u_ray
+                ij_ray = _np.floor(pts_ray / t.cell).astype(_np.int64) - org
+                in_w = (
+                    (ij_ray[:, 0] >= 0) & (ij_ray[:, 0] < t.n)
+                    & (ij_ray[:, 1] >= 0) & (ij_ray[:, 1] < t.n)
+                )
+                if not in_w.any():
+                    continue
+                for c_i, c_j in ij_ray[in_w]:
+                    if int(c_i) * t.n + int(c_j) in obs_set:
+                        continue
+                    traversed.add((int(c_i), int(c_j)))
+
+            # Reset streaks not traversed this frame (device-resident).
+            if traversed:
+                trav_mask = torch.zeros((t.n, t.n), dtype=torch.bool, device=self.device)
+                ti = torch.tensor([c[0] for c in traversed], dtype=torch.long, device=self.device)
+                tj = torch.tensor([c[1] for c in traversed], dtype=torch.long, device=self.device)
+                trav_mask[ti, tj] = True
+                s.free_passes[~trav_mask & (s.free_passes > 0)] = 0
+                # Increment streaks on-device.
+                s.free_passes[ti, tj] = (s.free_passes[ti, tj].int() + 1).clamp(max=255).to(torch.uint8)
+            else:
+                s.free_passes[s.free_passes > 0] = 0
+                continue
+
+            # Clear obstacles reaching threshold (host-indexed, device-applied).
+            # Read minimal host copies for the traversed cells only.
+            cls_h = s.cls.cpu().numpy()
+            dyn_h = s.dynamic_mask.cpu().numpy()
+            for c_i, c_j in traversed:
+                if int(s.free_passes[c_i, c_j].item()) < free_thresh:
+                    continue
+                if bool(dyn_h[c_i, c_j]):
+                    s.free_passes[c_i, c_j] = 0
+                    continue
+                c = int(cls_h[c_i, c_j])
+                if c != UNKNOWN and c not in ground_ids:
+                    s.cls[c_i, c_j] = UNKNOWN
+                    s.conf[c_i, c_j] = 0
+                    s.cost[c_i, c_j] = UNKNOWN
+                    s.count16[c_i, c_j] = 0
+                    s.ground[c_i, c_j] = float("nan")
+                    s.z_min[c_i, c_j] = float("nan")
+                    s.z_max[c_i, c_j] = float("nan")
+                    s.rough[c_i, c_j] = float("nan")
+                    s.clear[c_i, c_j] = UNKNOWN
+                    s.flags[c_i, c_j] = 0xF0
+                    s.age[c_i, c_j] = UNKNOWN
+                    s.free_passes[c_i, c_j] = 0
 
     def reset(self) -> None:
         """Reset internal grid state completely."""

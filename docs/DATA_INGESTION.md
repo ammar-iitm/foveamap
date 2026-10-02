@@ -94,6 +94,8 @@ File parsers in `foveamap.data.file` reject corrupt data with clear `DataAdapter
   - Automatically identifies 3-, 4-, or 5-float point formats, or accepts explicit `columns`.
 - **NPY / NPZ (`.npy`, `.npz`)**:
   - Supports 2D arrays (`(N, >=3)`) and `.npz` archives with `pts`, `intensity`, `ring` keys.
+  - Uses `allow_pickle=False` so malicious pickle payloads cannot execute.
+- **Remote ZIP (`foveamap.remote_zip`)**: internal research data-loader helper, not a public API. Only `http`/`https` URLs are accepted (`file://`, `ftp://` rejected); the URL is trusted operator configuration, not untrusted user input. Callers exposing URLs publicly must add their own allow-list and budgeting.
 
 ---
 

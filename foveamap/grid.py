@@ -25,8 +25,17 @@ Design (see Architecture Vision, sections 5-7 & PRD):
 
 Persistent record per cell = 16 bytes (structure-of-arrays):
     count u16 | z_min f16 | z_max f16 | ground f16 | rough f16 |
-    cls u8 | conf u8 | flags u8 (bits0-3 flags, bits4-7 ground class) |
+    cls u8 | conf u8 (upper nibble primary conf, lower nibble secondary conf) |
+    flags u8 (bits0-3 terrain flags, bits4-7 secondary-evidence class, 0xF=none) |
     clear u8 (2 cm units) | cost u8 | age u8
+
+Secondary-evidence semantics (flags upper nibble + conf lower nibble):
+    The pair stores the most relevant non-dominant class with its own matching
+    confidence. A distinct ground class (road/sidewalk/parking/terrain) is
+    preferred when confidently present (overhang/underpass case); otherwise the
+    fused runner-up (top-2) is stored. The confidence nibble always belongs to
+    the stored class. Effective class (passable-under) uses the stored class
+    only when it is a ground class and clearance >= vehicle_clearance_m.
 """
 from __future__ import annotations
 
@@ -120,12 +129,23 @@ class TierLayers:
 
     @property
     def secondary_class(self) -> np.ndarray:
-        """Secondary runner-up class ID (0..8 or 0xF for none) stored in flags upper nibble."""
-        return (self.flags >> 4).astype(np.uint8)
+        """Secondary evidence class ID (0..8, or UNKNOWN=255 for none).
+
+        Upper nibble of ``flags`` stores 0xF when no secondary evidence exists;
+        this accessor maps that sentinel to UNKNOWN for parity with the Torch
+        engine and the query API.
+        """
+        nid = (self.flags >> 4).astype(np.uint8)
+        return np.where(nid == 0xF, UNKNOWN, nid).astype(np.uint8)
 
     @property
     def secondary_confidence(self) -> np.ndarray:
-        """Secondary runner-up confidence (0.0 to 1.0) stored in conf lower nibble."""
+        """Secondary evidence confidence (0.0 to 1.0) stored in conf lower nibble.
+
+        This confidence always belongs to :meth:`secondary_class`: when the
+        stored nibble prefers a distinct ground class, the confidence is the
+        ground-class confidence, otherwise it is the runner-up confidence.
+        """
         return ((self.conf & 0x0F).astype(np.float32) / 15.0)
 
     @property
@@ -145,8 +165,11 @@ class TierLayers:
 
     @property
     def aux_nbytes(self) -> int:
-        """Total bytes for transient/auxiliary buffers (dynamic mask and free-space streak)."""
-        return self.dynamic_mask.nbytes + self.free_passes.nbytes
+        """Total bytes for transient/auxiliary buffers (dynamic mask, free-space streak, cached views)."""
+        b = self.dynamic_mask.nbytes + self.free_passes.nbytes
+        if self._eff_cls is not None:
+            b += self._eff_cls.nbytes
+        return b
 
     @property
     def eff_cls(self) -> np.ndarray:
@@ -158,7 +181,8 @@ class TierLayers:
         valid_g = np.isfinite(self.ground)
         clear_m = np.where(self.clear != UNKNOWN, self.clear * 0.02, np.nan)
         overhang = np.isfinite(clear_m) & (clear_m > 0.5) & valid_g
-        passable_under = overhang & (clear_m >= VEHICLE_CLEARANCE) & (gcls in GROUND_CLASSES)
+        is_ground = np.isin(gcls, list(GROUND_CLASSES))
+        passable_under = overhang & (clear_m >= VEHICLE_CLEARANCE) & is_ground
         eff = np.where(passable_under, gcls, cls)
         return np.where(cls == UNKNOWN, UNKNOWN, eff).astype(np.uint8)
 
@@ -181,23 +205,6 @@ class TierLayers:
     @property
     def clearance(self) -> np.ndarray:
         return self.clear
-
-    @property
-    def dynamic(self) -> np.ndarray:
-        return self.dynamic_mask
-
-    @property
-    def nbytes(self) -> int:
-        """Measured persistent memory bytes strictly for the 16 bytes/cell state."""
-        return sum(getattr(self, f).nbytes for f in self.FIELDS)
-
-    @property
-    def aux_nbytes(self) -> int:
-        """Auxiliary memory bytes (ray clearing counter and cached views)."""
-        b = self.free_passes.nbytes + self.dynamic_mask.nbytes
-        if self._eff_cls is not None:
-            b += self._eff_cls.nbytes
-        return b
 
     def copy(self) -> TierLayers:
         out = TierLayers(self.n, cell_size_m=self.cell, half_extent_m=self.half)
@@ -586,22 +593,33 @@ class FoveatedGrid:
         new_c = q.argmax(1)
         s.cls[i, j] = new_c
         q_sum = np.maximum(q.sum(1), 1e-9)
-        # Persistent top-2 secondary class evidence & confidences
+        # Persistent secondary evidence (16-byte cell: flags upper nibble + conf lower nibble).
+        # Semantics (documented, unambiguous): the stored pair is the most relevant
+        # non-dominant class with its own matching confidence. A distinct ground
+        # class is preferred when confidently present (overhang/underpass case);
+        # otherwise the fused runner-up (top-2) is stored. Confidence always
+        # belongs to the stored class — never mixed.
         q_sec = q.copy()
         q_sec[np.arange(len(new_c)), new_c] = -1.0
         sec_c = q_sec.argmax(1)
-        sec_conf = np.maximum(q_sec.max(1), 0.0) / q_sum
-        has_sec = sec_conf > 0.02
-        sec_c_id = np.where(has_sec, sec_c, 0xF).astype(np.uint8)
-        sec_conf_4bit = np.clip(np.round(sec_conf * 15.0), 0, 15).astype(np.uint8)
+        sec_conf_runner = np.maximum(q_sec.max(1), 0.0) / q_sum
+        has_runner = sec_conf_runner > 0.02
+        # Ground-class evidence from the fused distribution (stable across frames).
+        pg = np.where(GROUND_MASK[None, :], q, 0.0)
+        pg_sum = pg.sum(1)
+        gcls = np.where(pg_sum > 0.05 * q_sum, pg.argmax(1), 0xF)
+        gconf = np.where(pg_sum > 0.0, pg.max(1) / q_sum, 0.0)
+        use_ground = (gcls != 0xF) & (gcls != new_c) & (gconf > 0.02)
+        final_sec = np.where(use_ground, gcls, np.where(has_runner, sec_c, 0xF)).astype(np.uint8)
+        final_sec_conf = np.where(use_ground, gconf, np.where(has_runner, sec_conf_runner, 0.0))
+        has_sec = use_ground | has_runner
+        sec_c_id = np.where(has_sec, final_sec, 0xF).astype(np.uint8)
+        sec_conf_4bit = np.clip(np.round(final_sec_conf * 15.0), 0, 15).astype(np.uint8)
         prim_conf_4bit = np.clip(np.round((q.max(1) / q_sum) * 15.0), 0, 15).astype(np.uint8)
         s.conf[i, j] = (prim_conf_4bit << 4) | (sec_conf_4bit & 0x0F)
 
-        # ground class (argmax over ground classes only)
-        pg = np.where(GROUND_MASK[None, :], p, 0.0)
-        gcls = np.where(pg.sum(1) > 0.05, pg.argmax(1), 0xF)
-        # If ground class is distinct from dominant obstacle, prefer it in flags high nibble
-        keep_sec = np.where((gcls != 0xF) & (gcls != new_c), gcls, sec_c_id)
+        # Ground/secondary nibble stores the secondary evidence class above.
+        keep_sec = sec_c_id
 
         # ---- heights
         g_new = st["ground"][obs]
@@ -688,7 +706,10 @@ class FoveatedGrid:
         clear_m = np.where(s.clear != UNKNOWN, s.clear * 0.02, np.nan)
         overhang = np.isfinite(clear_m) & (clear_m > 0.5) & valid_g
         flags |= np.where(overhang, F_OVERHANG, 0).astype(np.uint8)
-        passable_under = overhang & (clear_m >= veh_clearance) & (gcls != 0xF)
+        # Passable only when the stored secondary evidence is a ground class
+        # (road/sidewalk/parking/terrain). A non-ground runner-up (pole,
+        # vegetation, building) must never become the effective class.
+        passable_under = overhang & (clear_m >= veh_clearance) & np.isin(gcls, list(GROUND_CLASSES))
         eff_cls = np.where(passable_under, gcls, cls)
 
         # 2. Step edges: height jump to neighbour 1 or 2 cells away
@@ -837,7 +858,10 @@ class FoveatedGrid:
             for c_i, c_j in traversed_this_frame:
                 s.free_passes[c_i, c_j] += 1
                 if s.free_passes[c_i, c_j] >= free_thresh:
-                    # Clear previously marked static obstacle, transition to UNKNOWN
+                    # Never clear dynamic obstacles, ground classes, or UNKNOWN.
+                    if bool(s.dynamic_mask[c_i, c_j]):
+                        s.free_passes[c_i, c_j] = 0
+                        continue
                     if s.cls[c_i, c_j] != UNKNOWN and s.cls[c_i, c_j] not in GROUND_CLASSES:
                         s.cls[c_i, c_j] = UNKNOWN
                         s.conf[c_i, c_j] = 0
