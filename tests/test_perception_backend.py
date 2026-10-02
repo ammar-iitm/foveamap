@@ -9,19 +9,21 @@ import torch
 
 from foveamap.core.contracts import LiDARFrame, PerceptionResult
 from foveamap.core.config import PerceptionConfig, SensorConfig, FoveaMapConfig, RuntimeConfig
-from foveamap.core.exceptions import ConfigurationError, ContractError, PerceptionError
+from foveamap.core.exceptions import ConfigurationError, ContractError, PerceptionError, NumericalConsistencyError
+from foveamap.core.ontology import CANONICAL_CLASSES, NUM_CLASSES, ROAD, SIDEWALK, BUILDING, VEHICLE, PERSON
 from foveamap.runtime.perception import (
+    CheckpointNotFoundError,
     PerceptionBackend,
     RangeUNetBackend,
     ClassicalFallbackBackend,
     DevicePerceptionResult,
+    DeviceTemporalState,
+    DeviceTemporalSweep,
     create_perception_backend,
     register_perception_backend,
     list_perception_backends,
 )
 from foveamap.runtime import FoveaMapRuntime
-from foveamap.sim import simulate_sequence
-from foveamap.frames import sim_frames
 from foveamap.data.sim import SimulatorSource
 
 
@@ -38,7 +40,7 @@ def test_frame() -> LiDARFrame:
 
 
 # ---------------------------------------------------------------------------
-# 1. Backend Lifecycle & Contract Tests
+# 1. Backend Lifecycle & Checkpoint Safety Tests
 # ---------------------------------------------------------------------------
 def test_range_unet_backend_initialization():
     p_cfg = PerceptionConfig(
@@ -59,14 +61,46 @@ def test_range_unet_backend_initialization():
     assert backend.model.training is False  # Must be in eval mode
 
 
+def test_range_unet_backend_checkpoint_none_rejected():
+    """Production configuration must reject checkpoint_path=None to avoid random weights."""
+    p_cfg = PerceptionConfig(checkpoint_path=None, num_classes=9)
+    s_cfg = SensorConfig(name="sim", n_rows=64, n_cols=1024)
+    dev = torch.device("cpu")
+
+    with pytest.raises(ConfigurationError, match="requires a valid checkpoint_path in production"):
+        RangeUNetBackend(p_cfg, s_cfg, dev, allow_untrained=False)
+
+
 def test_range_unet_backend_missing_checkpoint():
+    """Non-existent checkpoint file must raise CheckpointNotFoundError (both PerceptionError and ConfigurationError)."""
     p_cfg = PerceptionConfig(
         checkpoint_path="nonexistent_fake_checkpoint_12345.pt",
         num_classes=9,
     )
     s_cfg = SensorConfig(name="sim", n_rows=64, n_cols=1024)
-    with pytest.raises(PerceptionError, match="checkpoint file not found"):
+    with pytest.raises(CheckpointNotFoundError, match="checkpoint file not found"):
         RangeUNetBackend(p_cfg, s_cfg, torch.device("cpu"))
+
+
+def test_range_unet_backend_num_classes_mismatch():
+    """Model architecture and canonical ontology require num_classes=9; reject incompatible configs."""
+    p_cfg = PerceptionConfig(
+        checkpoint_path=CHECKPOINT_PATH,
+        num_classes=5,
+        active_classes=(True,) * 5,
+    )
+    s_cfg = SensorConfig(name="sim", n_rows=64, n_cols=1024)
+    with pytest.raises(ConfigurationError, match="require num_classes=9"):
+        RangeUNetBackend(p_cfg, s_cfg, torch.device("cpu"))
+
+
+def test_range_unet_backend_untrained_opt_in():
+    """Explicit allow_untrained=True permits structural testing without checkpoint."""
+    p_cfg = PerceptionConfig(checkpoint_path=None, num_classes=9)
+    s_cfg = SensorConfig(name="sim", n_rows=64, n_cols=1024)
+    backend = RangeUNetBackend(p_cfg, s_cfg, torch.device("cpu"), allow_untrained=True)
+    assert backend.is_ready is True
+    assert backend.checkpoint_path is None
 
 
 def test_classical_fallback_backend(test_frame):
@@ -193,7 +227,193 @@ def test_device_perception_result_to_host(test_frame):
 
 
 # ---------------------------------------------------------------------------
-# 4. Latency Timing Instrumentation
+# 4. Multi-Frame Temporal State & Device Residency Tests
+# ---------------------------------------------------------------------------
+def test_temporal_state_device_residency_and_boundedness():
+    """Verify that multi-frame temporal history stays on device and is bounded to 2 sweeps."""
+    dev = torch.device("cpu")
+    backend = RangeUNetBackend(
+        config=PerceptionConfig(num_classes=9),
+        sensor_config=SensorConfig(n_rows=64, n_cols=1024),
+        device=dev,
+        features_engine="torch",
+    )
+    source = SimulatorSource(n_steps=4, seed=123)
+
+    # Frame 1
+    res1 = backend.predict_device(source[0], dev_math=True)
+    assert len(backend._device_temporal_state) == 1
+    assert backend._device_temporal_state.sweeps[0].pts_world.device == dev
+    assert len(backend.history) == 1
+
+    # Frame 2
+    res2 = backend.predict_device(source[1], dev_math=True)
+    assert len(backend._device_temporal_state) == 2
+    assert len(backend.history) == 2
+
+    # Frame 3 (history must be bounded at max 2 sweeps)
+    res3 = backend.predict_device(source[2], dev_math=True)
+    assert len(backend._device_temporal_state) == 2
+    assert len(backend.history) == 2
+
+    # Frame 4
+    res4 = backend.predict_device(source[3], dev_math=True)
+    assert len(backend._device_temporal_state) == 2
+
+    # Check reset behavior
+    backend.reset()
+    assert len(backend._device_temporal_state) == 0
+    assert len(backend.history) == 0
+
+
+def test_temporal_state_100_frames_longevity():
+    """Verify that long streams do not leak memory or accumulate autograd graphs."""
+    backend = RangeUNetBackend(
+        config=PerceptionConfig(num_classes=9),
+        sensor_config=SensorConfig(n_rows=64, n_cols=1024),
+        device=torch.device("cpu"),
+        features_engine="torch",
+    )
+    frame = SimulatorSource(n_steps=1, seed=42)[0]
+
+    for _ in range(100):
+        res = backend.predict_device(frame, dev_math=True)
+        assert len(backend._device_temporal_state) <= 2
+
+    assert len(backend._device_temporal_state) == 2
+    for sw in backend._device_temporal_state.sweeps:
+        assert sw.pts_world.grad_fn is None
+        assert sw.pts_world.requires_grad is False
+
+
+def test_predict_device_argument_validation(test_frame):
+    """Verify that backend.predict() validates requested device matching backend device."""
+    backend = RangeUNetBackend(
+        config=PerceptionConfig(num_classes=9),
+        sensor_config=SensorConfig(),
+        device=torch.device("cpu"),
+    )
+    # Valid matching device
+    res = backend.predict(test_frame, device=torch.device("cpu"))
+    assert isinstance(res, PerceptionResult)
+
+    # Incompatible device request
+    incompatible = torch.device("cuda:0" if torch.cuda.is_available() else "mps")
+    with pytest.raises(ConfigurationError, match="initialized on device"):
+        backend.predict(test_frame, device=incompatible)
+
+
+# ---------------------------------------------------------------------------
+# 5. Contract Negative & Strict Validation Tests
+# ---------------------------------------------------------------------------
+def test_contract_negative_cases_host_perception_result():
+    """Negative tests for PerceptionResult validating rejection of all invalid shapes and values."""
+    n = 10
+    cp = np.full((n, 9), 1.0 / 9.0, dtype=np.float32)
+    mp = np.zeros(n, dtype=np.float32)
+    sp = np.zeros(n, dtype=np.int64)
+    mv = np.zeros(n, dtype=bool)
+
+    # 1. Shape mismatch (wrong point count in class_probabilities)
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp[:5], moving_probabilities=mp, semantic_predictions=sp, is_moving=mv)
+
+    # 2. Shape mismatch in moving_probabilities
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp, moving_probabilities=mp[:5], semantic_predictions=sp, is_moving=mv)
+
+    # 3. Shape mismatch in semantic_predictions
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp[:5], is_moving=mv)
+
+    # 4. Shape mismatch in is_moving
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv[:5])
+
+    # 5. Non-finite values (NaN / Inf in class_probabilities)
+    cp_nan = cp.copy()
+    cp_nan[0, 0] = np.nan
+    with pytest.raises(NumericalConsistencyError):
+        PerceptionResult(class_probabilities=cp_nan, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv)
+
+    cp_inf = cp.copy()
+    cp_inf[0, 0] = np.inf
+    with pytest.raises(NumericalConsistencyError):
+        PerceptionResult(class_probabilities=cp_inf, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv)
+
+    # 6. Probabilities outside [0, 1]
+    cp_neg = cp.copy()
+    cp_neg[0, 0] = -0.5
+    with pytest.raises(NumericalConsistencyError):
+        PerceptionResult(class_probabilities=cp_neg, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv)
+
+    cp_high = cp.copy()
+    cp_high[0, 0] = 1.5
+    with pytest.raises(NumericalConsistencyError):
+        PerceptionResult(class_probabilities=cp_high, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv)
+
+    # 7. Invalid class IDs (< 0 or >= num_classes)
+    sp_neg = sp.copy()
+    sp_neg[0] = -1
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp_neg, is_moving=mv)
+
+    sp_oob = sp.copy()
+    sp_oob[0] = 9
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp_oob, is_moving=mv)
+
+    # 8. Invalid confidence shape or bounds
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv, confidence=np.ones(5, dtype=np.float32))
+
+    with pytest.raises(NumericalConsistencyError):
+        PerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv, confidence=np.full(n, 2.0, dtype=np.float32))
+
+    # 9. Invalid point_indices shape or coordinates < -1
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv, point_indices=(np.zeros(5, dtype=np.int64), np.zeros(n, dtype=np.int64)))
+
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv, point_indices=(np.full(n, -2, dtype=np.int64), np.zeros(n, dtype=np.int64)))
+
+    # 10. Wrong dtypes
+    with pytest.raises(ContractError):
+        PerceptionResult(class_probabilities=cp.astype(np.int32), moving_probabilities=mp, semantic_predictions=sp, is_moving=mv)
+
+
+def test_device_perception_result_validation():
+    """Verify DevicePerceptionResult.validate() method."""
+    dev = torch.device("cpu")
+    n = 10
+    cp = torch.full((n, 9), 1.0 / 9.0, device=dev, dtype=torch.float32)
+    mp = torch.zeros(n, device=dev, dtype=torch.float32)
+    sp = torch.zeros(n, device=dev, dtype=torch.long)
+    mv = torch.zeros(n, device=dev, dtype=torch.bool)
+
+    # Valid
+    valid_res = DevicePerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv, device=dev)
+    assert valid_res.num_points == n
+
+    # Non-tensor
+    with pytest.raises(ContractError):
+        DevicePerceptionResult(class_probabilities=cp.numpy(), moving_probabilities=mp, semantic_predictions=sp, is_moving=mv, device=dev)  # type: ignore
+
+    # Non-finite
+    cp_bad = cp.clone()
+    cp_bad[0, 0] = float("nan")
+    with pytest.raises(NumericalConsistencyError):
+        DevicePerceptionResult(class_probabilities=cp_bad, moving_probabilities=mp, semantic_predictions=sp, is_moving=mv, device=dev)
+
+    # Class ID out of bounds
+    sp_bad = sp.clone()
+    sp_bad[0] = 15
+    with pytest.raises(ContractError):
+        DevicePerceptionResult(class_probabilities=cp, moving_probabilities=mp, semantic_predictions=sp_bad, is_moving=mv, device=dev)
+
+
+# ---------------------------------------------------------------------------
+# 6. Latency Timing Instrumentation
 # ---------------------------------------------------------------------------
 def test_perception_timing_instrumentation(test_frame):
     p_cfg = PerceptionConfig(num_classes=9)
@@ -215,7 +435,7 @@ def test_perception_timing_instrumentation(test_frame):
 
 
 # ---------------------------------------------------------------------------
-# 5. Golden Frame Perception Test (Determinism)
+# 7. Golden Frame Perception Test (Determinism)
 # ---------------------------------------------------------------------------
 def test_golden_frame_perception_determinism(test_frame):
     p_cfg = PerceptionConfig(
@@ -242,7 +462,7 @@ def test_golden_frame_perception_determinism(test_frame):
 
 
 # ---------------------------------------------------------------------------
-# 6. Perception Factory & Registry
+# 8. Perception Factory & Registry
 # ---------------------------------------------------------------------------
 def test_perception_factory_creation():
     p_cfg = PerceptionConfig(backend_type="range_unet", num_classes=9)
@@ -264,7 +484,7 @@ def test_perception_factory_creation():
 
 
 # ---------------------------------------------------------------------------
-# 7. Runtime End-to-End Ingestion -> Perception -> Mapping
+# 9. Runtime End-to-End Ingestion -> Perception -> Mapping
 # ---------------------------------------------------------------------------
 def test_runtime_with_perception_backend(test_frame):
     cfg = FoveaMapConfig(
@@ -281,11 +501,11 @@ def test_runtime_with_perception_backend(test_frame):
 
 
 # ---------------------------------------------------------------------------
-# 8. Conditional CUDA Test (Physically Verified when Available)
+# 10. Conditional CUDA Tests (Physically Verified when Available)
 # ---------------------------------------------------------------------------
 def test_cuda_perception_execution(test_frame):
     if not torch.cuda.is_available():
-        pytest.skip("CUDA device unavailable on current host (CPU environment)")
+        pytest.skip("CUDA device unavailable on current host (CPU environment); physical CUDA execution required")
 
     dev = torch.device("cuda:0")
     p_cfg = PerceptionConfig(
@@ -304,3 +524,27 @@ def test_cuda_perception_execution(test_frame):
     host_res = dev_res.to_host()
     assert host_res.num_points == test_frame.num_points
     assert np.all(np.isfinite(host_res.class_probabilities))
+
+
+def test_cuda_cpu_parity_when_available(test_frame):
+    """Test CPU vs CUDA numerical parity when CUDA hardware is physically available."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA device unavailable on current host (CPU environment); physical CUDA execution required")
+
+    s_cfg = SensorConfig(name="sim", n_rows=64, n_cols=1024)
+    p_cfg_cpu = PerceptionConfig(checkpoint_path=CHECKPOINT_PATH, num_classes=9, fp16=False)
+    p_cfg_cuda = PerceptionConfig(checkpoint_path=CHECKPOINT_PATH, num_classes=9, fp16=True)
+
+    backend_cpu = RangeUNetBackend(p_cfg_cpu, s_cfg, torch.device("cpu"), features_engine="torch")
+    backend_cuda = RangeUNetBackend(p_cfg_cuda, s_cfg, torch.device("cuda:0"), features_engine="torch")
+
+    res_cpu = backend_cpu.predict(test_frame)
+    res_cuda = backend_cuda.predict(test_frame)
+
+    # Class predictions should match with high fidelity
+    cls_match = np.mean(res_cpu.semantic_predictions == res_cuda.semantic_predictions)
+    assert cls_match >= 0.99, f"Semantic prediction parity {cls_match:.3f} below 0.99"
+
+    # Probabilities within reasonable FP32 vs FP16 mixed precision tolerance
+    np.testing.assert_allclose(res_cuda.class_probabilities, res_cpu.class_probabilities, atol=2e-2)
+    np.testing.assert_allclose(res_cuda.moving_probabilities, res_cpu.moving_probabilities, atol=2e-2)

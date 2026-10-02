@@ -20,16 +20,25 @@ from dataclasses import dataclass, field
 import numpy as np
 
 # ----------------------------------------------------------------------------
-# Taxonomy (9 fine classes; PRD FR-3 asks for >= 8)
+# Taxonomy (canonical 9 classes defined in core.ontology)
 # ----------------------------------------------------------------------------
-CLASSES = [
-    "road", "sidewalk", "parking", "terrain", "vegetation",
-    "building", "pole", "vehicle", "person",
-]
-ROAD, SIDEWALK, PARKING, TERRAIN, VEGETATION, BUILDING, POLE, VEHICLE, PERSON = range(9)
-NUM_CLASSES = len(CLASSES)
-GROUND_CLASSES = (ROAD, SIDEWALK, PARKING, TERRAIN)
-DRIVABLE_CLASSES = (ROAD, PARKING)
+from .core.ontology import (
+    CANONICAL_CLASSES,
+    ROAD,
+    SIDEWALK,
+    PARKING,
+    TERRAIN,
+    VEGETATION,
+    BUILDING,
+    POLE,
+    VEHICLE,
+    PERSON,
+    NUM_CLASSES,
+    GROUND_CLASSES,
+    DRIVABLE_CLASSES,
+    DYNAMIC_CLASSES,
+)
+CLASSES = list(CANONICAL_CLASSES)
 
 # base reflectivity per class (for the intensity channel)
 REFLECT = np.array([0.15, 0.30, 0.20, 0.35, 0.45, 0.35, 0.40, 0.55, 0.30], np.float32)

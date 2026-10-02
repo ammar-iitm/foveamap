@@ -5,6 +5,12 @@ __version__ = "0.1.0"
 
 from .core.contracts import LiDARFrame, PerceptionResult, MapSnapshot
 from .core.config import FoveaMapConfig, GridConfig, TierConfig, PreprocessConfig
+from .core.ontology import (
+    SemanticOntology,
+    CANONICAL_CLASSES,
+    NUM_CLASSES,
+    DEFAULT_ONTOLOGY,
+)
 from .core.exceptions import (
     FoveaMapError,
     ConfigurationError,
@@ -50,5 +56,9 @@ __all__ = [
     "PerceptionError",
     "MappingError",
     "NumericalConsistencyError",
+    "SemanticOntology",
+    "CANONICAL_CLASSES",
+    "NUM_CLASSES",
+    "DEFAULT_ONTOLOGY",
 ]
 

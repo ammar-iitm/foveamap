@@ -18,10 +18,10 @@ import torch
 from ..core.contracts import LiDARFrame, PerceptionResult
 from ..core.config import PerceptionConfig, SensorConfig
 from ..core.exceptions import ConfigurationError, ContractError, PerceptionError, NumericalConsistencyError
+from ..core.ontology import CANONICAL_CLASSES, NUM_CLASSES, ROAD, SIDEWALK, BUILDING, VEHICLE, PERSON
 from .device import DeviceContext
 from ..model import RangeUNet, predict
 from ..frames import DatasetInfo, make_features, prev_in_ego
-from ..sim import CLASSES as SIM_CLASSES, ROAD, SIDEWALK, BUILDING, VEHICLE, PERSON
 from .. import features_torch
 
 
@@ -30,22 +30,85 @@ class CheckpointNotFoundError(PerceptionError, ConfigurationError):
     pass
 
 
-def _prev_in_ego_dev(frame: dict[str, Any], history: list[Any], device: torch.device) -> list[Any]:
-    """Transform previous sweep points to current ego frame on device."""
-    inv = torch.as_tensor(np.linalg.inv(frame["pose"]), device=device)
-    src = frame.get("prev")
-    if src is None:
-        src = history
-    out = []
-    for item in list(src or [])[:2]:
-        if item is None:
-            out.append(None)
-            continue
-        pw, ring = item
-        pw = torch.as_tensor(pw).to(device, torch.float64)
-        out.append(((pw @ inv[:3, :3].T + inv[:3, 3]).float(), ring))
-    out += [None] * (2 - len(out))
-    return out
+@dataclass
+class DeviceTemporalSweep:
+    """Device-resident representation of a single LiDAR sweep in world coordinates."""
+    pts_world: torch.Tensor    # (M, 3) float32/float64 on device
+    ring: torch.Tensor         # (M,) integer on device
+    timestamp: float = 0.0
+    frame_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not torch.is_tensor(self.pts_world):
+            raise TypeError(f"pts_world must be a torch.Tensor, got {type(self.pts_world).__name__}")
+        if not torch.is_tensor(self.ring):
+            raise TypeError(f"ring must be a torch.Tensor, got {type(self.ring).__name__}")
+
+
+class DeviceTemporalState:
+    """Device-resident temporal history buffer for motion residual calculation.
+
+    Maintains sweep history strictly as PyTorch tensors on the target device
+    without GPU -> CPU -> GPU round-trips across streaming frames.
+    """
+    def __init__(self, device: torch.device, max_sweeps: int = 2) -> None:
+        self.device = device
+        self.max_sweeps = max_sweeps
+        self._sweeps: list[DeviceTemporalSweep] = []
+
+    @property
+    def sweeps(self) -> list[DeviceTemporalSweep]:
+        return list(self._sweeps)
+
+    def __len__(self) -> int:
+        return len(self._sweeps)
+
+    def clear(self) -> None:
+        self._sweeps.clear()
+
+    def append(
+        self,
+        pts_world: torch.Tensor,
+        ring: torch.Tensor,
+        timestamp: float = 0.0,
+        frame_id: str = "",
+    ) -> None:
+        """Append a new sweep in world coordinates, enforcing device residency and boundedness."""
+        sw = DeviceTemporalSweep(
+            pts_world=pts_world.detach().to(self.device),
+            ring=ring.detach().to(self.device),
+            timestamp=timestamp,
+            frame_id=frame_id,
+        )
+        self._sweeps.append(sw)
+        if len(self._sweeps) > self.max_sweeps:
+            self._sweeps = self._sweeps[-self.max_sweeps:]
+
+    def get_sweeps_in_ego(
+        self,
+        pose_dev: torch.Tensor,
+    ) -> list[tuple[torch.Tensor, torch.Tensor] | None]:
+        """Express up to 2 previous sweeps in current ego frame on device.
+
+        Uses torch.linalg.inv for device-consistent matrix inversion.
+        Returns a list of 2 items [(pts_in_current_ego, ring), ...]
+        matching the contract expected by features_torch.make_features.
+        """
+        pose_d = pose_dev.double()
+        inv_dev = torch.linalg.inv(pose_d)
+        out: list[tuple[torch.Tensor, torch.Tensor] | None] = []
+
+        # Most recent earlier sweep (t-1) is self._sweeps[-1]
+        # Earlier sweep (t-2) is self._sweeps[-2]
+        for k in (1, 2):
+            if len(self._sweeps) >= k:
+                sw = self._sweeps[-k]
+                pw = sw.pts_world.double()
+                pts_ego = (pw @ inv_dev[:3, :3].T + inv_dev[:3, 3]).float()
+                out.append((pts_ego, sw.ring))
+            else:
+                out.append(None)
+        return out
 
 
 @dataclass
@@ -64,6 +127,112 @@ class DevicePerceptionResult:
     pts_world: torch.Tensor | None = None
     point_indices: tuple[torch.Tensor, torch.Tensor] | torch.Tensor | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    @property
+    def num_points(self) -> int:
+        return len(self.semantic_predictions)
+
+    @property
+    def point_confidence(self) -> torch.Tensor:
+        """Per-point classification confidence tensor (explicit or max class probability)."""
+        if self.confidence is not None:
+            return self.confidence
+        if len(self.class_probabilities) == 0:
+            return torch.empty((0,), dtype=torch.float32, device=self.device)
+        return self.class_probabilities.max(dim=-1).values
+
+    def validate(self, num_classes: int | None = None) -> None:
+        """Validate tensor types, device residency, dimensions, finiteness, and bounds."""
+        for name, t in [
+            ("class_probabilities", self.class_probabilities),
+            ("moving_probabilities", self.moving_probabilities),
+            ("semantic_predictions", self.semantic_predictions),
+            ("is_moving", self.is_moving),
+        ]:
+            if not torch.is_tensor(t):
+                raise ContractError(f"DevicePerceptionResult.{name} must be a torch.Tensor; got {type(t).__name__}")
+            if t.device != self.device:
+                raise ContractError(f"DevicePerceptionResult.{name} device ({t.device}) mismatch with result device ({self.device})")
+
+        n = self.num_points
+        if self.class_probabilities.ndim != 2 or self.class_probabilities.shape[0] != n:
+            raise ContractError(f"class_probabilities shape {tuple(self.class_probabilities.shape)} mismatch with point count {n}")
+        if self.moving_probabilities.ndim != 1 or self.moving_probabilities.shape[0] != n:
+            raise ContractError(f"moving_probabilities shape {tuple(self.moving_probabilities.shape)} mismatch with point count {n}")
+        if self.semantic_predictions.ndim != 1 or self.semantic_predictions.shape[0] != n:
+            raise ContractError(f"semantic_predictions shape {tuple(self.semantic_predictions.shape)} mismatch with point count {n}")
+        if self.is_moving.ndim != 1 or self.is_moving.shape[0] != n:
+            raise ContractError(f"is_moving shape {tuple(self.is_moving.shape)} mismatch with point count {n}")
+
+        if num_classes is not None and self.class_probabilities.shape[1] != num_classes:
+            raise ContractError(f"class_probabilities channels ({self.class_probabilities.shape[1]}) != expected num_classes ({num_classes})")
+
+        # Finiteness checks (fast device reductions)
+        if not torch.all(torch.isfinite(self.class_probabilities)).item():
+            raise NumericalConsistencyError("class_probabilities contains non-finite values (NaN or Inf)")
+        if not torch.all(torch.isfinite(self.moving_probabilities)).item():
+            raise NumericalConsistencyError("moving_probabilities contains non-finite values (NaN or Inf)")
+
+        # Probability bounds [0, 1]
+        if (self.class_probabilities < -1e-4).any().item() or (self.class_probabilities > 1.0 + 1e-4).any().item():
+            raise NumericalConsistencyError("class_probabilities has values outside [0, 1]")
+        if (self.moving_probabilities < -1e-4).any().item() or (self.moving_probabilities > 1.0 + 1e-4).any().item():
+            raise NumericalConsistencyError("moving_probabilities has values outside [0, 1]")
+
+        # Semantic class index bounds
+        c_dim = self.class_probabilities.shape[1]
+        if n > 0 and c_dim > 0:
+            if (self.semantic_predictions < 0).any().item() or (self.semantic_predictions >= c_dim).any().item():
+                raise ContractError(f"semantic_predictions contains class IDs outside [0, {c_dim - 1}]")
+
+        # Optional confidence
+        if self.confidence is not None:
+            if not torch.is_tensor(self.confidence):
+                raise ContractError(f"confidence must be torch.Tensor; got {type(self.confidence).__name__}")
+            if self.confidence.device != self.device:
+                raise ContractError(f"confidence device ({self.confidence.device}) mismatch with {self.device}")
+            if self.confidence.shape != (n,):
+                raise ContractError(f"confidence shape {tuple(self.confidence.shape)} mismatch with point count {n}")
+            if not torch.all(torch.isfinite(self.confidence)).item():
+                raise NumericalConsistencyError("confidence contains non-finite values")
+            if (self.confidence < -1e-4).any().item() or (self.confidence > 1.0 + 1e-4).any().item():
+                raise NumericalConsistencyError("confidence has values outside [0, 1]")
+
+        # Optional pts_world
+        if self.pts_world is not None:
+            if not torch.is_tensor(self.pts_world):
+                raise ContractError(f"pts_world must be torch.Tensor; got {type(self.pts_world).__name__}")
+            if self.pts_world.device != self.device:
+                raise ContractError(f"pts_world device ({self.pts_world.device}) mismatch with {self.device}")
+            if self.pts_world.ndim != 2 or self.pts_world.shape != (n, 3):
+                raise ContractError(f"pts_world shape {tuple(self.pts_world.shape)} mismatch with (N, 3)")
+
+        # Optional point_indices
+        if self.point_indices is not None:
+            if isinstance(self.point_indices, (tuple, list)):
+                if len(self.point_indices) != 2:
+                    raise ContractError("point_indices tuple must contain exactly 2 tensors (row, col)")
+                r, c = self.point_indices
+                if not torch.is_tensor(r) or not torch.is_tensor(c):
+                    raise ContractError("point_indices tuple elements must be torch.Tensors")
+                if r.device != self.device or c.device != self.device:
+                    raise ContractError("point_indices tensors must be on the result device")
+                if r.shape != (n,) or c.shape != (n,):
+                    raise ContractError(f"point_indices tensors must have shape ({n},)")
+                if n > 0 and ((r < -1).any().item() or (c < -1).any().item()):
+                    raise ContractError("point_indices coordinates cannot be less than -1")
+            elif torch.is_tensor(self.point_indices):
+                if self.point_indices.device != self.device:
+                    raise ContractError("point_indices tensor must be on the result device")
+                if self.point_indices.shape != (n,):
+                    raise ContractError(f"point_indices tensor must have shape ({n},)")
+                if n > 0 and (self.point_indices < -1).any().item():
+                    raise ContractError("point_indices values cannot be less than -1")
+            else:
+                raise ContractError(f"point_indices must be tuple of tensors or tensor; got {type(self.point_indices).__name__}")
 
     def to_host(self) -> PerceptionResult:
         """Convert device tensors to canonical host PerceptionResult contract."""
@@ -175,7 +344,7 @@ class RangeUNetBackend(PerceptionBackend):
     """Range-image U-Net perception backend (segmentation + motion residual).
 
     Wraps the RangeUNet architecture, managing feature extraction, model inference,
-    temporal sweep history, per-point classification, and latency profiling.
+    device-resident temporal sweep history, per-point classification, and latency profiling.
     """
 
     def __init__(
@@ -184,18 +353,32 @@ class RangeUNetBackend(PerceptionBackend):
         sensor_config: SensorConfig,
         device: torch.device,
         features_engine: str = "numpy",
+        allow_untrained: bool = False,
     ) -> None:
+        # Validate class count against canonical ontology
+        if config.num_classes != NUM_CLASSES:
+            raise ConfigurationError(
+                f"RangeUNet architecture and canonical ontology require num_classes={NUM_CLASSES}, "
+                f"got {config.num_classes}."
+            )
+        if len(config.active_classes) != NUM_CLASSES:
+            raise ConfigurationError(
+                f"RangeUNet active_classes length ({len(config.active_classes)}) "
+                f"must match NUM_CLASSES ({NUM_CLASSES})."
+            )
+
         self.config = config
         self.sensor_config = sensor_config
         self._device = device
         self.features_engine = features_engine
+        self.allow_untrained = allow_untrained
 
-        # Build sensor/dataset metadata bridge
+        # Build sensor/dataset metadata bridge with canonical ontology
         self.dataset_info = DatasetInfo(
             name=sensor_config.name,
             n_rows=sensor_config.n_rows,
             n_cols=sensor_config.n_cols,
-            class_names=list(SIM_CLASSES),
+            class_names=list(CANONICAL_CLASSES),
             active=np.asarray(config.active_classes, bool),
             source=sensor_config.source_description or f"{sensor_config.name} sensor",
             hz=sensor_config.hz,
@@ -204,20 +387,36 @@ class RangeUNetBackend(PerceptionBackend):
         # Instantiate model architecture
         self.model = RangeUNet()
 
-        # Load weights if checkpoint is provided
-        if config.checkpoint_path is not None:
+        # Checkpoint safety policy
+        if config.checkpoint_path is None:
+            if not allow_untrained:
+                raise ConfigurationError(
+                    "RangeUNetBackend requires a valid checkpoint_path in production. "
+                    "Randomly initialized weights are forbidden to prevent silent perception corruption. "
+                    "Specify a valid checkpoint path or use ClassicalFallbackBackend."
+                )
+        else:
             if not os.path.isfile(config.checkpoint_path):
                 raise CheckpointNotFoundError(
                     f"Perception checkpoint file not found at: {config.checkpoint_path}"
                 )
             try:
                 state_dict = torch.load(config.checkpoint_path, map_location="cpu", weights_only=True)
+                if "sem.weight" in state_dict:
+                    ckpt_classes = state_dict["sem.weight"].shape[0]
+                    if ckpt_classes != self.num_classes:
+                        raise ConfigurationError(
+                            f"Checkpoint class count ({ckpt_classes}) does not match "
+                            f"configured num_classes ({self.num_classes})"
+                        )
                 self.model.load_state_dict(state_dict)
+            except (ConfigurationError, CheckpointNotFoundError):
+                raise
             except Exception as exc:
                 raise PerceptionError(f"Failed to load checkpoint '{config.checkpoint_path}': {exc}") from exc
 
         self.model.to(self._device).eval()
-        self.history: list[tuple[np.ndarray, np.ndarray]] = []
+        self._device_temporal_state = DeviceTemporalState(device=self._device, max_sweeps=2)
         self._is_ready: bool = True
 
     @property
@@ -244,13 +443,38 @@ class RangeUNetBackend(PerceptionBackend):
     def is_ready(self) -> bool:
         return self._is_ready
 
+    @property
+    def history(self) -> list[tuple[np.ndarray, np.ndarray]]:
+        """Host representation of sweep history for diagnostics / host inspection."""
+        return [
+            (sw.pts_world.detach().cpu().numpy(), sw.ring.detach().cpu().numpy())
+            for sw in self._device_temporal_state.sweeps
+        ]
+
+    @history.setter
+    def history(self, val: list[Any]) -> None:
+        """Allow setting host history for backward compatibility and test injection."""
+        self._device_temporal_state.clear()
+        for item in val:
+            if item is not None:
+                pw, ring = item
+                self._device_temporal_state.append(
+                    pts_world=torch.as_tensor(pw, device=self._device, dtype=torch.float32),
+                    ring=torch.as_tensor(ring, device=self._device, dtype=torch.long),
+                )
+
     def reset(self) -> None:
-        """Clear sweep history."""
-        self.history.clear()
+        """Clear temporal sweep history."""
+        self._device_temporal_state.clear()
 
     @torch.inference_mode()
     def predict_device(self, frame: LiDARFrame, dev_math: bool = False) -> DevicePerceptionResult:
-        """Run range-image inference and retain result tensors on-device."""
+        """Run range-image inference and retain result tensors on-device.
+
+        When dev_math=True or features_engine='torch', all geometric transforms,
+        feature extraction, model inference, and temporal updates occur strictly on
+        the target device without GPU -> CPU -> GPU round-trips.
+        """
         if not isinstance(frame, LiDARFrame):
             raise ContractError(f"Expected LiDARFrame, got {type(frame).__name__}")
 
@@ -294,35 +518,53 @@ class RangeUNetBackend(PerceptionBackend):
                 },
             )
 
-        legacy_frame = frame.to_legacy_dict()
-
         # -------------------------------------------------------------
         # Stage 1: Feature Extraction
         # -------------------------------------------------------------
         t0 = time.perf_counter()
-        hist = [self.history[-k] if len(self.history) >= k else None for k in (1, 2)]
 
-        if dev_math:
+        use_torch_features = dev_math or (self.features_engine == "torch" and dev.type != "mps")
+
+        if use_torch_features:
             pts_dev = torch.as_tensor(frame.pts, device=dev, dtype=torch.float32)
-            prev = _prev_in_ego_dev(legacy_frame, hist, dev)
-            frame_input = dict(legacy_frame, pts=pts_dev)
+            ring_dev = torch.as_tensor(frame.ring, device=dev, dtype=torch.long)
+            pose_dev = torch.as_tensor(frame.pose, device=dev, dtype=torch.float64)
+            sensor_dev = torch.as_tensor(frame.sensor_origin, device=dev, dtype=torch.float32)
+            pw_dev = (pts_dev.double() @ pose_dev[:3, :3].T + pose_dev[:3, 3]).float()
+
+            # Handle previous sweep geometry on device without host roundtrip
+            if frame.prev_sweeps is not None:
+                inv_dev = torch.linalg.inv(pose_dev)
+                prev_dev: list[tuple[torch.Tensor, torch.Tensor] | None] = []
+                for item in list(frame.prev_sweeps)[:2]:
+                    if item is None:
+                        prev_dev.append(None)
+                        continue
+                    pw_ext, r_ext = item
+                    pw_ext_t = torch.as_tensor(pw_ext, device=dev, dtype=torch.float64)
+                    r_ext_t = torch.as_tensor(r_ext, device=dev, dtype=torch.long)
+                    pts_ego = (pw_ext_t @ inv_dev[:3, :3].T + inv_dev[:3, 3]).float()
+                    prev_dev.append((pts_ego, r_ext_t))
+                while len(prev_dev) < 2:
+                    prev_dev.append(None)
+            else:
+                prev_dev = self._device_temporal_state.get_sweeps_in_ego(pose_dev)
+
+            inten_dev = torch.as_tensor(frame.intensity, device=dev, dtype=torch.float32)
+            frame_input = {"pts": pts_dev, "ring": ring_dev, "inten": inten_dev, "sensor": sensor_dev}
             feats, idx, row, col = features_torch.make_features(
-                frame_input, self.dataset_info, prev, dev
+                frame_input, self.dataset_info, prev_dev, dev
             )
             row_dev = torch.as_tensor(row, device=dev)
             col_dev = torch.as_tensor(col, device=dev)
-            pose_dev = torch.as_tensor(frame.pose, device=dev)
-            pw_dev = pts_dev.double() @ pose_dev[:3, :3].T + pose_dev[:3, 3]
-        elif self.features_engine == "torch" and dev.type != "mps":
-            prev = prev_in_ego(legacy_frame, hist)
-            feats, idx, row, col = features_torch.make_features(
-                legacy_frame, self.dataset_info, prev, dev
-            )
-            row_dev = torch.as_tensor(row, device=dev)
-            col_dev = torch.as_tensor(col, device=dev)
-            pw_dev = None
         else:
-            prev = prev_in_ego(legacy_frame, hist)
+            legacy_frame = frame.to_legacy_dict()
+            hist = [
+                (sw.pts_world.detach().cpu().numpy(), sw.ring.detach().cpu().numpy())
+                for sw in self._device_temporal_state.sweeps
+            ]
+            hist_padded = [hist[-k] if len(hist) >= k else None for k in (1, 2)]
+            prev = prev_in_ego(legacy_frame, hist_padded)
             feats, idx, row, col = make_features(legacy_frame, self.dataset_info, prev)
             row_dev = torch.as_tensor(row, device=dev)
             col_dev = torch.as_tensor(col, device=dev)
@@ -371,20 +613,29 @@ class RangeUNetBackend(PerceptionBackend):
         thresh = float(self.config.confidence_threshold)
         is_moving = (pmove > thresh) & ((cls == VEHICLE) | (cls == PERSON))
 
-        # Maintain sweep history (store world coordinates in host memory)
+        # Maintain device-resident sweep history (zero CPU host transfer in device mode)
         if pw_dev is not None:
-            pw_host = pw_dev.detach().cpu().numpy()
+            self._device_temporal_state.append(
+                pts_world=pw_dev,
+                ring=ring_dev,
+                timestamp=frame.timestamp,
+                frame_id=frame.frame_id,
+            )
         else:
             pw_host = frame.pts.astype(np.float64) @ frame.pose[:3, :3].T + frame.pose[:3, 3]
-        self.history.append((pw_host, frame.ring))
-        self.history = self.history[-2:]
+            self._device_temporal_state.append(
+                pts_world=torch.as_tensor(pw_host, device=dev, dtype=torch.float32),
+                ring=torch.as_tensor(frame.ring, device=dev, dtype=torch.long),
+                timestamp=frame.timestamp,
+                frame_id=frame.frame_id,
+            )
 
         if dev.type == "cuda":
             torch.cuda.synchronize(dev)
         postprocess_ms = (time.perf_counter() - t0) * 1000.0
         total_ms = (time.perf_counter() - t_start) * 1000.0
 
-        return DevicePerceptionResult(
+        result = DevicePerceptionResult(
             class_probabilities=P,
             moving_probabilities=pmove,
             semantic_predictions=cls,
@@ -407,6 +658,7 @@ class RangeUNetBackend(PerceptionBackend):
                 },
             },
         )
+        return result
 
     def predict(
         self,
@@ -415,6 +667,13 @@ class RangeUNetBackend(PerceptionBackend):
         device: DeviceContext | None = None,
     ) -> PerceptionResult:
         """Run range-image inference and return canonical host PerceptionResult."""
+        if device is not None:
+            req_dev = device.device if isinstance(device, DeviceContext) else torch.device(device)
+            if req_dev != self._device:
+                raise ConfigurationError(
+                    f"RangeUNetBackend was initialized on device {self._device}, "
+                    f"cannot execute predict on requested device {req_dev}."
+                )
         dev_res = self.predict_device(frame, dev_math=False)
         return dev_res.to_host()
 
@@ -436,6 +695,10 @@ class ClassicalFallbackBackend(PerceptionBackend):
         **kwargs: Any,
     ) -> None:
         self.config = config or PerceptionConfig()
+        if self.config.num_classes != NUM_CLASSES:
+            raise ConfigurationError(
+                f"ClassicalFallbackBackend requires num_classes={NUM_CLASSES}, got {self.config.num_classes}."
+            )
         self.sensor_config = sensor_config or SensorConfig()
         self._device = device or torch.device("cpu")
         self.ground_z_threshold = ground_z_threshold
@@ -501,8 +764,8 @@ class ClassicalFallbackBackend(PerceptionBackend):
         pw_dev = None
         if dev_math:
             pts_dev = torch.as_tensor(frame.pts, device=dev, dtype=torch.float32)
-            pose_dev = torch.as_tensor(frame.pose, device=dev)
-            pw_dev = pts_dev.double() @ pose_dev[:3, :3].T + pose_dev[:3, 3]
+            pose_dev = torch.as_tensor(frame.pose, device=dev, dtype=torch.float64)
+            pw_dev = (pts_dev.double() @ pose_dev[:3, :3].T + pose_dev[:3, 3]).float()
 
         total_ms = (time.perf_counter() - t_start) * 1000.0
 
@@ -535,6 +798,13 @@ class ClassicalFallbackBackend(PerceptionBackend):
         *,
         device: DeviceContext | None = None,
     ) -> PerceptionResult:
+        if device is not None:
+            req_dev = device.device if isinstance(device, DeviceContext) else torch.device(device)
+            if req_dev != self._device:
+                raise ConfigurationError(
+                    f"ClassicalFallbackBackend was initialized on device {self._device}, "
+                    f"cannot execute predict on requested device {req_dev}."
+                )
         dev_res = self.predict_device(frame, dev_math=False)
         return dev_res.to_host()
 
@@ -564,6 +834,7 @@ def create_perception_backend(
     sensor_config: SensorConfig,
     device: torch.device,
     features_engine: str = "numpy",
+    allow_untrained: bool = False,
     **kwargs: Any,
 ) -> PerceptionBackend:
     """Factory creating an instantiated PerceptionBackend according to configuration."""
@@ -579,6 +850,7 @@ def create_perception_backend(
         sensor_config=sensor_config,
         device=device,
         features_engine=features_engine,
+        allow_untrained=allow_untrained,
         **kwargs,
     )
 

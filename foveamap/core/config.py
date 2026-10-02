@@ -13,6 +13,7 @@ NOTE ON RUNTIME WIRING:
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Sequence
 import numpy as np
@@ -157,11 +158,24 @@ class SensorConfig:
             raise ConfigurationError(f"hz must be positive, got {self.hz}")
 
 
+def find_default_checkpoint() -> str | None:
+    """Locate default RangeUNet checkpoint file in standard repository location if present."""
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.abspath(os.path.join(pkg_dir, "..", "..", "checkpoints", "range_unet.pt")),
+        os.path.abspath(os.path.join(pkg_dir, "..", "checkpoints", "range_unet.pt")),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
 @dataclass(frozen=True)
 class PerceptionConfig:
     """Perception model and inference settings."""
     backend_type: str = "range_unet"
-    checkpoint_path: str | None = None
+    checkpoint_path: str | None = field(default_factory=find_default_checkpoint)
     num_classes: int = 9
     fp16: bool = True
     confidence_threshold: float = 0.5

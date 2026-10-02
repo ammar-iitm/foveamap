@@ -55,7 +55,8 @@ def to_host(x):
 
 def _prev_in_ego_dev(frame, history, device):
     """`frames.prev_in_ego` on the device: (pts float32 tensor, ring) entries."""
-    inv = torch.as_tensor(np.linalg.inv(frame["pose"]), device=device)
+    pose_dev = torch.as_tensor(frame["pose"], device=device, dtype=torch.float64)
+    inv = torch.linalg.inv(pose_dev)
     src = frame.get("prev")
     if src is None:
         src = history

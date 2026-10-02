@@ -12,6 +12,21 @@ from .config import (
     PreprocessConfig,
     FoveaMapConfig,
 )
+from .ontology import (
+    CANONICAL_CLASSES,
+    NUM_CLASSES,
+    SemanticOntology,
+    DEFAULT_ONTOLOGY,
+    ROAD,
+    SIDEWALK,
+    PARKING,
+    TERRAIN,
+    VEGETATION,
+    BUILDING,
+    POLE,
+    VEHICLE,
+    PERSON,
+)
 from .exceptions import (
     FoveaMapError,
     ConfigurationError,
@@ -44,4 +59,9 @@ __all__ = [
     "PerceptionError",
     "MappingError",
     "NumericalConsistencyError",
+    # Ontology
+    "CANONICAL_CLASSES",
+    "NUM_CLASSES",
+    "SemanticOntology",
+    "DEFAULT_ONTOLOGY",
 ]

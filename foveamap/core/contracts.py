@@ -255,16 +255,24 @@ class PerceptionResult:
         if not isinstance(self.is_moving, np.ndarray) or self.is_moving.shape != (n,):
             raise ContractError(f"is_moving shape {getattr(self.is_moving, 'shape', None)} mismatch with point count {n}")
 
+        # Dtype checks
+        if not np.issubdtype(self.class_probabilities.dtype, np.floating):
+            raise ContractError(f"class_probabilities must have floating dtype; got {self.class_probabilities.dtype}")
+        if not np.issubdtype(self.moving_probabilities.dtype, np.floating):
+            raise ContractError(f"moving_probabilities must have floating dtype; got {self.moving_probabilities.dtype}")
+        if self.is_moving.dtype != bool and not np.issubdtype(self.is_moving.dtype, np.integer):
+            raise ContractError(f"is_moving must have boolean or integer dtype; got {self.is_moving.dtype}")
+
         # Check finiteness
         if not np.all(np.isfinite(self.class_probabilities)):
             raise NumericalConsistencyError("class_probabilities contains NaN or Inf")
         if not np.all(np.isfinite(self.moving_probabilities)):
             raise NumericalConsistencyError("moving_probabilities contains NaN or Inf")
 
-        # Check probability bounds
-        if np.any(self.class_probabilities < -1e-5) or np.any(self.class_probabilities > 1.0 + 1e-4):
+        # Check probability bounds [0, 1]
+        if np.any(self.class_probabilities < -1e-4) or np.any(self.class_probabilities > 1.0 + 1e-4):
             raise NumericalConsistencyError("class_probabilities has values outside [0, 1]")
-        if np.any(self.moving_probabilities < -1e-5) or np.any(self.moving_probabilities > 1.0 + 1e-4):
+        if np.any(self.moving_probabilities < -1e-4) or np.any(self.moving_probabilities > 1.0 + 1e-4):
             raise NumericalConsistencyError("moving_probabilities has values outside [0, 1]")
 
         # Check class index bounds
@@ -279,9 +287,11 @@ class PerceptionResult:
         if self.confidence is not None:
             if not isinstance(self.confidence, np.ndarray) or self.confidence.shape != (n,):
                 raise ContractError(f"confidence shape {getattr(self.confidence, 'shape', None)} mismatch with point count {n}")
+            if not np.issubdtype(self.confidence.dtype, np.floating):
+                raise ContractError(f"confidence must have floating dtype; got {self.confidence.dtype}")
             if not np.all(np.isfinite(self.confidence)):
                 raise NumericalConsistencyError("confidence contains NaN or Inf")
-            if np.any(self.confidence < -1e-5) or np.any(self.confidence > 1.0 + 1e-4):
+            if np.any(self.confidence < -1e-4) or np.any(self.confidence > 1.0 + 1e-4):
                 raise NumericalConsistencyError("confidence has values outside [0, 1]")
 
         # Check optional point_indices
@@ -292,9 +302,18 @@ class PerceptionResult:
                 r, c = self.point_indices
                 if not isinstance(r, np.ndarray) or r.shape != (n,) or not isinstance(c, np.ndarray) or c.shape != (n,):
                     raise ContractError(f"point_indices (row, col) elements must both have shape ({n},)")
+                if not np.issubdtype(r.dtype, np.integer) or not np.issubdtype(c.dtype, np.integer):
+                    raise ContractError("point_indices (row, col) must have integer dtypes")
+                if n > 0:
+                    if np.any(r < -1) or np.any(c < -1):
+                        raise ContractError("point_indices values cannot be less than -1 (invalid coordinate)")
             elif isinstance(self.point_indices, np.ndarray):
                 if self.point_indices.shape[0] != n:
                     raise ContractError(f"point_indices shape {self.point_indices.shape} mismatch with point count {n}")
+                if not np.issubdtype(self.point_indices.dtype, np.integer):
+                    raise ContractError("point_indices must have integer dtype")
+                if n > 0 and np.any(self.point_indices < -1):
+                    raise ContractError("point_indices values cannot be less than -1 (invalid coordinate)")
             else:
                 raise ContractError(f"point_indices must be tuple, list, or ndarray; got {type(self.point_indices)}")
 

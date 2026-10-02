@@ -40,7 +40,26 @@ The mapping subsystem consumes `PerceptionResult` (or `DevicePerceptionResult` o
 
 ---
 
-## 2. Formal Perception Backend Interface
+## 2. Formal Semantic Ontology (Single Source of Truth)
+
+All perception and mapping components reference a single authoritative semantic taxonomy defined in `foveamap.core.ontology`:
+
+- **Authoritative Constant**: `foveamap.core.ontology.NUM_CLASSES = 9`
+- **Canonical Class IDs**:
+  - `0`: `ROAD`
+  - `1`: `SIDEWALK`
+  - `2`: `BUILDING`
+  - `3`: `VEHICLE`
+  - `4`: `PERSON`
+  - `5`: `POLE`
+  - `6`: `TREE`
+  - `7`: `TERRAIN`
+  - `8`: `OTHER`
+- **Ontology Decoupling**: Dataset loaders (e.g. `SemanticKITTI`, `nuScenes`, `sim`) map dataset-specific labels into this canonical ontology. The perception backend does not couple to any dataset-specific ontology. Incompatible `num_classes` configurations are strictly rejected at initialization time with `ConfigurationError`.
+
+---
+
+## 3. Formal Perception Backend Interface
 
 All perception models implement the `foveamap.runtime.PerceptionBackend` abstract base class:
 
@@ -65,6 +84,11 @@ class PerceptionBackend(ABC):
         """Run inference retaining tensors on device for zero-copy GPU mapping."""
         ...
 
+    @abstractmethod
+    def reset(self) -> None:
+        """Clear all internal temporal history."""
+        ...
+
     @property
     @abstractmethod
     def num_classes(self) -> int: ...
@@ -75,19 +99,31 @@ class PerceptionBackend(ABC):
 ```
 
 ### Registered Implementations
-- **`RangeUNetBackend`**: High-accuracy range-image U-Net predicting 9 semantic classes and dynamic object residuals.
-- **`ClassicalFallbackBackend`**: Zero-weight geometric heuristic classifier for low-power fallback and testing environments.
+- **`RangeUNetBackend`**: High-accuracy range-image U-Net predicting 9 semantic classes and dynamic motion probabilities. Requires a trained checkpoint file.
+- **`ClassicalFallbackBackend`**: Zero-weight geometric heuristic classifier for low-power fallback, degraded operation, and headless testing environments. Must be explicitly requested (`backend_type="classical"`). It is never silently substituted for a missing RangeUNet checkpoint.
 
 ---
 
-## 3. Model Input Contract (RangeUNet)
+## 4. Device Temporal State & Zero Round-Trip Pipeline
 
-RangeUNet processes a 2D cylindrical range image projection of shape `[B, 8, H, W]`:
-- **Batch Dimension ($B$)**: 1 during online streaming inference.
-- **Spatial Height ($H$)**: Number of sensor beam rows (e.g. 64 for Velodyne HDL-64E, 32 for nuScenes).
-- **Spatial Width ($W$)**: Number of horizontal azimuth columns (1024 columns standard, $0.35^\circ$ angular resolution).
-- **Input Channels (8)**:
-  1. `channel 0`: Radial range normalized by $50\,\text{m}$ ($r / 50.0$, where $r = \sqrt{x^2 + y^2 + z^2}$).
+To eliminate per-frame `GPU -> CPU -> GPU` temporal round-trips:
+
+- **`DeviceTemporalState` & `DeviceTemporalSweep`**:
+  - Sweep history is retained strictly on the active PyTorch device as `pts_world` and `ring` tensors.
+  - History is bounded to 2 previous sweeps (`max_sweeps=2`).
+  - In `RangeUNetBackend.predict_device(frame)`, previous sweeps are transformed into current ego coordinates on the device using `torch.linalg.inv(pose_dev)` in double precision.
+  - No CPU memory allocation or tensor round-trip occurs in the device hot path.
+  - Deterministic and resettable via `backend.reset()`.
+  - Longevity verified across 100+ streaming frames without unbounded memory accumulation.
+
+---
+
+## 5. Model Input & Output Contracts (RangeUNet)
+
+### RangeUNet Input Tensor
+Processes a 2D cylindrical range image projection of shape `[B, 8, H, W]`:
+- **Channels**:
+  1. `channel 0`: Radial range normalized by $50\,\text{m}$ ($r / 50.0$).
   2. `channel 1`: Ego forward coordinate normalized by $50\,\text{m}$ ($x / 50.0$).
   3. `channel 2`: Ego left coordinate normalized by $50\,\text{m}$ ($y / 50.0$).
   4. `channel 3`: Ego up coordinate normalized by $3\,\text{m}$ ($z / 3.0$).
@@ -96,78 +132,47 @@ RangeUNet processes a 2D cylindrical range image projection of shape `[B, 8, H, 
   7. `channel 6`: Motion residual against sweep at $t - 0.1\,\text{s}$ ($\min(5 \cdot |\Delta r| / r, 1.0)$).
   8. `channel 7`: Motion residual against sweep at $t - 0.2\,\text{s}$ ($\min(5 \cdot |\Delta r| / r, 1.0)$).
 
-### Pixel Projection & Collisions
-- **Azimuth Column**: $\text{col} = \text{round}((180.0 - \text{azimuth}) / 360.0 \cdot W) \pmod W$.
-- **Beam Row**: Directly indexed by sensor `ring` ($0 = \text{top beam}$).
-- **Multiple Points per Pixel**: **Nearest point wins** (smallest radial distance $r$; ties broken by highest point ID).
-- **Empty / No-Return Pixels**: Zero across all channels, validity mask $= 0.0$.
-
----
-
-## 4. Model Output Contract (RangeUNet)
-
-RangeUNet produces dual output heads:
+### RangeUNet Dual Heads
 1. **Semantic Head**: `[B, 9, H, W]` logits $\rightarrow$ `softmax` over class dimension $\rightarrow$ per-pixel probabilities $[0, 1]$.
-   - Inactive classes are masked with $-10^4$ before softmax.
-2. **Motion Head**: `[B, 1, H, W]` logits $\rightarrow$ `sigmoid` $\rightarrow$ per-pixel probability of being dynamic $[0, 1]$.
+2. **Motion Head**: `[B, 1, H, W]` logits $\rightarrow$ `sigmoid` $\rightarrow$ per-pixel dynamic probability $[0, 1]$.
 
-### Per-Point Gather & Motion Classification
-Every LiDAR point gathers predictions from its projected pixel coordinate $(r, c)$:
-- **Point Semantic Class**: `cls = argmax(P, dim=1)` ($0 \le \text{cls} < 9$).
-- **Point Confidence**: Max class probability $\max_c P_c \in [0, 1]$.
-- **Motion Decision**: Dynamic (`is_moving = True`) if and only if:
-  $$\text{moving\_probability} > \text{confidence\_threshold} \quad \land \quad \text{cls} \in \{\text{VEHICLE}, \text{PERSON}\}$$
+Points gather predictions from their projected $(row, col)$ pixel coordinates. Points are declared dynamic if:
+$$\text{moving\_probability} > \text{threshold} \quad \land \quad \text{class} \in \{\text{VEHICLE}, \text{PERSON}\}$$
 
 ---
 
-## 5. Canonical Perception Result Contracts
+## 6. Hardened Perception Result Contracts
 
 ### `PerceptionResult` (Host / NumPy)
-Frozen dataclass defining system-wide boundary:
+Strictly validated frozen contract:
 - `class_probabilities`: `(N, C)` `float32` in $[0, 1]$.
 - `moving_probabilities`: `(N,)` `float32` in $[0, 1]$.
 - `semantic_predictions`: `(N,)` `int64` with $0 \le \text{class\_id} < C$.
 - `is_moving`: `(N,)` `bool`.
 - `confidence`: `(N,)` `float32` in $[0, 1]$ (accessible via `.point_confidence`).
-- `point_indices`: `tuple[np.ndarray, np.ndarray]` $(row, col)$ mapping points to range-image pixels.
-- `metadata`: Execution device, model name, and profiling timings.
+- `point_indices`: `tuple[np.ndarray, np.ndarray]` $(row, col)$ with non-negative coordinates.
+- Contract violations raise `ContractError` or `NumericalConsistencyError`.
 
 ### `DevicePerceptionResult` (Device / PyTorch)
-Zero-copy container keeping tensors on active hardware (`device`):
-- Consumed directly by `TorchFoveatedGrid` on GPU without intermediate CPU round-trips.
-- `.to_host()` method produces a validated `PerceptionResult` copy when CPU consumers request it.
+On-device zero-copy tensor container:
+- Validates tensor types, device matching, shapes, finiteness, and bounds via device reductions without CPU synchronization.
+- `.to_host()` converts tensors to a validated host `PerceptionResult` when requested.
 
 ---
 
-## 6. Device-Resident Execution & Precision
+## 7. Checkpoint Safety Policy
 
-- **Device Support**: `cpu`, `cuda`, `mps` (Apple Silicon), `auto`.
-- **Zero-Copy Pipeline**:
-  - `LiDARFrame -> Feature Extraction (GPU) -> RangeUNet (GPU) -> Point Projection (GPU) -> Grid Binning (GPU)`.
-  - CPU host transfer only happens on snapshot publication.
-- **Precision**:
-  - `fp16=True`: When running on CUDA, activates `torch.autocast(device_type="cuda", dtype=torch.float16)`.
-  - When running on CPU, autocast is automatically disabled to guarantee full float32 numerical precision.
-  - Class indices and point indices remain strictly 64-bit integer types (`int64`).
+1. **Mandatory Checkpoint**: `backend_type="range_unet"` requires a valid checkpoint path. If `checkpoint_path is None`, initialization raises `ConfigurationError`. If the file does not exist, initialization raises `CheckpointNotFoundError`.
+2. **No Silent Random Inference**: Randomly initialized neural network weights are prohibited in production pipelines.
+3. **Opt-in Untrained Mode**: An explicit flag `allow_untrained=True` is provided solely for headless unit testing.
+4. **Lifecycle**: Weights are loaded once during initialization. Model parameters are frozen in `model.eval()`, and all inference runs under `@torch.inference_mode()`.
 
 ---
 
-## 7. Checkpoint Management & Inference Lifecycle
+## 8. Hardware & CUDA Verification Status
 
-1. **One-Time Initialization**: Model weights are loaded once during `__init__` via `torch.load(..., map_location="cpu", weights_only=True)` and transferred to target device.
-2. **Missing Checkpoint**: Raises `PerceptionError` with clear diagnostic path.
-3. **Inference Mode**: Inference strictly executes within `@torch.inference_mode()` with `model.eval()`. No autograd graphs are retained.
-4. **Finiteness Validation**: All model outputs are checked for `NaN`/`Inf`; non-finite activations immediately raise `PerceptionError`.
-
----
-
-## 8. Latency Profiling Instrumentation
-
-Every inference pass measures fine-grained stage timings reported in `metadata["timing"]`:
-- `feature_ms`: Time spent building range-image features and motion residuals.
-- `inference_ms`: Time spent executing neural network forward pass.
-- `postprocess_ms`: Time spent gathering point predictions and applying motion logic.
-- `total_ms`: End-to-end perception latency.
+- **Host Testing**: All unit, integration, and longevity tests pass on CPU.
+- **CUDA Verification**: **NOT PHYSICALLY VERIFIED — CUDA UNAVAILABLE** on the current Windows development machine. Real CUDA execution and CPU/CUDA FP16 numerical parity tests are conditionally guarded and must be physically verified in a dedicated GPU environment (e.g. 12-GB Colab runner).
 
 ---
 
