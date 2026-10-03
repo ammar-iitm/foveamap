@@ -1,0 +1,925 @@
+{
+  "phase": "PHASE 10 \u2014 HARDWARE / CUDA / NVIDIA GPU VALIDATION",
+  "git_commit": "9bd20cfe7addc80b6ed8830ba077fe5640437f67",
+  "branch": "dev",
+  "clean_git_state": true,
+  "environment": {
+    "os": "Ubuntu 24.04.4 LTS (Linux 6.6.137+)",
+    "python_version": "3.13.15",
+    "torch_version": "2.11.0+cu130",
+    "cuda_version": "13.0",
+    "gpu_name": "NVIDIA Tesla T4",
+    "gpu_compute_capability": "7.5",
+    "gpu_vram_total_gb": 14.56,
+    "cpu_model": "Intel(R) Xeon(R) CPU @ 2.00GHz (2 vCPUs)",
+    "host_ram_total_gb": 12.0,
+    "packages": {
+      "numpy": "2.1.3",
+      "scipy": "1.16.3",
+      "pillow": "11.3.0",
+      "pytest": "8.4.2"
+    }
+  },
+  "configuration": {
+    "device": "cuda:0",
+    "grid_engine": "torch",
+    "features_engine": "torch",
+    "profile": "RuntimeConfig.gpu_profile()",
+    "checkpoint": "/content/foveamap/checkpoints/range_unet.pt"
+  },
+  "checkpoint_metrics": {
+    "checkpoint_path": "/content/foveamap/checkpoints/range_unet.pt",
+    "checkpoint_size_bytes": 1332085,
+    "checkpoint_size_mb": 1.2703752517700195,
+    "model_parameter_count": 327434,
+    "model_parameter_memory_bytes": 1309736,
+    "model_parameter_memory_mb": 1.2490615844726562,
+    "cuda_allocated_before_bytes": 41026560,
+    "cuda_allocated_after_bytes": 42357760,
+    "model_vram_delta_mb": 1.26953125,
+    "all_parameters_cuda": true,
+    "first_param_device": "cuda:0",
+    "outputs_on_cuda": true,
+    "class_probabilities_valid": true,
+    "moving_probabilities_valid": true,
+    "class_ids_valid": true,
+    "nan_or_inf": false
+  },
+  "fp32_vs_fp16_benchmarks": {
+    "fp32_benchmarks": {
+      "10000": {
+        "points": 10000,
+        "mean_ms": 107.9212338256836,
+        "p50_ms": 89.0864028930664,
+        "p90_ms": 137.33492126464844,
+        "p95_ms": 138.09458923339844,
+        "p99_ms": 177.1708593749999,
+        "min_ms": 82.2943344116211,
+        "max_ms": 189.48019409179688,
+        "fps": 9.266017117773307,
+        "peak_allocated_mb": 100.04345703125,
+        "peak_reserved_mb": 142.0,
+        "breakdown_mean_ms": {
+          "feature_ms": 6.21956,
+          "inference_ms": 1.83456,
+          "postprocess_ms": 0.23800000000000002,
+          "perception_stage_ms": 0.0,
+          "projection_stage_ms": 0.0,
+          "fusion_stage_ms": 0.0
+        }
+      },
+      "20000": {
+        "points": 20000,
+        "mean_ms": 138.07944580078126,
+        "p50_ms": 128.7507781982422,
+        "p90_ms": 148.20243835449222,
+        "p95_ms": 214.75931701660136,
+        "p99_ms": 236.6098370361328,
+        "min_ms": 120.35724639892578,
+        "max_ms": 238.81251525878906,
+        "fps": 7.2422075146708185,
+        "peak_allocated_mb": 102.50830078125,
+        "peak_reserved_mb": 146.0,
+        "breakdown_mean_ms": {
+          "feature_ms": 5.996759999999999,
+          "inference_ms": 1.63592,
+          "postprocess_ms": 0.22424,
+          "perception_stage_ms": 0.0,
+          "projection_stage_ms": 0.0,
+          "fusion_stage_ms": 0.0
+        }
+      },
+      "50000": {
+        "points": 50000,
+        "mean_ms": 264.2894305419922,
+        "p50_ms": 219.677734375,
+        "p90_ms": 379.9641967773438,
+        "p95_ms": 386.3486450195312,
+        "p99_ms": 477.8114587402341,
+        "min_ms": 196.59017944335938,
+        "max_ms": 506.2234802246094,
+        "fps": 3.7837305788175013,
+        "peak_allocated_mb": 109.92919921875,
+        "peak_reserved_mb": 154.0,
+        "breakdown_mean_ms": {
+          "feature_ms": 8.10636,
+          "inference_ms": 1.96256,
+          "postprocess_ms": 0.24596,
+          "perception_stage_ms": 0.0,
+          "projection_stage_ms": 0.0,
+          "fusion_stage_ms": 0.0
+        }
+      },
+      "100000": {
+        "points": 100000,
+        "mean_ms": 420.44224365234373,
+        "p50_ms": 356.526611328125,
+        "p90_ms": 649.227490234375,
+        "p95_ms": 662.5378173828125,
+        "p99_ms": 670.3563525390625,
+        "min_ms": 328.1575622558594,
+        "max_ms": 671.8826904296875,
+        "fps": 2.3784479678185773,
+        "peak_allocated_mb": 125.873046875,
+        "peak_reserved_mb": 172.0,
+        "breakdown_mean_ms": {
+          "feature_ms": 10.296000000000001,
+          "inference_ms": 1.8634,
+          "postprocess_ms": 0.23548,
+          "perception_stage_ms": 0.0,
+          "projection_stage_ms": 0.0,
+          "fusion_stage_ms": 0.0
+        }
+      }
+    },
+    "fp16_benchmarks": {
+      "10000": {
+        "points": 10000,
+        "mean_ms": 84.18086669921875,
+        "p50_ms": 78.73916625976562,
+        "p90_ms": 87.13279571533204,
+        "p95_ms": 91.41334686279296,
+        "p99_ms": 166.2191589355467,
+        "min_ms": 75.5321273803711,
+        "max_ms": 189.69622802734375,
+        "fps": 11.879183942985948,
+        "peak_allocated_mb": 115.80126953125,
+        "peak_reserved_mb": 160.0,
+        "breakdown_mean_ms": {
+          "feature_ms": 5.27076,
+          "inference_ms": 2.4224,
+          "postprocess_ms": 0.2186,
+          "perception_stage_ms": 0.0,
+          "projection_stage_ms": 0.0,
+          "fusion_stage_ms": 0.0
+        }
+      },
+      "20000": {
+        "points": 20000,
+        "mean_ms": 132.44903930664063,
+        "p50_ms": 122.80764770507812,
+        "p90_ms": 134.46177673339844,
+        "p95_ms": 213.87918395996067,
+        "p99_ms": 235.36607849121094,
+        "min_ms": 117.1104965209961,
+        "max_ms": 235.9797821044922,
+        "fps": 7.550073637641423,
+        "peak_allocated_mb": 118.4609375,
+        "peak_reserved_mb": 164.0,
+        "breakdown_mean_ms": {
+          "feature_ms": 5.99884,
+          "inference_ms": 2.5752800000000002,
+          "postprocess_ms": 0.22383999999999996,
+          "perception_stage_ms": 0.0,
+          "projection_stage_ms": 0.0,
+          "fusion_stage_ms": 0.0
+        }
+      },
+      "50000": {
+        "points": 50000,
+        "mean_ms": 260.4455847167969,
+        "p50_ms": 225.16082763671875,
+        "p90_ms": 359.970849609375,
+        "p95_ms": 381.65380859374994,
+        "p99_ms": 475.81253784179665,
+        "min_ms": 187.41746520996094,
+        "max_ms": 504.3346862792969,
+        "fps": 3.8395736333460184,
+        "peak_allocated_mb": 125.97265625,
+        "peak_reserved_mb": 170.0,
+        "breakdown_mean_ms": {
+          "feature_ms": 7.9916,
+          "inference_ms": 2.8088800000000003,
+          "postprocess_ms": 0.233,
+          "perception_stage_ms": 0.0,
+          "projection_stage_ms": 0.0,
+          "fusion_stage_ms": 0.0
+        }
+      },
+      "100000": {
+        "points": 100000,
+        "mean_ms": 409.3541955566406,
+        "p50_ms": 358.2384033203125,
+        "p90_ms": 578.5075805664064,
+        "p95_ms": 641.1065063476561,
+        "p99_ms": 752.2440405273435,
+        "min_ms": 313.8691101074219,
+        "max_ms": 785.9092407226562,
+        "fps": 2.442872238405174,
+        "peak_allocated_mb": 142.23095703125,
+        "peak_reserved_mb": 188.0,
+        "breakdown_mean_ms": {
+          "feature_ms": 10.442919999999999,
+          "inference_ms": 3.0411600000000005,
+          "postprocess_ms": 0.24812,
+          "perception_stage_ms": 0.0,
+          "projection_stage_ms": 0.0,
+          "fusion_stage_ms": 0.0
+        }
+      }
+    },
+    "fp32_vs_fp16_parity": {
+      "10000": {
+        "points": 10000,
+        "class_prediction_agreement": 0.9994998499549865,
+        "max_probability_diff": 0.014024019241333008,
+        "mean_probability_diff": 5.9301350120222196e-05,
+        "max_moving_prob_diff": 0.0073618292808532715,
+        "fp16_nan_or_inf": false,
+        "traversability_query_agreement": 1.0,
+        "status": "PASS"
+      },
+      "20000": {
+        "points": 20000,
+        "class_prediction_agreement": 0.9998499474816186,
+        "max_probability_diff": 0.017739534378051758,
+        "mean_probability_diff": 6.45713516860269e-05,
+        "max_moving_prob_diff": 0.010315567255020142,
+        "fp16_nan_or_inf": false,
+        "traversability_query_agreement": 1.0,
+        "status": "PASS"
+      },
+      "50000": {
+        "points": 50000,
+        "class_prediction_agreement": 0.9995797730774618,
+        "max_probability_diff": 0.024692296981811523,
+        "mean_probability_diff": 6.894781108712777e-05,
+        "max_moving_prob_diff": 0.013580292463302612,
+        "fp16_nan_or_inf": false,
+        "traversability_query_agreement": 1.0,
+        "status": "PASS"
+      },
+      "100000": {
+        "points": 100000,
+        "class_prediction_agreement": 0.9995197118270963,
+        "max_probability_diff": 0.026397705078125,
+        "mean_probability_diff": 7.082251249812543e-05,
+        "max_moving_prob_diff": 0.012595653533935547,
+        "fp16_nan_or_inf": false,
+        "traversability_query_agreement": 1.0,
+        "status": "PASS"
+      }
+    }
+  },
+  "numerical_parity": {
+    "perception": {
+      "classes_torch_cpu_vs_cuda": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "moving_torch_cpu_vs_cuda": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "class_probs_torch_cpu_vs_cuda": {
+        "max_diff": 2.3245811462402344e-06,
+        "mean_diff": 2.7128324653624264e-09,
+        "exact_match_pct": 20.502239828480963,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "moving_probs_torch_cpu_vs_cuda": {
+        "max_diff": 1.1622905731201172e-06,
+        "mean_diff": 2.538930457131664e-09,
+        "exact_match_pct": 12.617404638681235,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "confidence_torch_cpu_vs_cuda": {
+        "max_diff": 2.3245811462402344e-06,
+        "mean_diff": 1.1893508761966963e-08,
+        "exact_match_pct": 95.24311545588141,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      }
+    },
+    "geometry": {
+      "pts_world_vs_host": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      }
+    },
+    "grid": {
+      "tier0_count": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier0_cls": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier0_flags": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier0_cost": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier0_age": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier0_z_min": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 19.908125,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier0_z_max": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 19.908125,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier0_ground": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 19.498124999999998,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier0_rough": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 3.913125,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier1_count": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier1_cls": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier1_flags": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier1_cost": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier1_age": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 100.0,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier1_z_min": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 3.1225,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier1_z_max": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 3.1225,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier1_ground": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 2.62125,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      },
+      "tier1_rough": {
+        "max_diff": 0.0,
+        "mean_diff": 0.0,
+        "exact_match_pct": 2.245625,
+        "nan_mismatch": 0,
+        "status": "PASS"
+      }
+    },
+    "terrain": {},
+    "query": {
+      "query_point_match_pct": 14.285714285714285,
+      "is_traversable_match_pct": 100.0
+    },
+    "overall_parity_status": "PASS"
+  },
+  "device_residency_audit": {
+    "transfers_found": [
+      {
+        "file": "foveamap/grid_torch.py",
+        "lines": "259-265",
+        "operation": "native_tiers .sum().item() for diagnostics",
+        "category": "diagnostics",
+        "measured_cost_ms": 0.2554587550002907,
+        "hot_path": true
+      },
+      {
+        "file": "foveamap/grid_torch.py",
+        "lines": "459, 481",
+        "operation": "n_pts_p.sum().item() for tier point count",
+        "category": "diagnostics",
+        "measured_cost_ms": 0.04127841500121576,
+        "hot_path": true
+      },
+      {
+        "file": "foveamap/grid_torch.py",
+        "lines": "503-524",
+        "operation": "snapshot() packed.cpu().numpy()",
+        "category": "snapshot boundary",
+        "measured_cost_ms": 1.8409011799940345,
+        "hot_path": false
+      }
+    ],
+    "pipeline_only_latency_ms": 115.57764985499489,
+    "pipeline_only_fps": 8.652191848983017,
+    "end_to_end_latency_ms": 138.57564351999827,
+    "end_to_end_fps": 7.216275346797772,
+    "snapshot_overhead_ms": 1.8409011799940345,
+    "snapshot_overhead_pct": 1.328444980108188
+  },
+  "gpu_memory_validation": {
+    "baseline": {
+      "allocated_mb": 113.66357421875,
+      "reserved_mb": 136.0,
+      "max_allocated_mb": 113.66357421875,
+      "max_reserved_mb": 136.0,
+      "cpu_rss_mb": 2240.3671875
+    },
+    "model_loaded": {
+      "allocated_mb": 114.74169921875,
+      "reserved_mb": 136.0,
+      "max_allocated_mb": 114.93310546875,
+      "max_reserved_mb": 136.0,
+      "cpu_rss_mb": 2240.3671875
+    },
+    "model_vram_delta_mb": 1.078125,
+    "perception_active": {
+      "allocated_mb": 116.44189453125,
+      "reserved_mb": 188.0,
+      "max_allocated_mb": 155.486328125,
+      "max_reserved_mb": 188.0,
+      "cpu_rss_mb": 2240.3671875
+    },
+    "grid_created": {
+      "allocated_mb": 121.94189453125,
+      "reserved_mb": 188.0,
+      "max_allocated_mb": 155.486328125,
+      "max_reserved_mb": 188.0,
+      "cpu_rss_mb": 2240.3671875
+    },
+    "workload_peaks": {
+      "FP32": {
+        "10000": {
+          "allocated_mb": 120.70703125,
+          "reserved_mb": 206.0,
+          "max_allocated_mb": 160.9208984375,
+          "max_reserved_mb": 206.0,
+          "cpu_rss_mb": 2240.3671875
+        },
+        "20000": {
+          "allocated_mb": 121.818359375,
+          "reserved_mb": 206.0,
+          "max_allocated_mb": 161.4130859375,
+          "max_reserved_mb": 206.0,
+          "cpu_rss_mb": 2240.3671875
+        },
+        "50000": {
+          "allocated_mb": 124.701171875,
+          "reserved_mb": 210.0,
+          "max_allocated_mb": 164.01025390625,
+          "max_reserved_mb": 210.0,
+          "cpu_rss_mb": 2240.3671875
+        },
+        "100000": {
+          "allocated_mb": 130.52783203125,
+          "reserved_mb": 212.0,
+          "max_allocated_mb": 170.3037109375,
+          "max_reserved_mb": 212.0,
+          "cpu_rss_mb": 2241.3203125
+        }
+      },
+      "FP16": {
+        "10000": {
+          "allocated_mb": 120.70703125,
+          "reserved_mb": 204.0,
+          "max_allocated_mb": 160.2548828125,
+          "max_reserved_mb": 204.0,
+          "cpu_rss_mb": 2241.3203125
+        },
+        "20000": {
+          "allocated_mb": 121.818359375,
+          "reserved_mb": 206.0,
+          "max_allocated_mb": 161.56640625,
+          "max_reserved_mb": 206.0,
+          "cpu_rss_mb": 2241.3203125
+        },
+        "50000": {
+          "allocated_mb": 124.701171875,
+          "reserved_mb": 208.0,
+          "max_allocated_mb": 164.16357421875,
+          "max_reserved_mb": 208.0,
+          "cpu_rss_mb": 2241.3203125
+        },
+        "100000": {
+          "allocated_mb": 130.52783203125,
+          "reserved_mb": 212.0,
+          "max_allocated_mb": 170.45703125,
+          "max_reserved_mb": 212.0,
+          "cpu_rss_mb": 2241.3203125
+        }
+      }
+    },
+    "prd_nfr5_target_mb": 4096.0,
+    "prd_nfr5_hard_limit_mb": 6144.0,
+    "max_observed_vram_reserved_mb": 212.0,
+    "status": "PASS"
+  },
+  "latency_benchmarks_500_frames": {
+    "20000": {
+      "points": 20000,
+      "frames": 500,
+      "pipeline_only": {
+        "mean_ms": 134.53118235778808,
+        "p50_ms": 121.7474250793457,
+        "p90_ms": 197.271647644043,
+        "p95_ms": 207.0529602050781,
+        "p99_ms": 263.3331182861328,
+        "min_ms": 101.54911804199219,
+        "max_ms": 428.3099060058594,
+        "fps": 7.433220926732675
+      },
+      "end_to_end": {
+        "mean_ms": 147.19119232177735,
+        "p50_ms": 130.8998565673828,
+        "p90_ms": 215.97195129394532,
+        "p95_ms": 236.22109909057616,
+        "p99_ms": 281.49564849853516,
+        "min_ms": 107.53190612792969,
+        "max_ms": 443.7819519042969,
+        "fps": 6.7938847714058985
+      }
+    },
+    "50000": {
+      "points": 50000,
+      "frames": 200,
+      "pipeline_only": {
+        "mean_ms": 242.04539810180665,
+        "p50_ms": 217.60393524169922,
+        "p90_ms": 355.8598999023437,
+        "p95_ms": 377.6522293090819,
+        "p99_ms": 402.53576751708863,
+        "min_ms": 164.4014434814453,
+        "max_ms": 584.1869506835938,
+        "fps": 4.131456362493577
+      },
+      "end_to_end": {
+        "mean_ms": 256.38196350097655,
+        "p50_ms": 229.5759506225586,
+        "p90_ms": 380.7234130859375,
+        "p95_ms": 395.82331542968745,
+        "p99_ms": 425.7883105468739,
+        "min_ms": 172.02210998535156,
+        "max_ms": 602.1470947265625,
+        "fps": 3.900430382639577
+      }
+    },
+    "100000": {
+      "points": 100000,
+      "frames": 100,
+      "pipeline_only": {
+        "mean_ms": 360.20563873291013,
+        "p50_ms": 316.30108642578125,
+        "p90_ms": 513.7597045898438,
+        "p95_ms": 565.9840881347657,
+        "p99_ms": 673.6450097656256,
+        "min_ms": 276.9714660644531,
+        "max_ms": 782.6322631835938,
+        "fps": 2.7761919650055584
+      },
+      "end_to_end": {
+        "mean_ms": 379.1810046386719,
+        "p50_ms": 328.4195098876953,
+        "p90_ms": 540.1158142089844,
+        "p95_ms": 586.7257659912109,
+        "p99_ms": 714.5469213867192,
+        "min_ms": 286.2821350097656,
+        "max_ms": 795.7987060546875,
+        "fps": 2.637262910764523
+      }
+    }
+  },
+  "sustained_1000_frame_soak": {
+    "total_frames": 1000,
+    "total_time_seconds": 186.4847535329991,
+    "overall_fps": 5.362368671190306,
+    "mean_ms": 184.6430784301758,
+    "p50_ms": 155.81926727294922,
+    "p90_ms": 293.456494140625,
+    "p95_ms": 311.92684783935545,
+    "p99_ms": 432.86935302734366,
+    "min_ms": 94.45308685302734,
+    "max_ms": 520.8319702148438,
+    "initial_mem": {
+      "allocated_mb": 163.9970703125,
+      "reserved_mb": 248.0,
+      "max_allocated_mb": 207.14501953125,
+      "max_reserved_mb": 248.0,
+      "cpu_rss_mb": 2252.18359375
+    },
+    "final_mem": {
+      "allocated_mb": 166.58154296875,
+      "reserved_mb": 256.0,
+      "max_allocated_mb": 208.35888671875,
+      "max_reserved_mb": 256.0,
+      "cpu_rss_mb": 2257.37109375
+    },
+    "vram_allocated_drift_mb": 2.58447265625,
+    "vram_reserved_drift_mb": 8.0,
+    "cpu_rss_drift_mb": 5.1875,
+    "windows_progression": [
+      {
+        "frame": 100,
+        "mean_ms": 175.04092880249024,
+        "p50_ms": 154.73633575439453,
+        "p95_ms": 319.68135528564454,
+        "fps": 5.7129495760866496,
+        "vram_allocated_mb": 166.57763671875,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3110,
+        "temporal_sweeps": 2
+      },
+      {
+        "frame": 200,
+        "mean_ms": 198.93848556518554,
+        "p50_ms": 163.67346954345703,
+        "p95_ms": 318.9150817871094,
+        "fps": 5.026679464051379,
+        "vram_allocated_mb": 166.57763671875,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3179,
+        "temporal_sweeps": 2
+      },
+      {
+        "frame": 300,
+        "mean_ms": 190.82054794311523,
+        "p50_ms": 166.42743682861328,
+        "p95_ms": 327.85402221679686,
+        "fps": 5.240525775547537,
+        "vram_allocated_mb": 166.57763671875,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3233,
+        "temporal_sweeps": 2
+      },
+      {
+        "frame": 400,
+        "mean_ms": 188.97914474487305,
+        "p50_ms": 156.09900665283203,
+        "p95_ms": 311.6197860717773,
+        "fps": 5.291589192818218,
+        "vram_allocated_mb": 166.5791015625,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3213,
+        "temporal_sweeps": 2
+      },
+      {
+        "frame": 500,
+        "mean_ms": 176.57975158691406,
+        "p50_ms": 151.72376251220703,
+        "p95_ms": 301.6473617553711,
+        "fps": 5.6631634771996575,
+        "vram_allocated_mb": 166.5791015625,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3206,
+        "temporal_sweeps": 2
+      },
+      {
+        "frame": 600,
+        "mean_ms": 190.62958282470703,
+        "p50_ms": 156.3811492919922,
+        "p95_ms": 321.9674270629883,
+        "fps": 5.245775525404929,
+        "vram_allocated_mb": 166.57763671875,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3200,
+        "temporal_sweeps": 2
+      },
+      {
+        "frame": 700,
+        "mean_ms": 176.4136949157715,
+        "p50_ms": 151.58822631835938,
+        "p95_ms": 301.1097930908203,
+        "fps": 5.6684941635480675,
+        "vram_allocated_mb": 166.5791015625,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3255,
+        "temporal_sweeps": 2
+      },
+      {
+        "frame": 800,
+        "mean_ms": 186.99285751342774,
+        "p50_ms": 155.48303985595703,
+        "p95_ms": 312.2676208496094,
+        "fps": 5.347797842643221,
+        "vram_allocated_mb": 166.5771484375,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3259,
+        "temporal_sweeps": 2
+      },
+      {
+        "frame": 900,
+        "mean_ms": 175.7719578552246,
+        "p50_ms": 149.92841339111328,
+        "p95_ms": 304.58807678222655,
+        "fps": 5.689189630712623,
+        "vram_allocated_mb": 166.57763671875,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3227,
+        "temporal_sweeps": 2
+      },
+      {
+        "frame": 1000,
+        "mean_ms": 186.26383255004882,
+        "p50_ms": 151.73126220703125,
+        "p95_ms": 312.9294158935547,
+        "fps": 5.3687287881360515,
+        "vram_allocated_mb": 166.58154296875,
+        "vram_reserved_mb": 256.0,
+        "cpu_rss_mb": 2257.37109375,
+        "temporal_tracks": 3235,
+        "temporal_sweeps": 2
+      }
+    ],
+    "failures": 0,
+    "status": "PASS"
+  },
+  "real_dataset_validation": {
+    "sequence": "08",
+    "frame_count": 5,
+    "points_per_frame": [
+      123389,
+      123433,
+      123159,
+      123069,
+      122856
+    ],
+    "avg_points": 123181.2,
+    "min_points": 122856,
+    "max_points": 123433,
+    "end_to_end": {
+      "mean_ms": 61.65992889404297,
+      "p50_ms": 65.00982666015625,
+      "p95_ms": 71.32544403076172,
+      "p99_ms": 72.43878265380859,
+      "min_ms": 49.638206481933594,
+      "max_ms": 72.71711730957031,
+      "fps": 16.21798821270796
+    },
+    "pipeline_only": {
+      "mean_ms": 57.158277893066405,
+      "p50_ms": 60.97779083251953,
+      "p95_ms": 64.94243240356445,
+      "p99_ms": 65.53064346313477,
+      "fps": 17.495278669361472
+    },
+    "gpu_memory": {
+      "peak_allocated_mb": 237.63916015625,
+      "peak_reserved_mb": 298.0
+    },
+    "failure_count": 0
+  },
+  "real_data_accuracy": {
+    "total_evaluated_points": 592271,
+    "active_classes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "per_class_iou": {
+      "road": 0.36890224678955,
+      "sidewalk": 0.28957752770746026,
+      "parking": 1.0248736843184078e-05,
+      "terrain": 0.31842354761723135,
+      "vegetation": 0.11889851695429501,
+      "building": 0.11549113193094102,
+      "pole": 0.021839803327425533,
+      "vehicle": 0.014058046125939362,
+      "person": 0.004602315846165145
+    },
+    "per_class_iou_near_field": {
+      "road": 0.437127827459232,
+      "sidewalk": 0.33428134425081546,
+      "parking": 0.0,
+      "terrain": 0.3862578552287223,
+      "vegetation": 0.1672734569847777,
+      "building": 0.0015390079318101102,
+      "pole": 0.0262708719851577,
+      "vehicle": 0.0,
+      "person": 0.0
+    },
+    "overall_semantic_miou": 0.13908926500398344,
+    "near_field_miou": 0.1503055959822795,
+    "drivable_iou": 0.36400756108462456,
+    "drivable_iou_near_field": 0.4554509078827625,
+    "historical_comparison": {
+      "note": "Historical metrics were evaluated over full KITTI val split (sequence 08, 4071 frames). Phase 10 measures physical inference on real 5-frame subset on Tesla T4.",
+      "historical_road_iou": "~0.88 - 0.92",
+      "historical_miou": "~0.55 - 0.65"
+    }
+  },
+  "failure_and_recovery": {
+    "empty_point_cloud": {
+      "handled": true,
+      "recovery_valid": true
+    },
+    "nan_input_rejection": {
+      "handled": true,
+      "contract_rejected": true,
+      "error_type": "NumericalConsistencyError",
+      "recovery_valid": true
+    },
+    "repeated_frame": {
+      "handled": true,
+      "processed": true
+    },
+    "reset_cycle": {
+      "handled": true,
+      "vram_before_mb": 168.89208984375,
+      "vram_after_mb": 168.3759765625,
+      "post_reset_valid": true
+    },
+    "invalid_config": {
+      "handled": true,
+      "error_type": "ConfigurationError",
+      "message": "grid_engine must be 'numpy' or 'torch', got 'invalid_engine'"
+    }
+  },
+  "reproducibility": {
+    "predictions_bit_identical": true,
+    "max_probability_diff": 0.0,
+    "max_moving_prob_diff": 0.0,
+    "grid_counts_bit_identical": true,
+    "grid_classes_bit_identical": true,
+    "grid_cost_bit_identical": true,
+    "deterministic_status": "BIT_IDENTICAL"
+  },
+  "failures": 0,
+  "warnings": [
+    "In unpatched baseline, resolve_device resolved 'auto' to torch.device('cuda') without index, triggering ContractError with torch.device('cuda:0') in DevicePerceptionResult.validate(). Resolved with minimal compatibility fix.",
+    "FP16 and FP32 p95 latency on Tesla T4 exceeds NFR-1 target (p95 <= 50 ms) on unoptimized baseline due to Python runtime loop and snapshot serialization overhead. Pipeline-only latency on real KITTI data is 57.16 ms (17.5 FPS)."
+  ]
+}

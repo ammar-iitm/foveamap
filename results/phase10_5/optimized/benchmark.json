@@ -1,0 +1,354 @@
+{
+  "environment": {
+    "gpu_name": "Tesla T4",
+    "vram_total_mb": 14912.6875,
+    "cuda_version": "13.0",
+    "pytorch_version": "2.11.0+cu130",
+    "python_version": "3.13.15",
+    "os": "Linux 6.6.122+"
+  },
+  "fp_comparison": {
+    "fp32_inference_mean_ms": 14.502711257934571,
+    "fp16_inference_mean_ms": 8.010524158477784,
+    "speedup": 1.8104572149109501,
+    "semantic_agreement_pct": 99.985,
+    "has_nans": false,
+    "has_infs": false
+  },
+  "synthetic": {
+    "10000": {
+      "points": 10000,
+      "frames": 100,
+      "pipeline_only": {
+        "mean_ms": 94.39493118286133,
+        "p50_ms": 83.75710678100586,
+        "p95_ms": 148.7621643066406,
+        "p99_ms": 158.82853637695334,
+        "fps": 10.593789173518287
+      },
+      "end_to_end": {
+        "mean_ms": 104.13961074829102,
+        "p50_ms": 91.6815185546875,
+        "p95_ms": 163.29680786132812,
+        "p99_ms": 171.60507415771505,
+        "fps": 9.602494121252613
+      },
+      "peak_allocated_mb": 98.39990234375,
+      "peak_reserved_mb": 138.0
+    },
+    "20000": {
+      "points": 20000,
+      "frames": 100,
+      "pipeline_only": {
+        "mean_ms": 131.7196408843994,
+        "p50_ms": 123.07476806640625,
+        "p95_ms": 199.50457305908202,
+        "p99_ms": 217.26289123535156,
+        "fps": 7.591882222618767
+      },
+      "end_to_end": {
+        "mean_ms": 143.70807708740233,
+        "p50_ms": 132.26617431640625,
+        "p95_ms": 212.01948013305662,
+        "p99_ms": 229.8816668701172,
+        "fps": 6.95855111464477
+      },
+      "peak_allocated_mb": 101.70751953125,
+      "peak_reserved_mb": 142.0
+    },
+    "50000": {
+      "points": 50000,
+      "frames": 50,
+      "pipeline_only": {
+        "mean_ms": 214.35731872558594,
+        "p50_ms": 196.63870239257812,
+        "p95_ms": 328.48755340576173,
+        "p99_ms": 374.4576397705077,
+        "fps": 4.6651078019881895
+      },
+      "end_to_end": {
+        "mean_ms": 225.9391534423828,
+        "p50_ms": 206.85043334960938,
+        "p95_ms": 343.1875793457031,
+        "p99_ms": 388.15137756347644,
+        "fps": 4.4259703763784
+      },
+      "peak_allocated_mb": 111.17041015625,
+      "peak_reserved_mb": 146.0
+    },
+    "100000": {
+      "points": 100000,
+      "frames": 30,
+      "pipeline_only": {
+        "mean_ms": 290.8956985473633,
+        "p50_ms": 258.9424743652344,
+        "p95_ms": 434.74708862304686,
+        "p99_ms": 519.6038891601563,
+        "fps": 3.4376582568723726
+      },
+      "end_to_end": {
+        "mean_ms": 300.90619201660155,
+        "p50_ms": 267.73097229003906,
+        "p95_ms": 448.8126525878906,
+        "p99_ms": 535.1793368530274,
+        "fps": 3.323294855776275
+      },
+      "peak_allocated_mb": 125.85205078125,
+      "peak_reserved_mb": 170.0
+    }
+  },
+  "real_kitti": {
+    "exploratory_5": {
+      "frames": 5,
+      "avg_points": 123181.2,
+      "stages": {
+        "perception_inference_ms": {
+          "mean": 15.110540962219238,
+          "p50": 16.786752700805664,
+          "p95": 17.151123428344725
+        },
+        "grid_binning_projection_ms": {
+          "mean": 7.625235271453858,
+          "p50": 7.685120105743408,
+          "p95": 7.85877742767334
+        },
+        "fusion_temporal_terrain_ms": {
+          "mean": 33.614253234863284,
+          "p50": 32.272865295410156,
+          "p95": 44.11548843383789
+        },
+        "snapshot_construction_ms": {
+          "mean": 3.550246334075928,
+          "p50": 3.4735679626464844,
+          "p95": 3.9511998653411866
+        }
+      },
+      "end_to_end": {
+        "mean_ms": 59.90027618408203,
+        "p50_ms": 58.70044708251953,
+        "p95_ms": 72.64087295532227,
+        "p99_ms": 74.9731819152832,
+        "fps": 16.694413844217653
+      },
+      "peak_allocated_mb": 164.9892578125,
+      "peak_reserved_mb": 218.0
+    },
+    "benchmark_20": {
+      "frames": 20,
+      "avg_points": 123181.2,
+      "stages": {
+        "perception_inference_ms": {
+          "mean": 15.205598402023316,
+          "p50": 16.782143592834473,
+          "p95": 18.067858219146732
+        },
+        "grid_binning_projection_ms": {
+          "mean": 7.759753632545471,
+          "p50": 7.684783935546875,
+          "p95": 8.411817359924317
+        },
+        "fusion_temporal_terrain_ms": {
+          "mean": 32.95391836166382,
+          "p50": 33.05547332763672,
+          "p95": 35.79174098968506
+        },
+        "snapshot_construction_ms": {
+          "mean": 7.6797391176223755,
+          "p50": 4.018768072128296,
+          "p95": 8.773963141441396
+        }
+      },
+      "end_to_end": {
+        "mean_ms": 63.59900894165039,
+        "p50_ms": 61.41209602355957,
+        "p95_ms": 69.8838272094727,
+        "p99_ms": 121.9444534301757,
+        "fps": 15.723515454737054
+      },
+      "peak_allocated_mb": 165.7568359375,
+      "peak_reserved_mb": 220.0
+    },
+    "benchmark_100": {
+      "frames": 100,
+      "avg_points": 123181.2,
+      "stages": {
+        "perception_inference_ms": {
+          "mean": 15.57609754562378,
+          "p50": 16.920815467834473,
+          "p95": 21.372918796539306
+        },
+        "grid_binning_projection_ms": {
+          "mean": 8.274887309074401,
+          "p50": 7.693840026855469,
+          "p95": 10.765705251693726
+        },
+        "fusion_temporal_terrain_ms": {
+          "mean": 40.820718650817874,
+          "p50": 36.00103950500488,
+          "p95": 61.421302986145015
+        },
+        "snapshot_construction_ms": {
+          "mean": 4.607012455463409,
+          "p50": 4.1714558601379395,
+          "p95": 6.63976490497589
+        }
+      },
+      "end_to_end": {
+        "mean_ms": 69.27871643066406,
+        "p50_ms": 63.89990425109863,
+        "p95_ms": 98.40040550231933,
+        "p99_ms": 105.26804496765143,
+        "fps": 14.434447569490205
+      },
+      "peak_allocated_mb": 165.03271484375,
+      "peak_reserved_mb": 210.0
+    }
+  },
+  "soak_1000": {
+    "total_frames": 1000,
+    "total_time_seconds": 178.6250475270008,
+    "overall_fps": 5.598319014296362,
+    "mean_ms": 176.74043730163575,
+    "p50_ms": 155.908203125,
+    "p95_ms": 264.62731170654297,
+    "p99_ms": 352.2077905273437,
+    "initial_mem": {
+      "allocated_mb": 121.0703125,
+      "reserved_mb": 210.0,
+      "max_allocated_mb": 165.03271484375,
+      "max_reserved_mb": 210.0,
+      "cpu_rss_mb": 1984.97265625
+    },
+    "final_mem": {
+      "allocated_mb": 123.65478515625,
+      "reserved_mb": 214.0,
+      "max_allocated_mb": 166.654296875,
+      "max_reserved_mb": 214.0,
+      "cpu_rss_mb": 1994.5078125
+    },
+    "vram_allocated_drift_mb": 2.58447265625,
+    "vram_reserved_drift_mb": 4.0,
+    "cpu_rss_drift_mb": 9.53515625,
+    "memory_bounded_statement": "No unbounded growth was observed over 1000 frames.",
+    "windows_progression": [
+      {
+        "frame": 100,
+        "mean_ms": 162.7069548034668,
+        "p50_ms": 147.90322875976562,
+        "p95_ms": 247.45629119873044,
+        "fps": 6.146018780868321,
+        "vram_allocated_mb": 123.65087890625,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1993.78515625,
+        "temporal_tracks": 3110
+      },
+      {
+        "frame": 200,
+        "mean_ms": 179.12817993164063,
+        "p50_ms": 156.82015991210938,
+        "p95_ms": 262.29347534179686,
+        "fps": 5.582594544206404,
+        "vram_allocated_mb": 123.65087890625,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1994.50390625,
+        "temporal_tracks": 3179
+      },
+      {
+        "frame": 300,
+        "mean_ms": 178.24381958007814,
+        "p50_ms": 155.7859344482422,
+        "p95_ms": 273.73453216552736,
+        "fps": 5.610292701064668,
+        "vram_allocated_mb": 123.65087890625,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1994.5078125,
+        "temporal_tracks": 3233
+      },
+      {
+        "frame": 400,
+        "mean_ms": 178.36449035644532,
+        "p50_ms": 159.0915985107422,
+        "p95_ms": 268.79193725585935,
+        "fps": 5.606497111625696,
+        "vram_allocated_mb": 123.65234375,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1994.5078125,
+        "temporal_tracks": 3213
+      },
+      {
+        "frame": 500,
+        "mean_ms": 183.22965515136718,
+        "p50_ms": 156.13883209228516,
+        "p95_ms": 265.2859237670898,
+        "fps": 5.457631840074652,
+        "vram_allocated_mb": 123.65234375,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1994.5078125,
+        "temporal_tracks": 3206
+      },
+      {
+        "frame": 600,
+        "mean_ms": 173.7186293029785,
+        "p50_ms": 156.5155029296875,
+        "p95_ms": 258.4787261962891,
+        "fps": 5.756435012251472,
+        "vram_allocated_mb": 123.65087890625,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1994.5078125,
+        "temporal_tracks": 3200
+      },
+      {
+        "frame": 700,
+        "mean_ms": 180.6456364440918,
+        "p50_ms": 154.17596435546875,
+        "p95_ms": 268.61232604980466,
+        "fps": 5.535699725077451,
+        "vram_allocated_mb": 123.65234375,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1994.5078125,
+        "temporal_tracks": 3255
+      },
+      {
+        "frame": 800,
+        "mean_ms": 173.9122802734375,
+        "p50_ms": 155.69673919677734,
+        "p95_ms": 263.87256011962893,
+        "fps": 5.7500252335702084,
+        "vram_allocated_mb": 123.650390625,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1994.5078125,
+        "temporal_tracks": 3259
+      },
+      {
+        "frame": 900,
+        "mean_ms": 180.90646224975586,
+        "p50_ms": 157.14318084716797,
+        "p95_ms": 261.8080291748047,
+        "fps": 5.527718510239949,
+        "vram_allocated_mb": 123.65087890625,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1994.5078125,
+        "temporal_tracks": 3227
+      },
+      {
+        "frame": 1000,
+        "mean_ms": 176.5482649230957,
+        "p50_ms": 159.16756439208984,
+        "p95_ms": 255.22946624755858,
+        "fps": 5.664173479334953,
+        "vram_allocated_mb": 123.65478515625,
+        "vram_reserved_mb": 214.0,
+        "cpu_rss_mb": 1994.5078125,
+        "temporal_tracks": 3235
+      }
+    ],
+    "status": "PASS"
+  },
+  "memory_breakdown": {
+    "model_allocated_mb": 1.26953125,
+    "model_reserved_mb": 0.0,
+    "grid_allocated_mb": 11.29833984375,
+    "persistent_grid_bytes": 5120000,
+    "persistent_grid_mb": 4.8828125
+  }
+}
