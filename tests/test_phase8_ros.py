@@ -269,8 +269,9 @@ def test_qos_profiles_documented_and_bounded():
 def _node_config(**over):
     # Same-frame operation (world == base) unless a test overrides it: the
     # node never silently substitutes identity world pose when TF is required.
+    # The runtime runs on the CPU: "auto" would pick CUDA or MPS when present.
     params = {"perception.backend_type": "classical", "runtime.grid_engine": "numpy",
-              "io.world_frame": "base_link"}
+              "runtime.device": "cpu", "io.world_frame": "base_link"}
     params.update(over)
     return from_ros_params(params)
 
