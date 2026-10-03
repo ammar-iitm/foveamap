@@ -267,7 +267,10 @@ def test_qos_profiles_documented_and_bounded():
 
 # ------------------------------------------------------- A4 node lifecycle
 def _node_config(**over):
-    params = {"perception.backend_type": "classical", "runtime.grid_engine": "numpy"}
+    # Same-frame operation (world == base) unless a test overrides it: the
+    # node never silently substitutes identity world pose when TF is required.
+    params = {"perception.backend_type": "classical", "runtime.grid_engine": "numpy",
+              "io.world_frame": "base_link"}
     params.update(over)
     return from_ros_params(params)
 
@@ -469,6 +472,204 @@ def test_single_point_with_ring_processes_through_node():
     assert snap is not None
     assert isinstance(core.last_outputs["/foveamap/grid"], dict)
     assert core.last_outputs["/foveamap/metrics"]["frames_processed"] == 1
+
+
+# ------------------------------------------------------- B guarded ROS2 tests
+@needs_ros
+def test_ros_node_lifecycle_with_rclpy():
+    node = FoveaMapRosNode(ros_params={"perception.backend_type": "classical"})
+    node.configure()
+    node.activate()
+    assert node.state == "ACTIVE"
+    node.deactivate()
+    node.shutdown()
+    assert node.state == "SHUTDOWN"
+
+
+@needs_ros
+def test_ros_qos_conversion_with_rclpy():
+    from foveamap_ros.qos import to_rclpy
+    q = to_rclpy(LIDAR_INPUT_QOS)
+    assert q.depth == 5
+
+
+# --------------------------------------- C closure: padded/shuffled layouts
+def _velodyne_style_cloud(n=6, frame="lidar"):
+    """Ouster/Velodyne-style layout: shuffled fields, alignment padding."""
+    import struct as _struct
+    xs = np.linspace(1.0, 6.0, n).astype(np.float32)
+    recs = bytearray()
+    for k in range(n):
+        # ring u16@0, pad, x f32@8, y f32@12, z f32@16, intensity u8@20, pad, ring u16@22
+        recs += _struct.pack("<H6xfffBxH",
+                             k % 64, float(xs[k]), 0.5, -1.7, 100 + k, 7)
+    return RosPointCloud2(
+        fields=[RosPointField("ring", 0, UINT16),
+                RosPointField("x", 8, FLOAT32),
+                RosPointField("y", 12, FLOAT32),
+                RosPointField("z", 16, FLOAT32),
+                RosPointField("intensity", 20, UINT8),
+                RosPointField("pad_ring", 22, UINT16)],
+        height=1, width=n, point_step=24, row_step=24 * n, data=bytes(recs),
+        header=RosHeader(RosStamp(50, 0), frame)), xs
+
+
+def test_shuffled_padded_layout_parses_exactly():
+    msg, xs = _velodyne_style_cloud(n=6)
+    out = cloud_to_arrays(msg)
+    np.testing.assert_allclose(out["pts"][:, 0], xs, rtol=1e-6)
+    np.testing.assert_allclose(out["pts"][:, 1], 0.5, rtol=1e-6)
+    np.testing.assert_allclose(out["pts"][:, 2], -1.7, rtol=1e-6)
+    # Offset-honoring proof: ring@0 reads k%64, NOT the pad_ring@22 value (7).
+    np.testing.assert_array_equal(out["ring"], np.arange(6, dtype=np.int16) % 64)
+    assert out["ring_available"] is True
+    np.testing.assert_allclose(out["intensity"], (100 + np.arange(6)) / 255.0, rtol=1e-6)
+
+
+def test_organized_cloud_with_row_padding():
+    xyz, msg = _cloud_xyz(n=4)
+    # organized 2x2 with 8 bytes of row padding: row_step = 2*12 + 8
+    padded = msg.data[:24] + b"\x00" * 8 + msg.data[24:] + b"\x00" * 8
+    org = RosPointCloud2(fields=list(msg.fields), height=2, width=2,
+                         point_step=12, row_step=32, data=padded, header=msg.header)
+    out = cloud_to_arrays(org)
+    np.testing.assert_allclose(out["pts"].reshape(2, 2, 3)[:, :, 0],
+                               xyz[:, 0].reshape(2, 2), rtol=1e-6)
+
+
+def test_overlapping_and_oob_fields_rejected():
+    _, msg = _cloud_xyz(n=2)
+    overlap = RosPointCloud2(
+        fields=[RosPointField("x", 0, FLOAT32), RosPointField("y", 2, FLOAT32),
+                RosPointField("z", 8, FLOAT32)],
+        height=1, width=2, point_step=12, row_step=24, data=msg.data, header=msg.header)
+    with pytest.raises(DataAdapterError):
+        cloud_to_arrays(overlap)
+    oob = RosPointCloud2(
+        fields=[RosPointField("x", 0, FLOAT32), RosPointField("y", 4, FLOAT32),
+                RosPointField("z", 12, FLOAT32)],
+        height=1, width=2, point_step=12, row_step=24, data=msg.data, header=msg.header)
+    with pytest.raises(DataAdapterError):
+        cloud_to_arrays(oob)
+
+
+def test_count_multi_field_first_element_used():
+    import struct as _struct
+    recs = b"".join(_struct.pack("<fff3f", 1.0 + k, 0.0, 0.0, 0.1 * k, 0.2 * k, 0.3 * k) for k in range(3))
+    msg = RosPointCloud2(
+        fields=[RosPointField("x", 0, FLOAT32), RosPointField("y", 4, FLOAT32),
+                RosPointField("z", 8, FLOAT32),
+                RosPointField("normal", 12, FLOAT32, 3)],
+        height=1, width=3, point_step=24, row_step=72, data=recs,
+        header=RosHeader(RosStamp(1, 0), "lidar"))
+    out = cloud_to_arrays(msg)  # must not crash on count > 1 auxiliary field
+    assert len(out["pts"]) == 3
+
+
+# --------------------------------------- C closure: TF world pose
+def _tf_node(world="map", provider=None):
+    from foveamap_ros.node import FoveaMapNodeCore
+    params = {"perception.backend_type": "classical", "runtime.grid_engine": "numpy",
+              "io.world_frame": world}
+    return FoveaMapNodeCore(config=_node_config(**params), tf_provider=provider)
+
+
+def _static_tf(x, stamp=100.0):
+    from foveamap_ros.frames import RigidTransform, DictTransformProvider
+    return DictTransformProvider({
+        ("base_link", "lidar"): RigidTransform((0, 0, 0), (0, 0, 0, 1), stamp, "base_link", "lidar"),
+        ("map", "base_link"): RigidTransform((x, 0, 0), (0, 0, 0, 1), stamp, "map", "base_link"),
+    })
+
+
+def test_world_pose_moves_with_vehicle():
+    from foveamap_ros.frames import resolve_world_pose
+    from foveamap_ros.frames import FramePolicy
+    policy = FramePolicy(base_frame="base_link", world_frame="map")
+    for x in (0.0, 5.0, 10.0):
+        pose, prov = resolve_world_pose("base_link", "map", 100.0, policy, _static_tf(x))
+        assert pose[0, 3] == pytest.approx(x)
+        assert prov["pose"] == "transformed"
+
+
+def test_world_pose_missing_or_stale_fails_typed():
+    from foveamap_ros.frames import FramePolicy, resolve_world_pose
+    from foveamap_ros.frames import DictTransformProvider, MissingTransformError, StaleTransformError
+    policy = FramePolicy(base_frame="base_link", world_frame="map")
+    with pytest.raises(MissingTransformError):
+        resolve_world_pose("base_link", "map", 100.0, policy, DictTransformProvider({}))
+    with pytest.raises(MissingTransformError):
+        resolve_world_pose("base_link", "map", 100.0, policy, None)
+    old = DictTransformProvider({("map", "base_link"):
+        RigidTransform((0, 0, 0), (0, 0, 0, 1), 90.0, "map", "base_link")})
+    with pytest.raises(StaleTransformError):
+        resolve_world_pose("base_link", "map", 100.0, policy, old)
+    pose, prov = resolve_world_pose("base_link", "base_link", 100.0, policy, None)
+    np.testing.assert_allclose(pose, np.eye(4))
+    assert prov["pose"] == "identity_same_frame_operation"
+
+
+def test_node_world_frame_end_to_end_and_timestamp_consistency():
+    core = _tf_node(world="map", provider=_static_tf(5.0))
+    core.configure()
+    core.activate()
+    # Cloud stamp exactly matches the TF stamp (100.0); staleness is strict.
+    xyz, msg = _cloud_xyz(n=10, frame="lidar", sec=100, nanosec=0)
+    assert core.submit(msg) is True
+    snap = core.spin_once()
+    assert snap is not None
+    assert snap.ego_pose[0, 3] == pytest.approx(5.0)  # world pose from TF, same stamp
+    assert snap.timestamp == pytest.approx(100.0, rel=1e-9)
+
+
+def test_node_missing_world_tf_drops_frame_with_metrics():
+    # base_link cloud needs no sensor TF, isolating the world-pose branch.
+    core = _tf_node(world="map", provider=None)
+    core.configure()
+    core.activate()
+    _, msg = _cloud_xyz(n=5, frame="base_link", sec=100, nanosec=0)
+    core.submit(msg)
+    assert core.spin_once() is None
+    assert core.metrics.errors.get("INPUT_MissingTransformError", 0) == 1
+    assert core.last_snapshot is None
+
+
+# --------------------------------------- C closure: terminal lifecycle
+def test_shutdown_is_terminal():
+    from foveamap_ros.node import SHUTDOWN
+    from foveamap.core.exceptions import FoveaMapError
+    core = FoveaMapNodeCore(config=_node_config())
+    core.configure()
+    core.activate()
+    core.shutdown()
+    assert core.state == SHUTDOWN
+    for op in (core.configure, core.activate):
+        with pytest.raises(FoveaMapError):
+            op()
+    core.deactivate()  # safe no-op, stays terminal
+    assert core.state == SHUTDOWN
+    _, msg = _cloud_xyz(n=2, frame="base_link")
+    assert core.submit(msg) is False
+    assert core.spin_once() is None
+
+
+# --------------------------------------- C closure: colcon structure
+def test_ros_package_structurally_colcon_valid():
+    import os
+    import xml.etree.ElementTree as ET
+    root = os.path.join(os.path.dirname(__file__), "..", "foveamap_ros")
+    assert os.path.isfile(os.path.join(root, "package.xml"))
+    assert os.path.isfile(os.path.join(root, "CMakeLists.txt"))
+    tree = ET.parse(os.path.join(root, "package.xml"))
+    assert tree.getroot().find("name").text == "foveamap_ros"
+    with open(os.path.join(root, "CMakeLists.txt")) as fh:
+        cmake = fh.read()
+    msgs = sorted(f for f in os.listdir(os.path.join(root, "msg")) if f.endswith(".msg"))
+    assert msgs, "msg/ must contain message definitions"
+    for m in msgs:
+        assert m in cmake, f"{m} not wired into CMakeLists.txt"
+    for dep in ("rosidl_default_generators", "std_msgs", "sensor_msgs"):
+        assert dep in cmake, f"{dep} missing from CMakeLists.txt"
 
 
 # ------------------------------------------------------- B guarded ROS2 tests
