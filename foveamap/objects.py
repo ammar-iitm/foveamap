@@ -64,55 +64,63 @@ def extract_objects(grid, snap, dyn=None, max_age=0):
 
     grid: the FoveatedGrid (or TorchFoveatedGrid) the snapshot came from, for tiers / origins.
     snap: host TierLayers per tier (`grid.snapshot()`); dyn: host dynamic cells per tier.
-    max_age: include static cells observed up to this many frames ago (0 = this frame)."""
+    max_age: include static cells observed up to this many frames ago (0 = this frame).
+    Every box is computed at once from per-object sums (no per-object Python work)."""
     m = _members(grid, snap, dyn, max_age)
     if m is None:
         return []
-    n = grid.tiers[-1].n
-    objs = []
+    comp = np.zeros(len(m["cls"]), np.int64)            # object id per member cell, 0 = none
+    next_id = 0
     for c in OBJECT_CLASSES:
         sel = m["cls"] == c
         if not sel.any():
             continue
-        raster = np.zeros((n, n), bool)
-        raster[m["ci"][sel], m["cj"][sel]] = True
+        ci, cj = m["ci"][sel], m["cj"][sel]
+        i0, j0 = ci.min(), cj.min()                     # label only the box around this class's cells
+        raster = np.zeros((ci.max() - i0 + 1, cj.max() - j0 + 1), bool)
+        raster[ci - i0, cj - j0] = True
         lab, nlab = ndimage.label(raster, structure=np.ones((3, 3), bool))
-        comp = lab[m["ci"][sel], m["cj"][sel]]
-        order = np.argsort(comp, kind="stable")
-        comp = comp[order]
-        idx = np.nonzero(sel)[0][order]
-        starts = np.r_[0, np.nonzero(np.diff(comp))[0] + 1]
-        for a, b in zip(starts, np.r_[starts[1:], len(comp)]):
-            if b - a < MIN_CELLS[c]:
-                continue
-            objs.append(_box(c, m, idx[a:b]))
-    return objs
-
-
-def _box(c, m, ids):
-    x, y, cell = m["x"][ids], m["y"][ids], m["cell"][ids]
+        comp[sel] = lab[ci - i0, cj - j0] + next_id
+        next_id += nlab
+    ids, g = np.unique(comp, return_inverse=True)       # every member belongs to some component
+    count = np.bincount(g)
+    first = np.zeros(len(ids), np.int64)
+    first[g[::-1]] = np.arange(len(g))[::-1]            # one member of each component
+    cls = m["cls"][first].astype(np.int64)
+    keep = count >= np.array([MIN_CELLS.get(int(c), 1) for c in cls])
+    if not keep.any():
+        return []
+    sel = keep[g]                                        # drop small components, renumber the rest
+    g = np.cumsum(keep)[g[sel]] - 1
+    cls, count = cls[keep], count[keep]
+    x, y, cell = m["x"][sel], m["y"][sel], m["cell"][sel]
     w = cell * cell
-    mx, my = np.average(x, weights=w), np.average(y, weights=w)
-    dx, dy = x - mx, y - my
-    cxx, cyy, cxy = np.average(dx * dx, weights=w), np.average(dy * dy, weights=w), np.average(dx * dy, weights=w)
-    yaw = 0.5 * np.arctan2(2 * cxy, cxx - cyy)           # long axis
+    sw = lambda v: np.bincount(g, w * v, minlength=len(cls))
+    W = sw(np.ones_like(w))
+    mx, my = sw(x) / W, sw(y) / W
+    dx, dy = x - mx[g], y - my[g]
+    cxx, cyy, cxy = sw(dx * dx) / W, sw(dy * dy) / W, sw(dx * dy) / W
+    yaw = 0.5 * np.arctan2(2 * cxy, cxx - cyy)                # long axis
     u, v = np.cos(yaw), np.sin(yaw)
-    pa, pb = dx * u + dy * v, -dx * v + dy * u
-    half = cell / 2 * (abs(u) + abs(v))                  # a cell's half-extent along either axis
-    a0, a1 = (pa - half).min(), (pa + half).max()
-    b0, b1 = (pb - half).min(), (pb + half).max()
+    pa, pb = dx * u[g] + dy * v[g], -dx * v[g] + dy * u[g]
+    half = cell / 2 * (np.abs(u) + np.abs(v))[g]           # a cell's half-extent along either axis
+    order = np.argsort(g, kind="stable")
+    starts = np.r_[0, np.nonzero(np.diff(g[order]))[0] + 1]
+    red = lambda f, a: f.reduceat(a[order], starts)
+    a0, a1 = red(np.minimum, pa - half), red(np.maximum, pa + half)
+    b0, b1 = red(np.minimum, pb - half), red(np.maximum, pb + half)
     ca, cb = (a0 + a1) / 2, (b0 + b1) / 2
     length, width = a1 - a0, b1 - b0
-    if width > length:                                    # keep yaw on the long side
-        length, width, yaw = width, length, yaw + np.pi / 2
-    yaw = (yaw + np.pi / 2) % np.pi - np.pi / 2
-    z = m["z"][ids]
-    z = z[np.isfinite(z)]
-    moving = float(np.sum(w * m["moving"][ids])) > 0.5 * float(np.sum(w))
-    return dict(cls=int(c), moving=bool(moving),
-                x=float(mx + ca * u - cb * v), y=float(my + ca * v + cb * u),
-                length=float(length), width=float(width), yaw=float(yaw),
-                z_top=float(z.max()) if len(z) else None, n_cells=int(len(ids)))
+    swap = width > length                                  # keep yaw on the long side
+    length, width = np.where(swap, width, length), np.where(swap, length, width)
+    yaw = (np.where(swap, yaw + np.pi / 2, yaw) + np.pi / 2) % np.pi - np.pi / 2
+    cx, cy = mx + ca * u - cb * v, my + ca * v + cb * u
+    z_top = red(np.fmax, m["z"][sel].astype(np.float64))   # NaN only where no member has a height
+    moving = sw(m["moving"][sel].astype(np.float64)) > 0.5 * W
+    return [dict(cls=int(cls[k]), moving=bool(moving[k]), x=float(cx[k]), y=float(cy[k]),
+                 length=float(length[k]), width=float(width[k]), yaw=float(yaw[k]),
+                 z_top=None if np.isnan(z_top[k]) else float(z_top[k]), n_cells=int(count[k]))
+            for k in range(len(cls))]
 
 
 def match_objects(pred, gt, ego_xy, max_range=25.0):
