@@ -36,7 +36,7 @@ from foveamap.core.exceptions import (
     ContractError,
     PerceptionError,
 )
-from foveamap.runtime.device import resolve_device, sync_device
+from foveamap.runtime.device import canonical_device, resolve_device, sync_device
 from foveamap.runtime.perception import RangeUNetBackend, DevicePerceptionResult
 from foveamap.runtime.runtime import FoveaMapRuntime
 from foveamap.grid import FoveatedGrid, UNKNOWN
@@ -416,3 +416,33 @@ def test_runtime_reset_clears_all_temporal_and_grid_state():
     snap_fresh = runtime.process(frame)
     assert runtime.frame_count == 1
     assert snap_fresh.frame_id == frame.frame_id
+
+
+def _accelerators():
+    out = []
+    if torch.cuda.is_available():
+        out.append("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        out.append("mps")
+    return out
+
+
+def test_canonical_device_fills_in_the_index():
+    assert canonical_device("cpu") == torch.device("cpu")
+    assert canonical_device("mps") == torch.device("mps", 0)
+    assert canonical_device(torch.device("cuda", 1)) == torch.device("cuda", 1)
+    with patch("torch.cuda.current_device", return_value=0):
+        assert canonical_device("cuda") == torch.device("cuda", 0)
+
+
+@pytest.mark.parametrize("kind", _accelerators() or [pytest.param("none", marks=pytest.mark.skip("no CUDA or MPS"))])
+def test_result_on_accelerator_accepts_unindexed_device(kind):
+    # tensors report "cuda:0" / "mps:0" while resolve_device used to hand out "cuda" / "mps"
+    dev = torch.device(kind)
+    n = 4
+    cp = torch.full((n, 9), 1 / 9, device=dev)
+    res = DevicePerceptionResult(class_probabilities=cp, moving_probabilities=torch.zeros(n, device=dev),
+                                 semantic_predictions=torch.zeros(n, dtype=torch.long, device=dev),
+                                 is_moving=torch.zeros(n, dtype=torch.bool, device=dev), device=dev)
+    assert res.device == cp.device
+    assert resolve_device(RuntimeConfig(device=kind)).device == cp.device

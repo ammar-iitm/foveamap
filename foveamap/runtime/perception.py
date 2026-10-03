@@ -19,7 +19,7 @@ from ..core.contracts import LiDARFrame, PerceptionResult
 from ..core.config import PerceptionConfig, SensorConfig
 from ..core.exceptions import ConfigurationError, ContractError, PerceptionError, NumericalConsistencyError
 from ..core.ontology import CANONICAL_CLASSES, NUM_CLASSES, ROAD, SIDEWALK, BUILDING, VEHICLE, PERSON
-from .device import DeviceContext
+from .device import DeviceContext, canonical_device
 from ..model import RangeUNet, predict
 from ..frames import DatasetInfo, make_features, prev_in_ego
 from .. import features_torch
@@ -130,6 +130,7 @@ class DevicePerceptionResult:
     strict_validation: bool = False
 
     def __post_init__(self) -> None:
+        self.device = canonical_device(self.device)
         self.validate()
 
     @property
@@ -161,7 +162,7 @@ class DevicePerceptionResult:
         ]:
             if not torch.is_tensor(t):
                 raise ContractError(f"DevicePerceptionResult.{name} must be a torch.Tensor; got {type(t).__name__}")
-            if t.device != self.device:
+            if canonical_device(t.device) != self.device:
                 raise ContractError(f"DevicePerceptionResult.{name} device ({t.device}) mismatch with result device ({self.device})")
 
         n = self.num_points
@@ -181,7 +182,7 @@ class DevicePerceptionResult:
         if self.confidence is not None:
             if not torch.is_tensor(self.confidence):
                 raise ContractError(f"confidence must be torch.Tensor; got {type(self.confidence).__name__}")
-            if self.confidence.device != self.device:
+            if canonical_device(self.confidence.device) != self.device:
                 raise ContractError(f"confidence device ({self.confidence.device}) mismatch with {self.device}")
             if self.confidence.shape != (n,):
                 raise ContractError(f"confidence shape {tuple(self.confidence.shape)} mismatch with point count {n}")
@@ -190,7 +191,7 @@ class DevicePerceptionResult:
         if self.pts_world is not None:
             if not torch.is_tensor(self.pts_world):
                 raise ContractError(f"pts_world must be torch.Tensor; got {type(self.pts_world).__name__}")
-            if self.pts_world.device != self.device:
+            if canonical_device(self.pts_world.device) != self.device:
                 raise ContractError(f"pts_world device ({self.pts_world.device}) mismatch with {self.device}")
             if self.pts_world.ndim != 2 or self.pts_world.shape != (n, 3):
                 raise ContractError(f"pts_world shape {tuple(self.pts_world.shape)} mismatch with (N, 3)")
@@ -203,12 +204,12 @@ class DevicePerceptionResult:
                 r, c = self.point_indices
                 if not torch.is_tensor(r) or not torch.is_tensor(c):
                     raise ContractError("point_indices tuple elements must be torch.Tensors")
-                if r.device != self.device or c.device != self.device:
+                if canonical_device(r.device) != self.device or canonical_device(c.device) != self.device:
                     raise ContractError("point_indices tensors must be on the result device")
                 if r.shape != (n,) or c.shape != (n,):
                     raise ContractError(f"point_indices tensors must have shape ({n},)")
             elif torch.is_tensor(self.point_indices):
-                if self.point_indices.device != self.device:
+                if canonical_device(self.point_indices.device) != self.device:
                     raise ContractError("point_indices tensor must be on the result device")
                 if self.point_indices.shape != (n,):
                     raise ContractError(f"point_indices tensor must have shape ({n},)")
