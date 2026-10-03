@@ -1,0 +1,11 @@
+std_msgs/Header header
+uint64 frames_received
+uint64 frames_processed
+uint64 frames_dropped
+float64 fps
+uint64 queue_depth
+string device
+uint64 grid_bytes
+uint64 temporal_tracks
+uint64 traversable_cells
+uint64 unknown_cells

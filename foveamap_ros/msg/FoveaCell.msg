@@ -1,0 +1,9 @@
+int32 i
+int32 j
+float64 x
+float64 y
+uint8 cls
+uint8 cost
+float32 ground
+bool dynamic
+bool traversable
