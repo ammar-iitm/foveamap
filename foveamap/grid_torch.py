@@ -235,7 +235,7 @@ class TorchFoveatedGrid(FoveatedGrid):
         return torch.floor(xy.double() / self.base).long().to(self.device)
 
     # ------------------------------------------------ authoritative tier assign
-    def assign_native_tiers_t(self, xy_world: Any, origins: list[np.ndarray | torch.Tensor]) -> tuple[torch.Tensor, dict[str, Any]]:
+    def assign_native_tiers_t(self, xy_world: Any, origins: list[np.ndarray | torch.Tensor], compute_diagnostics: bool = True) -> tuple[torch.Tensor, dict[str, Any]]:
         """Assign each point to exactly one native tier on the device."""
         dev = self.device
         n_pts = len(xy_world)
@@ -256,15 +256,18 @@ class TorchFoveatedGrid(FoveatedGrid):
             native_tiers[assign_mask] = k
             unassigned[assign_mask] = False
 
-        n_assigned = int((native_tiers >= 0).sum().item())
-        n_filtered = int((native_tiers == -1).sum().item())
-        diag = {
-            "points_in": n_pts,
-            "native_points_assigned": n_assigned,
-            "filtered_points": n_filtered,
-            "native_counts_per_tier": [int((native_tiers == k).sum().item()) for k in range(len(self.tiers))],
-        }
-        self.last_diagnostics = diag
+        if compute_diagnostics:
+            n_assigned = int((native_tiers >= 0).sum().item())
+            n_filtered = int((native_tiers == -1).sum().item())
+            diag = {
+                "points_in": n_pts,
+                "native_points_assigned": n_assigned,
+                "filtered_points": n_filtered,
+                "native_counts_per_tier": [int((native_tiers == k).sum().item()) for k in range(len(self.tiers))],
+            }
+            self.last_diagnostics = diag
+        else:
+            diag = {}
         return native_tiers, diag
 
     # -------------------------------------------------------------- binning
@@ -305,7 +308,7 @@ class TorchFoveatedGrid(FoveatedGrid):
         is_ground = self._ground_mask[cls]
         static = ~moving
 
-        native_tiers, _ = self.assign_native_tiers_t(xy_world, origins)
+        native_tiers, _ = self.assign_native_tiers_t(xy_world, origins, compute_diagnostics=False)
 
         # 1. Native binning
         native_stats = []
@@ -456,7 +459,7 @@ class TorchFoveatedGrid(FoveatedGrid):
                 zmin_ng=zmin_ng_p, p_static=p_static_p, p_all=p_all_p,
                 n_dyn=n_dyn_p, n_dyn_person=n_dyn_person_p,
                 zmin_dyn=zmin_dyn_p, zmax_dyn=zmax_dyn_p,
-                n_in=int(n_pts_p.sum().item()),
+                n_in=int(child_st.get("n_in", 0)),
             )
 
         all_keys = torch.cat([parent_native["key"], uk_p])
@@ -478,7 +481,7 @@ class TorchFoveatedGrid(FoveatedGrid):
             n_dyn_person=torch.cat([parent_native["n_dyn_person"], n_dyn_person_p])[order],
             zmin_dyn=torch.cat([parent_native.get("zmin_dyn", torch.full_like(parent_native["z_min"], float("inf"))), zmin_dyn_p])[order],
             zmax_dyn=torch.cat([parent_native.get("zmax_dyn", torch.full_like(parent_native["z_max"], -float("inf"))), zmax_dyn_p])[order],
-            n_in=parent_native["n_in"] + int(n_pts_p.sum().item()),
+            n_in=int(parent_native.get("n_in", 0)) + int(child_st.get("n_in", 0)),
         )
 
     # --------------------------------------------------------------- update

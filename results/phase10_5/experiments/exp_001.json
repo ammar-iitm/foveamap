@@ -1,0 +1,34 @@
+{
+  "experiment_id": "EXP-001",
+  "name": "Eliminate Diagnostic .item() Calls in grid_torch.py",
+  "hypothesis": "Eliminating 5 unneeded host-synchronizing .item() calls from assign_native_tiers_t and mip-up bin_points eliminates CPU-GPU pipeline stalls without altering mapping arithmetic or diagnostics contracts.",
+  "baseline": {
+    "label": "Baseline (Phase 10 post-fix)",
+    "synth_20k_mean_ms": 35.25,
+    "synth_20k_p50_ms": 34.2,
+    "synth_20k_p95_ms": 38.85,
+    "synth_20k_fps": 28.37,
+    "real_mean_ms": 49.15,
+    "real_p50_ms": 48.64,
+    "real_p95_ms": 52.21,
+    "real_fps": 20.35
+  },
+  "optimized": {
+    "label": "EXP-001: Eliminate Diagnostic .item() Calls",
+    "synth_20k_mean_ms": 34.22,
+    "synth_20k_p50_ms": 33.49,
+    "synth_20k_p95_ms": 37.25,
+    "synth_20k_fps": 29.22,
+    "real_mean_ms": 47.91,
+    "real_p50_ms": 47.3,
+    "real_p95_ms": 51.55,
+    "real_fps": 20.87
+  },
+  "delta_real_mean_ms": -1.24,
+  "delta_real_p95_ms": -0.66,
+  "delta_real_fps": 0.53,
+  "tests_passed": 52,
+  "tests_failed": 0,
+  "correctness": "BIT_IDENTICAL",
+  "decision": "KEEP"
+}
