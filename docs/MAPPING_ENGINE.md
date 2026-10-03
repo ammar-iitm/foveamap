@@ -131,10 +131,10 @@ Every cell computes a comprehensive 2.5D traversability cost in $[0, 255]$ incor
    $$\nabla g = \sqrt{\left(\frac{\partial g}{\partial x}\right)^2 + \left(\frac{\partial g}{\partial y}\right)^2}, \quad \theta_{\text{slope}} = \arctan(\nabla g)$$
    - Slopes exceeding $\theta_{\text{thresh}} = 0.25\,\text{rad}$ add a proportional penalty.
    - Slopes exceeding $\theta_{\text{crit}} = 0.40\,\text{rad}$ clamp cost to $\ge 220$ (critical obstacle).
-3. **Step Edges**: Height discontinuities $\Delta z > 0.15\,\text{m}$ between adjacent cells clamp cost to non-traversable ($\ge 180$).
+3. **Step Edges**: Height discontinuities $\Delta z > 0.08\,\text{m}$ (`step_threshold_m`) between adjacent cells clamp cost to non-traversable ($\ge 180$ on drivable, $\ge 140$ otherwise).
 4. **Depressions / Potholes**: Deviations below a local window filter clamp cost to $\ge 170$.
-5. **Overhang Clearance**: Cells with $z_{\text{min\_ng}} - g \ge 2.2\,\text{m}$ (`vehicle_clearance_m`) are flagged `passable_under` and take ground-class traversability cost.
-6. **Confidence & Stale Penalties**: Low-confidence cells ($< 150$) and stale cells ($> 20$ frames) receive additive penalties.
+5. **Overhang Clearance**: Cells with non-ground points $> 0.5\,\text{m}$ above ground are flagged overhang; clearance $\ge$ `vehicle_clearance_m` (2.5 m) with ground-class evidence underneath is passable-under and takes ground-class traversability cost.
+6. **Confidence & Stale Penalties**: Low-confidence cells ($< 150$) and stale cells ($\text{age} \ge 20$ frames, i.e. at the stale threshold) receive additive penalties.
 
 ---
 

@@ -39,7 +39,26 @@ from typing import Any, Sequence
 import numpy as np
 
 UNKNOWN_COST = 255
+# Fallback traversal boundary, used only when no TerrainConfig value is
+# available (mirrors TerrainConfig.traversable_cost_max default). All grid,
+# snapshot, and report APIs take the configured value; this constant is the
+# documented default, not a second source of truth.
 TRAVERSABLE_COST_MAX = 180
+
+
+def is_traversable_cell(cost: int, dynamic: bool, known: bool, cost_max: int = TRAVERSABLE_COST_MAX) -> bool:
+    """One authoritative traversability policy for every public API.
+
+    UNKNOWN / OUT_OF_BOUNDS (known=False) -> False; dynamic occupancy ->
+    False; lethal/high cost (cost >= cost_max, including UNKNOWN=255) ->
+    False; otherwise True. STALE cells follow the same cost rule (staleness
+    is already priced into cost via the stale penalty).
+    """
+    if not known:
+        return False
+    if dynamic:
+        return False
+    return int(cost) < int(cost_max)
 
 
 def slope_at_cell(
@@ -108,12 +127,15 @@ def report_tier(
     age: np.ndarray,
     cell_m: float,
     stale_age_threshold: int = 20,
+    traversable_cost_max: int = TRAVERSABLE_COST_MAX,
 ) -> dict[str, Any]:
     """Aggregate terrain/traversability diagnostics for one tier (plain values).
 
     All inputs are host NumPy arrays from a single tier. Slope statistics are
     computed vectorially with the same central/edge policy basis as
     ``slope_at_cell`` (unknown slopes excluded, never zero-filled).
+    Traversable counts obey the unified ``is_traversable_cell`` policy, so
+    dynamic occupancy blocks traversal here exactly as in query APIs.
     """
     ground = np.asarray(ground, dtype=np.float64)
     valid = np.isfinite(ground)
@@ -123,8 +145,10 @@ def report_tier(
 
     cost = np.asarray(cost)
     known_cost = cost != UNKNOWN_COST
-    traversable = int(((cost < TRAVERSABLE_COST_MAX) & known_cost).sum())
-    nontraversable = int((known_cost & (cost >= TRAVERSABLE_COST_MAX)).sum())
+    dyn = np.asarray(dynamic_mask, dtype=bool)
+    trav_mask = known_cost & ~dyn & (cost < int(traversable_cost_max))
+    traversable = int(trav_mask.sum())
+    nontraversable = int((known_cost & ~trav_mask).sum())
     unknown_cost = int((~known_cost).sum())
 
     rough = np.asarray(rough, dtype=np.float64)
@@ -139,7 +163,7 @@ def report_tier(
     max_slope = float(slope_known.max()) if slope_known.size else None
 
     age = np.asarray(age)
-    stale = int(((age != 255) & (age > stale_age_threshold)).sum())
+    stale = int(((age != 255) & (age >= stale_age_threshold)).sum())
     dynamic = int(np.asarray(dynamic_mask, dtype=bool).sum())
 
     return {
@@ -198,6 +222,7 @@ def report_layers(
     layers: Sequence[Any],
     cell_sizes_m: Sequence[float],
     stale_age_threshold: int = 20,
+    traversable_cost_max: int = TRAVERSABLE_COST_MAX,
 ) -> dict[str, Any]:
     """Full-map terrain report from tier layer objects (plain values).
 
@@ -214,6 +239,7 @@ def report_layers(
             np.asarray(s.age),
             float(cell_m),
             stale_age_threshold=int(stale_age_threshold),
+            traversable_cost_max=int(traversable_cost_max),
         )
         for s, cell_m in zip(layers, cell_sizes_m)
     ]

@@ -191,7 +191,13 @@ class PerceptionConfig:
 
 @dataclass(frozen=True)
 class TerrainConfig:
-    """Geometric and traversability analysis thresholds."""
+    """Geometric and traversability analysis thresholds.
+
+    traversable_cost_max (unitless cost, valid [0, 254], default 180) is the
+    authoritative traversal boundary: a known, non-dynamic cell with
+    cost < traversable_cost_max is traversable. It aligns with the derivation
+    rule that clamps step-impaired drivable cells to >= 180 (non-traversable).
+    """
     vehicle_clearance_m: float = 2.5
     step_threshold_m: float = 0.08
     depression_threshold_m: float = 0.05
@@ -203,8 +209,8 @@ class TerrainConfig:
     max_stale_age: int = 100
     enable_ray_clearing: bool = False
     free_clear_frames: int = 3
+    traversable_cost_max: int = 180
     cost_priors: tuple[int, ...] = field(default_factory=lambda: tuple(DEFAULT_COST_PRIOR))
-
     def __post_init__(self) -> None:
         if self.vehicle_clearance_m <= 0:
             raise ConfigurationError(f"vehicle_clearance_m must be positive, got {self.vehicle_clearance_m}")
@@ -226,9 +232,10 @@ class TerrainConfig:
             raise ConfigurationError(f"max_stale_age ({self.max_stale_age}) must exceed stale_age_threshold ({self.stale_age_threshold})")
         if self.free_clear_frames <= 0:
             raise ConfigurationError(f"free_clear_frames must be positive, got {self.free_clear_frames}")
+        if not (0 <= self.traversable_cost_max <= 254):
+            raise ConfigurationError(f"traversable_cost_max must be in [0, 254], got {self.traversable_cost_max}")
         if len(self.cost_priors) != 256:
             raise ConfigurationError("cost_priors must have length 256")
-
 
 @dataclass(frozen=True)
 class DynamicConfig:

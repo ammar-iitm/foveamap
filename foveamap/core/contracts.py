@@ -12,7 +12,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from .exceptions import ContractError, NumericalConsistencyError
-from ..terrain import slope_at_cell
+from ..terrain import slope_at_cell, is_traversable_cell
 
 
 @dataclass(frozen=True)
@@ -477,6 +477,10 @@ class MapSnapshot:
                     state = "OBSERVED_STATIC"
                 sec_c = int(tier.secondary_class[cx, cy]) if hasattr(tier, "secondary_class") else 255
                 sec_conf = float(tier.secondary_confidence[cx, cy]) if hasattr(tier, "secondary_confidence") else 0.0
+                # Clearance in metres (raw byte is 2 cm units, 255 = unknown),
+                # matching the live-grid query contract.
+                clear_byte = int(tier.clearance[cx, cy])
+                clearance_m = None if clear_byte == 255 else float(clear_byte * 0.02)
                 return {
                     "tier": t_idx,
                     "resolution": float(r),
@@ -500,7 +504,7 @@ class MapSnapshot:
                     "secondary_confidence": sec_conf,
                     "dynamic": dyn,
                     "cost": int(tier.cost[cx, cy]),
-                    "clearance": float(tier.clearance[cx, cy]),
+                    "clearance": clearance_m,
                     "age": age,
                     "dynamic_state": dyn_state,
                     "dynamic_confidence": float(track.get("confidence", 0.0)) if track is not None else 0.0,
@@ -509,16 +513,26 @@ class MapSnapshot:
         return {"state": "OUT_OF_BOUNDS", "cost": 255, "traversable": False}
 
     def is_traversable(self, x: float, y: float, clearance_req: float = 0.0) -> bool:
-        """Check whether continuous world coordinate (x, y) is safely traversable."""
+        """Check whether continuous world coordinate (x, y) is safely traversable.
+
+        Uses the unified traversability policy (known, non-dynamic,
+        cost below the configured threshold from snapshot metadata, default
+        180): lethal known costs are never traversable. ``clearance_req`` is
+        an additional physical constraint in metres.
+        """
         info = self.query_point(x, y)
         if info.get("state") in ("OUT_OF_BOUNDS", "UNKNOWN"):
             return False
-        if info.get("dynamic", False):
+        try:
+            cost_max = int(self.metadata.get("traversable_cost_max", 180))
+        except (TypeError, ValueError):
+            cost_max = 180
+        if not is_traversable_cell(info.get("cost", 255), bool(info.get("dynamic", False)), True, cost_max):
             return False
-        if info.get("cost", 255) == 255:
-            return False
-        if clearance_req > 0.0 and info.get("clearance", 0.0) < clearance_req:
-            return False
+        if clearance_req > 0.0:
+            clearance = info.get("clearance", None)
+            if clearance is None or float(clearance) < clearance_req:
+                return False
         return True
 
     def get_height(self, x: float, y: float) -> float:

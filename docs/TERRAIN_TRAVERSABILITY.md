@@ -91,9 +91,16 @@ cost = semantic_prior[eff_cls]
 clip 0..254; UNKNOWN cells keep 255
 ```
 
-Deterministic, bounded, identical in both engines. Traversable means
-`cost < 180` with known state and no dynamic occupancy
-(`is_traversable(..., max_cost=150)` by default).
+Deterministic, bounded, identical in both engines. One authoritative policy
+(`terrain.is_traversable_cell`, threshold `TerrainConfig.traversable_cost_max`,
+default 180, aligned with the step clamp): known cell + no dynamic occupancy
++ `cost < traversable_cost_max`. `Grid.is_traversable()` defaults to the
+configured threshold (explicit `max_cost` is a planner override);
+`MapSnapshot.is_traversable()` enforces the same cost rule from snapshot
+metadata (lethal known costs are never traversable) plus an optional
+`clearance_req` in metres. Query `clearance`/`snapshot clearance` are metres
+(`None` when unknown); the stored byte stays 2 cm units. Stale is uniformly
+`age >= stale_age_threshold` in derivation, queries, snapshots, and reports.
 
 ## 9. Unknown handling
 
@@ -134,7 +141,8 @@ No `.cpu()/.numpy()/.item()` was added to any hot path (audited).
 No new parameters: every threshold already lives in `TerrainConfig`
 (`vehicle_clearance_m`, `step_threshold_m`, `depression_threshold_m`,
 `depression_window_m`, `roughness_threshold_m`, `slope_threshold_rad`,
-`slope_critical_rad`, `stale_age_threshold`, `cost_priors`, ray-clearing
+`slope_critical_rad`, `stale_age_threshold`, `traversable_cost_max`,
+`cost_priors`, ray-clearing
 fields), each with name, type, unit, range, default, and meaning in code
 plus validation. Custom priors/thresholds demonstrably alter behavior
 (tests + pre-existing runtime tests).

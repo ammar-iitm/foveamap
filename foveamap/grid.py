@@ -67,7 +67,7 @@ from .temporal import (
     TEMPORARILY_MISSING as DYN_MISSING,
     STALE as DYN_STALE,
 )
-from .terrain import slope_at_cell, report_layers
+from .terrain import slope_at_cell, report_layers, is_traversable_cell
 
 UNKNOWN = 255
 F_SLOPE, F_OVERHANG, F_STEP, F_DEPRESSION = 1, 2, 4, 8
@@ -891,7 +891,7 @@ class FoveatedGrid:
         cost = np.where(has_slope & (slope_rad >= slope_crit), np.maximum(cost, 220), cost)
 
         cost = np.where(s.conf < 150, cost + 25, cost)
-        stale = (s.age != UNKNOWN) & (s.age > stale_thresh)
+        stale = (s.age != UNKNOWN) & (s.age >= stale_thresh)
         cost = np.where(stale, cost + 20, cost)
         cost = np.clip(cost, 0, 254)
         cost = np.where(cls == UNKNOWN, UNKNOWN, cost)
@@ -1067,7 +1067,8 @@ class FoveatedGrid:
                     "age": age,
                     "flags": int(s.flags[i, j]),
                     "is_unknown": state == "UNKNOWN",
-                    "is_traversable": (cost < 180) and (state != "UNKNOWN") and not dyn,
+                    "is_traversable": is_traversable_cell(
+                        cost, dyn, state != "UNKNOWN", self._trav_max()),
                     "dynamic_state": dyn_state,
                     "dynamic_confidence": float(enrich["dynamic_confidence"]) if enrich else 0.0,
                     "dynamic_age_frames": int(enrich["dynamic_age_frames"]) if enrich else 0,
@@ -1075,12 +1076,26 @@ class FoveatedGrid:
                 }
         return {"tier": -1, "state": "OUT_OF_BOUNDS", "is_unknown": True, "is_traversable": False}
 
-    def is_traversable(self, x: float, y: float, max_cost: int = 150) -> bool:
-        """Check if world coordinate (x, y) is safely traversable."""
+    def _trav_max(self) -> int:
+        """Authoritative traversal threshold from configuration."""
+        trav = getattr(self.terrain, "traversable_cost_max", 180)
+        try:
+            return int(trav)
+        except (TypeError, ValueError):
+            return 180
+
+    def is_traversable(self, x: float, y: float, max_cost: int | None = None) -> bool:
+        """Check if world coordinate (x, y) is safely traversable.
+
+        With ``max_cost=None`` (default) the authoritative configured
+        threshold applies, agreeing with ``query_point()["is_traversable"]``.
+        An explicit ``max_cost`` is a planner policy override.
+        """
         q = self.query_point(x, y)
         if q.get("dynamic", False) or q["is_unknown"] or q.get("cost", UNKNOWN) == UNKNOWN:
             return False
-        return q.get("cost", 255) <= max_cost
+        limit = self._trav_max() if max_cost is None else int(max_cost)
+        return q.get("cost", 255) < limit
 
     def get_height(self, x: float, y: float) -> float | None:
         """Get best elevation estimate at world coordinate (x, y)."""
@@ -1156,6 +1171,7 @@ class FoveatedGrid:
             self.state,
             [t.cell for t in self.tiers],
             stale_age_threshold=stale_thresh,
+            traversable_cost_max=self._trav_max(),
         )
 
     def memory_report(self) -> dict[str, Any]:

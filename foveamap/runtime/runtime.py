@@ -247,6 +247,7 @@ class FoveaMapRuntime:
                 "profile_name": getattr(self.config.grid, "profile_name", ""),
                 "stale_age_threshold": int(self.config.terrain.stale_age_threshold),
                 "max_stale_age": int(self.config.terrain.max_stale_age),
+                "traversable_cost_max": int(self.config.terrain.traversable_cost_max),
                 "dynamic_config": {
                     "activation_frames": int(self.config.dynamic.activation_frames),
                     "missing_tolerance_frames": int(self.config.dynamic.missing_tolerance_frames),
