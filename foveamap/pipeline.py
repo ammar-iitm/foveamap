@@ -22,6 +22,7 @@ from .frames import DatasetInfo, make_features, prev_in_ego, transform
 from .grid import (FoveatedGrid, UNKNOWN, DRIVABLE, F_DYNAMIC, F_OVERHANG, F_STEP, F_DEPRESSION)
 from .grid_torch import TorchFoveatedGrid
 from . import features_torch
+from .objects import OBJECT_CLASSES, extract_objects, match_objects, pack
 
 BANDS = [(0, 10), (10, 25), (25, 50), (50, 100)]
 BAND_NAMES = ["0–10 m", "10–25 m", "25–50 m", "50–100 m"]
@@ -244,6 +245,8 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
     cm_grid = np.zeros((len(BANDS), C, C), np.int64)
     mov_tp = np.zeros(len(BANDS)); mov_un = np.zeros(len(BANDS))
     curb_hit = curb_tot = pot_hit = pot_tot = 0
+    obj_counts = {c: np.zeros(3, np.int64) for c in OBJECT_CLASSES}   # tp, fp, fn within 25 m
+    obj_agree = obj_pairs = 0
     dep_hit = dep_tot = 0           # drivable cells within 10 m flagged as potholes (false alarms on real roads)
     per_frame, pts_blob, pts_index = [], [], []
     rng = np.random.default_rng(0)
@@ -263,6 +266,11 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         snap = pipe.grid.snapshot()
         dyn = to_host(r["dyn"])
         r["timing"]["publish"] = time.perf_counter() - t0
+
+        # ---- objects: obstacle cells grouped into classified, boxed objects (host, timed)
+        t0 = time.perf_counter()
+        objs = extract_objects(pipe.grid, snap, dyn)
+        r["timing"]["objects"] = time.perf_counter() - t0
         for k in ("cls_pts", "moving_pts", "stats", "pw"):    # benchmark bookkeeping, not timed
             r[k] = to_host(r[k])
 
@@ -271,6 +279,12 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         has = lab >= 0
         gm = fr["moving"]
         gstats = gt_grid.bin_points(r["pw"][has, :2], r["pw"][has, 2], np.eye(C)[lab[has]], gm[has], pipe.grid.origins)
+        # reference objects: the same extraction on a grid fused from this frame's labels
+        gdyn = gt_grid.fuse_stats(gstats, pipe.grid.origins)
+        cnt, agree, pairs = match_objects(objs, extract_objects(gt_grid, gt_grid.state, gdyn), ego)
+        for c in OBJECT_CLASSES:
+            obj_counts[c] += np.asarray(cnt[c])
+        obj_agree += agree; obj_pairs += pairs
         path = os.path.join(frames_dir, f"f{t:03d}.png") if export_mode != "none" else None
         if export_mode == "async":
             exports.append(exporter.submit(_export_frame, snap, dyn, gstats, pipe.grid.tiers, path))
@@ -344,6 +358,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
             timing_ms=timing_ms, total_ms=round(sum(timing_ms.values()), 2),
             points=n_pts, binned=n_in, in_window=in_window, nest_ok=bool(nest_ok),
             cells_updated=int(sum(len(s["key"]) for s in r["stats"])),
+            objects=pack(objs),
         ))
         print(f"frame {t:3d}  total {per_frame[-1]['total_ms']:7.1f} ms  "
               + "  ".join(f"{k} {v:.0f}" for k, v in timing_ms.items()), flush=True)
@@ -428,6 +443,11 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         pothole_flag_rate_drivable_10m=float(dep_hit / max(dep_tot, 1)),
         points_lost=int(sum(f["in_window"] - f["binned"] for f in per_frame)),
         nesting_ok=all(f["nest_ok"] for f in per_frame),
+        objects_within_25m={info.class_names[c]: dict(
+            precision=float(tp / (tp + fp)) if tp + fp else None, recall=float(tp / (tp + fn)) if tp + fn else None,
+            tp=int(tp), fp=int(fp), fn=int(fn)) for c, (tp, fp, fn) in obj_counts.items()},
+        objects_moving_flag_agreement=float(obj_agree / obj_pairs) if obj_pairs else None,
+        objects_per_frame=float(np.mean([len(f["objects"]) for f in per_frame])),
         points_file_index=pts_index,
     )
     if export_mode != "none":
