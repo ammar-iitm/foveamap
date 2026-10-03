@@ -146,6 +146,7 @@ button, input, select { font: inherit; color: inherit; }
       <button class="chip" data-ov="fovea" aria-pressed="true" title="Fine 5 cm tier on or off (V)">5 cm tier<kbd>V</kbd></button>
       <button class="chip" data-ov="edges" aria-pressed="true" title="Curb steps and potholes (E)">Edges<kbd>E</kbd></button>
       <button class="chip" data-ov="dyn" aria-pressed="true" title="Outline moving agents (D)">Moving<kbd>D</kbd></button>
+      <button class="chip" data-ov="objects" aria-pressed="true" title="Object boxes: vehicles, people, poles (O)">Objects<kbd>O</kbd></button>
       <button class="chip" data-ov="conf" aria-pressed="false" title="Fade low-confidence cells (K)">Confidence<kbd>K</kbd></button>
       <button class="chip" data-ov="grid" aria-pressed="true" title="Cell grid lines when zoomed in (G)">Cells<kbd>G</kbd></button>
       <button class="chip" data-ov="points" aria-pressed="false" title="Raw points coloured by predicted class (P)">Points<kbd>P</kbd></button>
@@ -172,7 +173,8 @@ const ALPHA_LIGHT = [0.72, 0.70, 0.68, 0.62, 0.9, 0.9, 1, 1, 1];
 const CATEGORIES = [
   ["Drivable", [0, 2]], ["Non-drivable ground", [1, 3]], ["Static obstacle", [4, 5, 6]], ["Vehicle", [7]], ["Person / cyclist", [8]],
 ];
-const STAGES = [["preprocess", "Preprocess"], ["inference", "Network"], ["projection", "Projection"], ["fusion", "Fusion + cost"], ["publish", "Serialise"]];
+const STAGES = [["preprocess", "Preprocess"], ["inference", "Network"], ["projection", "Projection"], ["fusion", "Fusion + cost"], ["publish", "Serialise"], ["objects", "Objects"]];
+const STAGE_OP = [0.35, 1, 0.75, 0.55, 0.25, 0.9];
 const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 const CLASS_RGB = CLASS_HEX.map(hexRgb);
 const CIVIDIS = ["#00224E", "#2A3C6B", "#575D6D", "#7C7B78", "#A59C74", "#D3C065", "#FEE838"].map(hexRgb);
@@ -184,7 +186,7 @@ const isLight = () => css("--bg").toLowerCase() === "#f3f5f8";
 
 const S = {
   M: null, imgs: [], raw: new Map(), t: 0, playing: false, layer: "semantic",
-  ov: { fovea: true, edges: true, dyn: true, conf: false, grid: true, points: false },
+  ov: { fovea: true, edges: true, dyn: true, objects: true, conf: false, grid: true, points: false },
   compare: false, scale: 12, pan: [0, 0], hover: null, painted: null, pts: null,
 };
 
@@ -374,7 +376,9 @@ function scene(rect, T, fovea, label) {
     ctx.strokeRect(bx, by, bw, bw); ctx.setLineDash([]);
     tagAt = rot([bx + bw / 2, by]);
   }
+  const labels = S.ov.objects ? drawObjects(f, toD, rot) : [];
   ctx.restore();
+  for (const [text, x, y] of labels) objLabel(text, x, y);
   if (tagAt) tag(`${fmtCm(tiers[0].cell)} | ${fmtCm(tiers[1].cell)}`, tagAt[0], tagAt[1] - 4);
   // ego-frame overlays (never rotated): range marks along the heading, points, footprint
   ctx.font = `11px ${css("--font-num")}`; ctx.fillStyle = css("--fg2"); ctx.strokeStyle = css("--fg2"); ctx.lineWidth = 1;
@@ -395,6 +399,32 @@ function scene(rect, T, fovea, label) {
     ctx.fillStyle = css("--fg"); ctx.fillText(label, lx - 8, rect.y + 25);
   }
   ctx.restore();
+}
+
+// object boxes, in the rotated d-space; returns upright labels for nearby vehicles and people
+function drawObjects(f, toD, rot) {
+  const out = [];
+  for (const [cls, mv, x, y, L, Wd, yaw] of f.objects || []) {
+    const c = Math.cos(yaw), sn = Math.sin(yaw);
+    const pts = [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([a, b]) =>
+      toD(x + a * L / 2 * c - b * Wd / 2 * sn, y + a * L / 2 * sn + b * Wd / 2 * c));
+    ctx.beginPath(); pts.forEach(([px, py], i) => i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.closePath();
+    ctx.lineWidth = mv ? 2.2 : 1.4;
+    ctx.strokeStyle = mv ? (isLight() ? "#0F1720" : "#FFFFFF") : CLASS_HEX[cls];
+    ctx.stroke();
+    if (cls !== 6 && Math.hypot(x - f.ego[0], y - f.ego[1]) < 30) {
+      const [lx, ly] = rot(toD(x, y));
+      out.push([`${CLASS_NAMES[cls].split(" ")[0]}${mv ? " · moving" : ""}`, lx, ly]);
+    }
+  }
+  return out;
+}
+
+function objLabel(text, x, y) {
+  ctx.font = `600 10.5px ${css("--font-ui")}`; ctx.textAlign = "center";
+  const w = ctx.measureText(text).width + 8;
+  ctx.fillStyle = css("--panel"); ctx.globalAlpha = 0.85; ctx.fillRect(x - w / 2, y - 22, w, 14); ctx.globalAlpha = 1;
+  ctx.fillStyle = css("--fg"); ctx.fillText(text, x, y - 11.5);
 }
 
 function tag(text, x, y) {
@@ -440,6 +470,7 @@ function legend() {
     h += `<h4>Traversability cost</h4><div class="ramp" style="background:linear-gradient(90deg,rgba(40,40,40,.2),rgb(${VERMILLION}))"></div><div class="ramplab"><span>free</span><span>curb / rough</span><span>blocked</span></div>`;
   }
   if (S.ov.edges && L !== "gt") h += `<div><span class="sw" style="background:#fff;outline:1px solid var(--border)"></span>Curb step ≥ 8 cm</div><div><span class="sw" style="background:rgb(${VERMILLION})"></span>Pothole</div>`;
+  if (S.ov.objects) h += `<div><span class="sw" style="background:transparent;outline:1.5px solid ${CLASS_HEX[7]}"></span>Object box (white: moving)</div>`;
   h += `<div><span class="sw" style="background:var(--unknown)"></span>Unknown</div>`;
   const t = S.M.summary.tiers;
   h += `<div class="sec num" style="grid-column:1/-1">${t.map(x => `${fmtCm(x.cell)} to ±${x.half} m`).join(" · ")}</div>`;
@@ -501,13 +532,14 @@ function drawLatency() {
   let g = "", x = 0;
   const bw = W, sc = bw / Math.max(total, 1);
   STAGES.forEach(([k, name], i) => {
-    const w = tm[k] * sc, op = [0.35, 1, 0.75, 0.55, 0.25][i];
+    if (tm[k] == null) return;              // runs recorded before the stage existed
+    const w = tm[k] * sc, op = STAGE_OP[i];
     g += `<rect x="${x}" y="0" width="${Math.max(0, w - 1)}" height="14" fill="var(--accent)" fill-opacity="${op}"><title>${name}: ${tm[k].toFixed(1)} ms</title></rect>`;
     x += w;
   });
   // stage labels under the bar (two rows)
-  STAGES.forEach(([k, name], i) => {
-    const col = i % 3, row = Math.floor(i / 3), op = [0.35, 1, 0.75, 0.55, 0.25][i];
+  STAGES.filter(([k]) => tm[k] != null).forEach(([k, name], i) => {
+    const col = i % 3, row = Math.floor(i / 3), op = STAGE_OP[STAGES.findIndex(q => q[0] === k)];
     g += `<rect x="${col * 120}" y="${24 + row * 15}" width="8" height="8" fill="var(--accent)" fill-opacity="${op}"/>` + T(col * 120 + 12, 32 + row * 15, `${name} <tspan fill="var(--fg)" font-family="var(--font-num)">${tm[k].toFixed(0)}</tspan>`, { size: 10.5 });
   });
   // sparkline of total latency per frame
@@ -544,7 +576,14 @@ function drawAccuracy() {
   g += `<rect x="${W - 222}" y="0" width="8" height="8" fill="var(--accent)"/>` + T(W - 210, 8, "grid cells", { size: 10 }) + `<rect x="${W - 154}" y="0" width="8" height="8" fill="var(--muted)"/>` + T(W - 142, 8, "points", { size: 10 }) + `<line x1="${W - 92}" x2="${W - 76}" y1="4" y2="4" stroke="var(--fg)" stroke-dasharray="4 3"/>` + T(W - 72, 8, "target 70 (0–10 m)", { size: 10 });
   $("c-acc").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="mIoU by distance band">${g}</svg>`;
   const pct = v => v == null ? "—" : `${(v * 100).toFixed(1)}%`;
-  $("acc-facts").innerHTML = `<dt>Drivable IoU, grid, 0–10 m</dt><dd>${pct(s.drivable_iou_grid_0_10)}</dd><dt>Moving-object IoU (points)</dt><dd>${pct(s.moving_iou)}</dd>${s.curb_recall_10m == null ? "" : `<dt>Curb recall within 10 m</dt><dd>${pct(s.curb_recall_10m)}</dd><dt>Pothole recall within 10 m</dt><dd>${pct(s.pothole_recall_10m)}</dd>`}<dt>Point mIoU, all ranges</dt><dd>${pct(s.point_miou)}</dd>`;
+  $("acc-facts").innerHTML = `<dt>Drivable IoU, grid, 0–10 m</dt><dd>${pct(s.drivable_iou_grid_0_10)}</dd><dt>Moving-object IoU (points)</dt><dd>${pct(s.moving_iou)}</dd>${s.curb_recall_10m == null ? "" : `<dt>Curb recall within 10 m</dt><dd>${pct(s.curb_recall_10m)}</dd><dt>Pothole recall within 10 m</dt><dd>${pct(s.pothole_recall_10m)}</dd>`}<dt>Point mIoU, all ranges</dt><dd>${pct(s.point_miou)}</dd>${objFacts(s, pct)}`;
+}
+
+function objFacts(s, pct) {
+  const o = s.objects_within_25m;
+  if (!o) return "";
+  return Object.entries(o).filter(([, v]) => v.tp + v.fn > 0)
+    .map(([name, v]) => `<dt>Objects within 25 m: ${name.split(" ")[0]}, precision / recall</dt><dd>${pct(v.precision)} / ${pct(v.recall)}</dd>`).join("");
 }
 
 // ---------------------------------------------------------------- frame / integrity
@@ -651,6 +690,7 @@ document.addEventListener("keydown", e => {
   else if (k === "v") toggle("fovea");
   else if (k === "e") toggle("edges");
   else if (k === "d") toggle("dyn");
+  else if (k === "o") toggle("objects");
   else if (k === "k") toggle("conf");
   else if (k === "g") toggle("grid");
   else if (k === "p") toggle("points");
