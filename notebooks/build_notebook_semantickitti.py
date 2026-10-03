@@ -127,12 +127,12 @@ for n, v in zero_shot['iou_by_class'].items():
 """)
 
 md("""
-## 4. Fine-tune on the training sequences (about 15 minutes on a T4)
+## 4. Fine-tune on the training sequences (about 15 minutes on a T4 for 40 epochs, plus a few to prepare the frames)
 
 Starts from the simulator checkpoint. It first prepares the training frames (progress every 250 frames, a few minutes), then prints progress every 250 steps. The model and log are copied to Drive afterwards. `FLAGS` takes the recipe options from `scripts/train.py` (`--reset-head`, `--balance`, `--aug`).
 """)
 code("""
-EPOCHS = 20
+EPOCHS = 40
 FLAGS = ''
 !python scripts/train.py --dataset semantickitti --cache $CACHE --init checkpoints/range_unet.pt \\
     --out checkpoints/range_unet_semantickitti.pt --epochs $EPOCHS $FLAGS 2>&1 | tee train_semantickitti.log | awk '!/^step/ || (++n % 10 == 0)'
