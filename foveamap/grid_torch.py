@@ -222,6 +222,12 @@ class TorchFoveatedGrid(FoveatedGrid):
         self._drivable = torch.as_tensor(DRIVABLE, device=dev)
         self._overhang = torch.as_tensor(OVERHANG_LUT, device=dev)
         self.state = [self._new_layers(t) for t in self.tiers]
+        total_snap_bytes = sum(t.n * t.n * b for t in self.tiers for _, _, _, b in self.TIER_EXTENDED_SPECS)
+        self._snap_packed_buf = torch.empty(total_snap_bytes, dtype=torch.uint8, device=self.device)
+        self._snap_host_buf = (
+            torch.empty(total_snap_bytes, dtype=torch.uint8, pin_memory=True)
+            if self.device.type == "cuda" else None
+        )
 
     # ------------------------------------------------------------------ utils
     def _t(self, a: Any, dtype: torch.dtype) -> torch.Tensor:
@@ -502,12 +508,22 @@ class TorchFoveatedGrid(FoveatedGrid):
         ("age", "age", np.uint8, 1),
         ("eff_cls", "eff_cls", np.uint8, 1),
     )
+    TIER_EXTENDED_SPECS = TIER_FIELD_SPECS + (
+        ("dynamic_mask", "dynamic_mask", np.bool_, 1),
+        ("free_passes", "free_passes", np.uint8, 1),
+    )
 
     def snapshot(self) -> list[TierLayers]:
         """Host copy of the grid state (single packed device-to-host copy)."""
         parts = [getattr(s, attr).view(torch.uint8).reshape(-1)
-                 for s in self.state for _, attr, _, _ in self.TIER_FIELD_SPECS]
-        packed = torch.cat(parts).cpu().numpy()
+                 for s in self.state for _, attr, _, _ in self.TIER_EXTENDED_SPECS]
+        torch.cat(parts, out=self._snap_packed_buf)
+        if self._snap_host_buf is not None:
+            self._snap_host_buf.copy_(self._snap_packed_buf, non_blocking=False)
+            packed = self._snap_host_buf.numpy().copy()
+        else:
+            packed = self._snap_packed_buf.cpu().numpy().copy()
+
         out = []
         offset = 0
         for s in self.state:
@@ -516,10 +532,8 @@ class TorchFoveatedGrid(FoveatedGrid):
             tl.cell = s.cell
             tl.half = s.half
             tl.r = s.r
-            tl.dynamic_mask = s.dynamic_mask.cpu().numpy()
-            tl.free_passes = s.free_passes.cpu().numpy()
             n_cells = s.n * s.n
-            for name, _, dt, b in self.TIER_FIELD_SPECS:
+            for name, _, dt, b in self.TIER_EXTENDED_SPECS:
                 sz = n_cells * b
                 setattr(tl, name, packed[offset:offset + sz].view(dt).reshape(s.n, s.n))
                 offset += sz

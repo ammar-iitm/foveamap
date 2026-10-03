@@ -1,0 +1,26 @@
+{
+  "experiment_id": "EXP-002",
+  "title": "Consolidated single-transfer snapshot with preallocated buffers",
+  "hypothesis": "Consolidating snapshot device-to-host copy into a single preallocated buffer (including dynamic_mask and free_passes) and using pinned host memory avoids 4 separate DtoH round-trips and repeated GPU memory allocations.",
+  "baseline_metric": {
+    "real_kitti_mean_ms": 47.91,
+    "real_kitti_p95_ms": 51.55,
+    "real_kitti_fps": 20.87,
+    "synth_20k_mean_ms": 34.25,
+    "synth_20k_p95_ms": 38.83
+  },
+  "change": "Added TIER_EXTENDED_SPECS, preallocated _snap_packed_buf and _snap_host_buf in TorchFoveatedGrid.__init__, and updated snapshot() to execute single torch.cat into preallocated buffer and single DtoH transfer.",
+  "expected_effect": "Reduce snapshot latency by 2-3 ms per frame without altering cell layout or detached snapshot contract.",
+  "actual_effect": {
+    "real_kitti_mean_ms": 47.14,
+    "real_kitti_p50_ms": 47.13,
+    "real_kitti_p95_ms": 47.51,
+    "real_kitti_fps": 21.22,
+    "synth_20k_mean_ms": 34.21,
+    "synth_20k_p95_ms": 37.98,
+    "synth_20k_fps": 29.23
+  },
+  "correctness_result": "51/51 tests passing in test_grid, test_grid_torch, test_runtime_integration; bit-identical snapshot content verified.",
+  "memory_result": "Persistent grid memory unchanged at 5.12 MB (16 bytes/cell); zero dynamic allocations during snapshot.",
+  "decision": "KEEP"
+}
