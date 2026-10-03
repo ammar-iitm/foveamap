@@ -25,35 +25,34 @@ class DeviceContext:
     description: str
 
 
-def canonicalize_device(device: torch.device | str) -> torch.device:
-    """Return a canonical, index-resolved torch.device representation.
+def canonical_device(device: torch.device | str) -> torch.device:
+    """The device with its index filled in, as tensors report it.
 
-    Resolves unindexed 'cuda' to 'cuda:<current_device>' (defaulting to cuda:0 if
-    CUDA is uninitialized or mocked), while preserving distinct indices 'cuda:0' vs 'cuda:1',
-    and standardizing 'cpu' and 'mps'.
+    ``torch.device("cuda") != torch.device("cuda:0")`` even though tensors
+    created on the first spells their device ``cuda:0``; the same holds for
+    ``mps``. Comparing canonical devices avoids false mismatches.
     """
-    dev = torch.device(device) if isinstance(device, str) else device
-    if dev.type == "cuda" and dev.index is None:
-        idx = 0
-        if torch.cuda.is_available():
+    d = torch.device(device) if isinstance(device, str) else device
+    if d.index is None:
+        if d.type == "cuda":
             try:
-                idx = torch.cuda.current_device()
-            except (Exception, AssertionError):
-                idx = 0
-        return torch.device(f"cuda:{idx}")
-    return dev
+                idx = torch.cuda.current_device() if torch.cuda.is_available() else 0
+                return torch.device("cuda", idx)
+            except (AssertionError, RuntimeError, Exception):
+                return torch.device("cuda", 0)
+        if d.type == "mps":
+            return torch.device("mps", 0)
+    return d
+
+
+# Backward compatibility alias
+canonicalize_device = canonical_device
 
 
 def devices_match(d1: torch.device | str, d2: torch.device | str) -> bool:
-    """Check logical equivalence between two torch devices.
+    """Check logical equivalence between two torch devices."""
+    return canonical_device(d1) == canonical_device(d2)
 
-    Correctly identifies that torch.device('cuda') and torch.device('cuda:0')
-    refer to the same physical device when current device is 0, while distinguishing
-    'cuda:0' from 'cuda:1' or 'cpu'.
-    """
-    dev1 = canonicalize_device(d1)
-    dev2 = canonicalize_device(d2)
-    return dev1 == dev2
 
 
 def resolve_device(
@@ -124,6 +123,7 @@ def resolve_device(
     else:
         desc = f"CPU ({os.cpu_count() or 1} vCPU threads)"
 
+    device = canonical_device(device)
     return DeviceContext(
         device=device,
         device_type=device.type,
