@@ -280,10 +280,10 @@ class TorchFoveatedGrid(FoveatedGrid):
                 step = torch.fmax(step, diff.nan_to_num(nan=0.0))
                 step = torch.fmax(step, diff.roll(-d, ax).nan_to_num(nan=0.0))
         stepf = step > STEP_THRESH
-        # depressions (potholes): clearly below the local plane of drivable ground
+        # depressions (potholes): clearly below the local plane of drivable ground, finest tier only
         drv_cls = self._drivable[eff_cls]
         drv = drv_cls & valid_g
-        dep = depressions_t(gz, drv, t.cell)
+        dep = depressions_t(gz, drv, t.cell) if t.ratio == 1 else torch.zeros_like(drv)
         flags = (torch.where(overhang, F_OVERHANG, 0) | torch.where(stepf & valid_g, F_STEP, 0)
                  | torch.where(dep, F_DEPRESSION, 0))
         # cost

@@ -384,9 +384,10 @@ class FoveatedGrid:
                 step = np.fmax(step, np.nan_to_num(b, nan=0.0))
         stepf = step > STEP_THRESH
         flags |= np.where(stepf & valid_g, F_STEP, 0).astype(np.uint8)
-        # depressions (potholes): clearly below the local plane of drivable ground
+        # depressions (potholes): clearly below the local plane of drivable ground. Only the finest
+        # tier: a 0.25-0.6 m pothole is about one cell on the coarser ones, too few to tell from noise
         drv = DRIVABLE[np.clip(eff_cls, 0, 255)] & valid_g
-        dep = depressions(gz, drv, t.cell)
+        dep = depressions(gz, drv, t.cell) if t.ratio == 1 else np.zeros_like(drv)
         flags |= np.where(dep, F_DEPRESSION, 0).astype(np.uint8)
         # cost
         cost = COST_PRIOR[np.clip(eff_cls, 0, 255)].copy()
