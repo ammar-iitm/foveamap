@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Sequence
+import math
+
+import numpy as np
 
 from . import API_VERSION
 from .errors import SDKQueryError
@@ -144,6 +147,54 @@ class SnapshotView:
         if len(xs) > limit:
             raise SDKQueryError(f"Batch limited to {limit} points, got {len(xs)}")
         return [self.query_point(float(x), float(y)) for x, y in zip(xs, ys)]
+
+    def query_ray(
+        self,
+        x: float,
+        y: float,
+        theta_rad: float,
+        *,
+        step_m: float = 0.5,
+        max_steps: int = 512,
+    ) -> list[QueryResult]:
+        """Sample the authoritative snapshot query along a ray (no new mapping logic).
+
+        Each sample delegates to ``query_point``; the SDK adds only the ray
+        walk itself. Bounded by ``max_steps`` (1..4096) with positive step.
+        """
+        if not (np.isfinite(float(x)) and np.isfinite(float(y)) and np.isfinite(float(theta_rad))):
+            raise SDKQueryError("Ray origin and heading must be finite")
+        if not (float(step_m) > 0):
+            raise SDKQueryError(f"step_m must be positive, got {step_m}")
+        if not (1 <= int(max_steps) <= 4096):
+            raise SDKQueryError(f"max_steps must be in [1, 4096], got {max_steps}")
+        dx, dy = math.cos(float(theta_rad)), math.sin(float(theta_rad))
+        return [
+            self.query_point(float(x) + k * float(step_m) * dx, float(y) + k * float(step_m) * dy)
+            for k in range(int(max_steps))
+        ]
+
+    def export_numpy(self) -> dict[str, Any]:
+        """Detached NumPy copy of tier arrays for offline/export consumers.
+
+        Returns ``{"api_version", "tiers": [...], "origins": [...]}`` where
+        each tier dict holds fresh array copies (mutating them cannot affect
+        the live map or this view). Read-only semantic content; sizes follow
+        the configured foveated profile.
+        """
+        import numpy as _np
+
+        tiers: list[dict[str, Any]] = []
+        for tier in self._snapshot.tier_states:
+            entry: dict[str, Any] = {"cell_m": float(getattr(tier, "cell", getattr(tier, "r", 0.0)) or 0.0)}
+            for name in ("count", "cls", "conf", "flags", "clear", "cost", "age"):
+                entry[name] = np.array(getattr(tier, name), copy=True)
+            for name in ("z_min", "z_max", "ground", "rough"):
+                entry[name] = np.array(getattr(tier, name), dtype=np.float32, copy=True)
+            entry["dynamic"] = np.array(tier.dynamic, dtype=bool, copy=True)
+            tiers.append(entry)
+        return {"api_version": API_VERSION, "tiers": tiers,
+                "origins": [list(o) for o in self.origins]}
 
     def is_traversable(self, x: float, y: float, clearance_req: float = 0.0) -> bool:
         return bool(self._snapshot.is_traversable(float(x), float(y), float(clearance_req)))

@@ -402,13 +402,20 @@ def test_http_frame_lifecycle_and_limits():
         pts = [[1.0 + i * 0.05, 1.0, -1.7] for i in range(20)]
         code, out = _post(url, "/frames", {"pts": pts, "frame_id": "h0"})
         assert code == 200 and out["snapshot"]["frame_id"] == "h0"
+        assert "pose_identity_synthetic_test_only" in out["defaults_applied"]
+        assert "timestamp_zero_synthetic" in out["defaults_applied"]
         code, err = _post(url, "/frames", {"nope": 1})
+        assert code == 400
+        code, err = _post(url, "/frames", {"pts": pts})  # frame_id required
         assert code == 400
         code, err = _post(url, "/frames", {"pts": []})
         assert code == 400
+        code, err = _post(url, "/frames", {"pts": pts, "frame_id": "bad",
+                                           "intensity": [1.0, 2.0]})
+        assert code == 400  # shape mismatch is validation, not a crash
         code, st = _post(url, "/lifecycle", {"action": "stop"})
         assert code == 200 and st["status"]["lifecycle"] == "INACTIVE"
-        code, err = _post(url, "/frames", {"pts": pts})
+        code, err = _post(url, "/frames", {"pts": pts, "frame_id": "after-stop"})
         assert code == 409
         code, st = _post(url, "/lifecycle", {"action": "configure"})
         assert code == 200
@@ -428,3 +435,60 @@ def test_http_rejects_non_loopback_bind():
     m = _active()
     with pytest.raises(SDKError):
         FoveaMapHttpServer(m, host="0.0.0.0")
+
+
+# --------------------------------------- closure: error state, rays, export
+def test_last_error_stored_and_cleared_on_recovery():
+    m = _active()
+    assert m.status().last_error is None
+    with pytest.raises(Exception):
+        m.process({"bogus": True})
+    err = m.status().last_error
+    assert isinstance(err, str) and len(err) > 0
+    assert any(r.startswith("last_error:") for r in m.health().reasons)
+    m.process(_frame())
+    assert m.status().last_error is None
+
+
+def test_snapshot_view_exposes_no_mutable_arrays():
+    m = _active()
+    view = m.process(_frame())
+    for name in dir(view):
+        if name.startswith("__"):
+            continue
+        attr = getattr(view, name)
+        assert not isinstance(attr, np.ndarray), f"public accessor {name} leaks ndarray"
+    for value in view.to_dict().values():
+        assert not isinstance(value, np.ndarray)
+
+
+def test_query_ray_follows_authoritative_queries():
+    m = _active()
+    m.process(_frame())
+    ray = m.query_ray(0.0, 1.0, 0.0, step_m=0.5, max_steps=8)
+    assert len(ray) == 8
+    for k, q in enumerate(ray):
+        ref = m.query_point(0.0 + k * 0.5, 1.0)
+        assert (q.state, q.cost, q.dynamic) == (ref.state, ref.cost, ref.dynamic)
+    with pytest.raises(SDKQueryError):
+        m.query_ray(0.0, 1.0, 0.0, step_m=0.0)
+    with pytest.raises(SDKQueryError):
+        m.query_ray(0.0, 1.0, 0.0, max_steps=5000)
+    with pytest.raises(SDKQueryError):
+        m.query_ray(float("nan"), 1.0, 0.0)
+
+
+def test_export_numpy_detached_copies():
+    m = _active()
+    m.process(_frame())
+    exp = m.export_numpy()
+    assert set(exp) == {"api_version", "tiers", "origins"}
+    assert exp["api_version"] == "1"
+    assert len(exp["tiers"]) == 2
+    for tier in exp["tiers"]:
+        for key in ("count", "cls", "cost", "ground", "dynamic"):
+            assert isinstance(tier[key], np.ndarray)
+    before = m.query_point(2.0, 1.0).cost
+    exp["tiers"][0]["cost"][:] = 0
+    exp["tiers"][0]["ground"][:] = 999.0
+    assert m.query_point(2.0, 1.0).cost == before

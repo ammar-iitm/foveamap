@@ -113,7 +113,7 @@ class _Handler(BaseHTTPRequestHandler):
             if parsed.path == "/frames":
                 try:
                     body = self._read_json()
-                    frame = _frame_from_json(body)
+                    frame, defaults = _frame_from_json(body)
                 except SDKError as exc:
                     return self._fail(400, "SDKError", str(exc))
                 except FoveaMapError as exc:
@@ -124,7 +124,8 @@ class _Handler(BaseHTTPRequestHandler):
                     return self._fail(409, "SDKLifecycleError", str(exc))
                 except FoveaMapError as exc:
                     return self._fail(422, type(exc).__name__, str(exc))
-                self._send(200, {"api_version": API_VERSION, "snapshot": view.to_dict()})
+                self._send(200, {"api_version": API_VERSION, "snapshot": view.to_dict(),
+                                 "defaults_applied": defaults})
             elif parsed.path == "/reset":
                 try:
                     sdk.reset()
@@ -155,12 +156,21 @@ class _Handler(BaseHTTPRequestHandler):
             self._fail(500, "InternalError", f"{type(exc).__name__}")
 
 
-def _frame_from_json(body: Any) -> LiDARFrame:
-    """Strict JSON -> LiDARFrame (no silent defaults beyond documented ones)."""
+def _frame_from_json(body: Any) -> tuple[LiDARFrame, list[str]]:
+    """Strict JSON -> (LiDARFrame, defaults_applied).
+
+    External production-like input must carry its own identity: ``frame_id``
+    is required. ``timestamp``/``pose``/``sensor_origin`` fall back to
+    synthetic defaults ONLY for testing/replay, and every applied default is
+    reported so consumers can never mistake synthetic metadata for measured
+    data (no silent invention of physically meaningful values).
+    """
     if not isinstance(body, dict):
         raise SDKError("Frame body must be a JSON object")
     if "pts" not in body:
         raise SDKError("Frame body requires 'pts' ([[x,y,z],...])")
+    if "frame_id" not in body or not str(body["frame_id"]).strip():
+        raise SDKError("Frame body requires a non-empty 'frame_id'")
     try:
         pts = np.asarray(body["pts"], dtype=np.float32).reshape(-1, 3)
     except (TypeError, ValueError) as exc:
@@ -172,20 +182,42 @@ def _frame_from_json(body: Any) -> LiDARFrame:
     if not np.all(np.isfinite(pts)):
         raise SDKError("pts must be finite")
     n = len(pts)
-    intensity = np.asarray(body.get("intensity", np.ones(n, dtype=np.float32)), dtype=np.float32).reshape(n)
-    ring = np.asarray(body.get("ring", np.zeros(n, dtype=np.int16)), dtype=np.int16).reshape(n)
-    pose = np.asarray(body.get("pose", np.eye(4)), dtype=np.float64).reshape(4, 4)
-    origin = np.asarray(body.get("sensor_origin", [0.0, 0.0, 1.73]), dtype=np.float32).reshape(3)
-    return LiDARFrame(
+    try:
+        intensity = np.asarray(body.get("intensity", np.ones(n, dtype=np.float32)), dtype=np.float32).reshape(n)
+        ring = np.asarray(body.get("ring", np.zeros(n, dtype=np.int16)), dtype=np.int16).reshape(n)
+    except (TypeError, ValueError) as exc:
+        raise SDKError(f"'intensity'/'ring' must reshape to (N,): {exc}") from exc
+    defaults: list[str] = []
+    try:
+        if "pose" in body:
+            pose = np.asarray(body["pose"], dtype=np.float64).reshape(4, 4)
+        else:
+            pose = np.eye(4, dtype=np.float64)
+            defaults.append("pose_identity_synthetic_test_only")
+        if "sensor_origin" in body:
+            origin = np.asarray(body["sensor_origin"], dtype=np.float32).reshape(3)
+        else:
+            origin = np.array([0.0, 0.0, 1.73], dtype=np.float32)
+            defaults.append("sensor_origin_core_default_mount")
+        if "timestamp" in body:
+            timestamp = float(body["timestamp"])
+        else:
+            timestamp = 0.0
+            defaults.append("timestamp_zero_synthetic")
+    except (TypeError, ValueError) as exc:
+        raise SDKError(f"Invalid frame metadata (pose/sensor_origin/timestamp): {exc}") from exc
+    frame = LiDARFrame(
         pts=pts,
         intensity=intensity,
         ring=ring,
         pose=pose,
         sensor_origin=origin,
-        timestamp=float(body.get("timestamp", 0.0)),
-        frame_id=str(body.get("frame_id", "")),
+        timestamp=timestamp,
+        frame_id=str(body["frame_id"]),
         source_id="sdk/http",
+        metadata={"defaults_applied": list(defaults)},
     )
+    return frame, defaults
 
 
 class FoveaMapHttpServer:

@@ -154,13 +154,15 @@ class FoveaMap:
             t0 = time.perf_counter()
             try:
                 snapshot = self._runtime.process(frame)
-            except FoveaMapError:
+            except FoveaMapError as exc:
                 self._consec_failures += 1
                 self._dropped += 1
+                self._last_error = f"{type(exc).__name__}: {exc}"[:300]
                 raise
             except Exception as exc:
                 self._consec_failures += 1
                 self._dropped += 1
+                self._last_error = f"{type(exc).__name__}: {exc}"[:300]
                 raise SDKError(f"Frame processing failed: {exc}") from exc
             dt = time.perf_counter() - t0
             self._processed += 1
@@ -210,6 +212,18 @@ class FoveaMap:
     def query_points(self, xs: Sequence[float], ys: Sequence[float], *, limit: int = 4096) -> list[QueryResult]:
         with self._lock:
             return self._view().query_points(xs, ys, limit=limit)
+
+    def query_ray(self, x: float, y: float, theta_rad: float, *,
+                  step_m: float = 0.5, max_steps: int = 512) -> list[QueryResult]:
+        """Sample the authoritative snapshot along a ray (delegates per sample)."""
+        with self._lock:
+            return self._view().query_ray(float(x), float(y), float(theta_rad),
+                                          step_m=step_m, max_steps=max_steps)
+
+    def export_numpy(self) -> dict[str, Any]:
+        """Detached NumPy copy of tier arrays (mutating it affects nothing)."""
+        with self._lock:
+            return self._view().export_numpy()
 
     def is_traversable(self, x: float, y: float, clearance_req: float = 0.0) -> bool:
         with self._lock:
