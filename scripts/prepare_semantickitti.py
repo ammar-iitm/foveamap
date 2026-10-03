@@ -12,6 +12,7 @@ KITTI is CC BY-NC-SA 3.0 and SemanticKITTI CC BY-NC-SA 4.0 (non-commercial).
 """
 import argparse
 import os
+import shutil
 import sys
 import time
 import urllib.request
@@ -31,12 +32,31 @@ def download(url, dst):
     return dst
 
 
+def _safe_join(root, member):
+    """Join an archive member path, rejecting traversal outside root."""
+    if os.path.isabs(member):
+        raise ValueError(f"Refusing absolute archive path {member!r}")
+    parts = member.replace("\\", "/").split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise ValueError(f"Refusing unsafe archive path {member!r}")
+    dst = os.path.abspath(os.path.join(root, *parts))
+    if dst != os.path.abspath(root) and not dst.startswith(os.path.abspath(root) + os.sep):
+        raise ValueError(f"Archive member escapes root: {member!r}")
+    return dst
+
+
 def extract(zip_path, root, keep):
     with zipfile.ZipFile(zip_path) as z:
-        members = [n for n in z.namelist() if keep(n) and not n.endswith("/")
-                   and not os.path.exists(os.path.join(root, n))]
-        for n in members:
-            z.extract(n, root)
+        members = [n for n in z.namelist() if keep(n) and not n.endswith("/")]
+        # Validate every selected member BEFORE extracting anything, so one
+        # hostile entry cannot plant files while others fail.
+        targets = [(_safe_join(root, n), n) for n in members]
+        for dst, n in targets:
+            if not os.path.exists(dst):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with z.open(n) as src, open(dst + ".part", "wb") as fh:
+                    shutil.copyfileobj(src, fh)
+                os.replace(dst + ".part", dst)
     return len(members)
 
 

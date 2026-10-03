@@ -245,8 +245,15 @@ def fetch_scans(root, wanted, url=VELODYNE_URL, workers=16, log=print, reserve=1
     import shutil
     import threading
     import time
+    import re
     from .remote_zip import open_remote_zip
 
+    for s, ids in wanted.items():
+        if not re.fullmatch(r"[0-9]{2}", str(s)):
+            raise ValueError(f"Refusing unsafe sequence id {s!r}: must match [0-9]{{2}}")
+        for i in ids:
+            if not isinstance(i, int) or i < 0:
+                raise ValueError(f"Refusing unsafe scan id {i!r} in sequence {s!r}")
     todo = [(s, i) for s, ids in wanted.items() for i in ids
             if not os.path.exists(os.path.join(root, "dataset", "sequences", s, "velodyne", f"{i:06d}.bin"))]
     log(f"fetching {len(todo)} scans ({sum(len(v) for v in wanted.values()) - len(todo)} already present)")

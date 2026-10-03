@@ -43,12 +43,18 @@ def _validate_url(url: str) -> str:
 class HTTPRangeFile(io.RawIOBase):
     """Seekable, read-only view of a URL (the server must honour Range requests)."""
 
-    def __init__(self, url, block=1 << 20, timeout=60, retries=6, backoff=2.0):
+    def __init__(self, url, block=1 << 20, timeout=60, retries=6, backoff=2.0,
+                 max_size: int | None = None):
         self.url, self.block, self.timeout = _validate_url(url), block, timeout
         self.retries, self.backoff = retries, backoff
         self.pos = 0
         size = self._retry(lambda: self._open("bytes=0-0").headers["Content-Range"])
         self.size = int(size.split("/")[1])
+        if max_size is not None and self.size > max_size:
+            raise OSError(
+                f"{self.url}: remote size {self.size} bytes exceeds max_size {max_size} "
+                "(refusing a potentially unbounded download)"
+            )
         self._buf_start, self._buf = 0, b""
 
     def _open(self, rng):
