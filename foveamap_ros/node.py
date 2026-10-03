@@ -29,7 +29,7 @@ from foveamap.core.exceptions import DataAdapterError, FoveaMapError
 from foveamap.runtime.runtime import FoveaMapRuntime
 from .config import RosNodeConfig, from_ros_params
 from .diagnostics import MetricsAggregator
-from .frames import MissingTransformError, TransformProvider, resolve_ego_points
+from .frames import MissingTransformError, TransformProvider, resolve_ego_points, resolve_world_pose
 from .messages import build_grid_payload, build_points_payload
 from .pointcloud import cloud_to_arrays
 
@@ -70,7 +70,8 @@ class FoveaMapNodeCore:
 
     # ------------------------------------------------------------- lifecycle
     def configure(self) -> None:
-        if self.state not in (CREATED, INACTIVE, SHUTDOWN):
+        # SHUTDOWN is terminal: a shut-down node must be recreated, never revived.
+        if self.state not in (CREATED, INACTIVE):
             raise FoveaMapError(f"configure() illegal from {self.state}")
         # Startup validation: config already validated by dataclasses; verify
         # the perception backend actually constructed (missing checkpoint
@@ -151,29 +152,43 @@ class FoveaMapNodeCore:
     def _convert(self, msg: Any) -> LiDARFrame:
         arrays = cloud_to_arrays(msg, intensity_mode=self.config.io.intensity_mode)
         pts_sensor = arrays["pts"]
+        stamp = float(arrays["timestamp"])
+        policy = self.config.io.frame_policy()
         ego, tf_prov = resolve_ego_points(
             pts_sensor,
             arrays["frame_id"],
-            arrays["timestamp"],
-            self.config.io.frame_policy(),
+            stamp,
+            policy,
+            self.tf_provider,
+        )
+        # Base -> world uses the SAME cloud timestamp: frames, sensor TF and
+        # world TF can never mix timestamps. Identity pose is only legal for
+        # explicitly configured same-frame (world == base) operation.
+        pose, pose_prov = resolve_world_pose(
+            policy.base_frame,
+            policy.world_frame,
+            stamp,
+            policy,
             self.tf_provider,
         )
         origin = np.asarray(self.config.io.sensor_origin, dtype=np.float32)
-        pose = np.eye(4, dtype=np.float64)
         return LiDARFrame(
             pts=ego.astype(np.float32),
             intensity=arrays["intensity"],
             ring=arrays["ring"],
             pose=pose,
             sensor_origin=origin,
-            timestamp=float(arrays["timestamp"]),
+            timestamp=stamp,
             frame_id=str(arrays["frame_id"]),
             source_id="ros/node",
+            time_offsets=arrays.get("time_offsets"),
             metadata={
                 "intensity_provenance": arrays["intensity_provenance"],
                 "ring_available": bool(arrays["ring_available"]),
                 "timestamp_provenance": "ros_header_stamp",
+                "time_provenance": arrays.get("time_provenance", "absent_no_per_point_timing"),
                 "tf_provenance": tf_prov,
+                "pose_provenance": pose_prov,
             },
         )
 

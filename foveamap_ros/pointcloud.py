@@ -56,6 +56,7 @@ _DTYPE_OF = {
 
 INTENSITY_NAMES = ("intensity", "reflectivity", "amplitude")
 RING_NAMES = ("ring", "laser", "channel")
+TIME_NAMES = ("time", "timestamp", "t", "stamps")
 
 
 @dataclass
@@ -158,6 +159,8 @@ def cloud_to_arrays(
             "pts": np.zeros((0, 3), dtype=np.float32),
             "intensity": np.zeros((0,), dtype=np.float32),
             "ring": np.zeros((0,), dtype=np.int16),
+            "time_offsets": None,
+            "time_provenance": "empty",
             "intensity_provenance": "empty",
             "ring_available": False,
             "timestamp": stamp_to_seconds(header.stamp),
@@ -181,20 +184,55 @@ def cloud_to_arrays(
     names = [str(getattr(f, "name", "")) for f in msg.fields]
     if len(set(names)) != len(names):
         raise DataAdapterError(f"PointCloud2 has duplicate field names: {names}")
-    descr = []
+    if any(not nm for nm in names):
+        raise DataAdapterError("PointCloud2 has an empty field name")
+    # Honor the wire layout exactly: offsets and point_step define placement,
+    # so padded / shuffled / non-contiguous Velodyne/Ouster layouts parse
+    # correctly instead of being misread as packed sequential fields.
+    layout: list[tuple[str, Any, int, int, int]] = []  # name, dtype, offset, count, size
     for f in msg.fields:
         dtype_id = int(getattr(f, "datatype", 0))
         count = int(getattr(f, "count", 1))
+        offset = int(getattr(f, "offset", -1))
         if dtype_id not in _DTYPE_OF or count < 1:
             raise DataAdapterError(f"Unsupported PointCloud2 field {f.name!r}: datatype={dtype_id} count={count}")
+        if offset < 0:
+            raise DataAdapterError(f"PointCloud2 field {f.name!r} has invalid offset {offset}")
         _, np_dtype = _DTYPE_OF[dtype_id]
-        fname = str(getattr(f, "name", ""))
-        if count > 1:
-            descr.append((fname, np_dtype, (count,)))
-        else:
-            descr.append((fname, np_dtype))
+        size = int(np.dtype(np_dtype).itemsize) * count
+        if offset + size > point_step:
+            raise DataAdapterError(
+                f"PointCloud2 field {f.name!r} spans bytes [{offset}, {offset + size}) "
+                f"beyond point_step {point_step}"
+            )
+        layout.append((str(getattr(f, "name", "")), np_dtype, offset, count, size))
+    layout.sort(key=lambda e: e[2])
+    for (_, _, off_a, _, size_a), (_, _, off_b, _, _) in zip(layout, layout[1:]):
+        if off_b < off_a + size_a:
+            raise DataAdapterError(
+                f"PointCloud2 fields overlap at byte offset {off_b} "
+                f"(previous field ends at {off_a + size_a})"
+            )
+    descr = {
+        "names": [e[0] for e in layout],
+        "formats": [(e[1], (e[3],)) if e[3] > 1 else e[1] for e in layout],
+        "offsets": [e[2] for e in layout],
+        "itemsize": point_step,
+    }
+    rows = []
     try:
-        record = np.frombuffer(data[: height * row_step], dtype=np.dtype(descr)).reshape(height, width)
+        record_dtype = np.dtype(descr)
+        for r in range(height):
+            base = r * row_step
+            if base + width * point_step > len(data):
+                raise DataAdapterError(
+                    f"Truncated PointCloud2 row {r}: need {width * point_step} bytes at offset {base}, "
+                    f"have {len(data) - base}"
+                )
+            rows.append(np.frombuffer(data, dtype=record_dtype, count=width, offset=base))
+        record = np.stack(rows) if rows else np.zeros((height, width), dtype=record_dtype)
+    except DataAdapterError:
+        raise
     except (ValueError, TypeError) as exc:
         raise DataAdapterError(f"PointCloud2 buffer does not match field layout: {exc}") from exc
     flat = record.reshape(n_pts)
@@ -221,16 +259,36 @@ def cloud_to_arrays(
         ring = _read_channel(flat, fields[ring_name], n_pts).astype(np.int16)
         ring_available = True
 
+    # Per-point time offsets (seconds, relative to the header stamp): parsed
+    # when a time channel exists, validated by the LiDARFrame contract
+    # downstream. Absent means no per-point timing (normal processing +
+    # provenance, never fabricated de-skew).
+    time_name = next((k for k in TIME_NAMES if k in fields), None)
+    if time_name is None:
+        time_offsets = None
+        time_prov = "absent_no_per_point_timing"
+    else:
+        if int(fields[time_name].datatype) not in (FLOAT32, FLOAT64):
+            raise DataAdapterError(
+                f"PointCloud2 time channel must be float32/float64, got datatype {fields[time_name].datatype}"
+            )
+        time_offsets = _read_channel(flat, fields[time_name], n_pts).astype(np.float32)
+        time_prov = "ros_time_channel"
+
     if reject_invalid and n_pts:
         if not np.all(np.isfinite(pts)):
             raise DataAdapterError("PointCloud2 xyz contains NaN or Inf (rejected; set reject_invalid=False to filter upstream)")
         if not np.all(np.isfinite(intensity)):
             raise DataAdapterError("PointCloud2 intensity contains NaN or Inf")
+        if time_offsets is not None and not np.all(np.isfinite(time_offsets)):
+            raise DataAdapterError("PointCloud2 time channel contains NaN or Inf")
 
     return {
         "pts": pts,
         "intensity": intensity.astype(np.float32),
         "ring": ring,
+        "time_offsets": time_offsets,
+        "time_provenance": time_prov,
         "intensity_provenance": inten_prov,
         "ring_available": ring_available,
         "timestamp": stamp_to_seconds(header.stamp),
@@ -270,10 +328,12 @@ def cloud_to_lidar_frame(
         timestamp=float(arrays["timestamp"]),
         frame_id=str(arrays["frame_id"]) or f"ros_frame_{n}pts",
         source_id=source_id,
+        time_offsets=arrays.get("time_offsets"),
         metadata={
             "intensity_provenance": arrays["intensity_provenance"],
             "ring_available": bool(arrays["ring_available"]),
             "timestamp_provenance": "ros_header_stamp",
+            "time_provenance": arrays.get("time_provenance", "absent_no_per_point_timing"),
             "origin_provenance": "user_supplied" if sensor_origin is not None else "default_vehicle_mount",
         },
     )

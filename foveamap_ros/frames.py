@@ -159,3 +159,55 @@ def resolve_ego_points(
         "tf_stamp": float(tf.stamp),
         "tf_age_s": age,
     }
+
+
+def resolve_world_pose(
+    base_frame: str,
+    world_frame: str,
+    stamp: float,
+    policy: FramePolicy,
+    provider: TransformProvider | None = None,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Resolve the ego/base -> world/map pose for ``stamp``.
+
+    Returns ``(pose_4x4, provenance)``. The SAME cloud timestamp is used for
+    the sensor->base and base->world lookups, so frames can never mix
+    timestamps. Rules:
+    - ``world_frame == base_frame``: explicit same-frame operation, identity
+      pose with ``local_map_origin`` provenance (valid and documented).
+    - Otherwise a provider lookup ``(world_frame, base_frame)`` at ``stamp``
+      is REQUIRED: missing -> MissingTransformError, stale -> StaleTransformError
+      (unless ``allow_stale_tf``), future-dated -> StaleTransformError. The
+      ``provider is None`` case therefore fails loudly instead of silently
+      substituting identity.
+    """
+    if not base_frame or not world_frame:
+        raise DataAdapterError("base_frame and world_frame must be non-empty for pose resolution")
+    if world_frame == base_frame:
+        return np.eye(4, dtype=np.float64), {
+            "pose": "identity_same_frame_operation",
+            "base_frame": base_frame,
+            "world_frame": world_frame,
+        }
+    if provider is None:
+        raise MissingTransformError(
+            f"World transform {base_frame!r} -> {world_frame!r} required at t={stamp} "
+            "but no TF provider is configured (configure world_frame == base_frame "
+            "for explicit local-map operation)"
+        )
+    tf = provider.lookup(world_frame, base_frame, stamp)
+    age = float(stamp) - float(tf.stamp)
+    if age < -1e-6:
+        raise StaleTransformError(f"World transform from the future (age {age:.3f}s) for t={stamp}")
+    stale = age > policy.max_tf_age_s
+    if stale and not policy.allow_stale_tf:
+        raise StaleTransformError(
+            f"World transform age {age:.3f}s exceeds max_tf_age_s={policy.max_tf_age_s} for t={stamp}"
+        )
+    return tf.matrix(), {
+        "pose": "transformed_stale_accepted" if stale else "transformed",
+        "base_frame": base_frame,
+        "world_frame": world_frame,
+        "tf_stamp": float(tf.stamp),
+        "tf_age_s": age,
+    }
