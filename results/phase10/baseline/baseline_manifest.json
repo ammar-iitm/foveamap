@@ -1,0 +1,12 @@
+{
+  "git_sha": "9bd20cfe7addc80b6ed8830ba077fe5640437f67",
+  "dirty": false,
+  "note": "FROZEN BASELINE \u2014 NO SOURCE MODIFICATIONS DURING MEASUREMENT",
+  "hardware": "NVIDIA Tesla T4 (14.56 GB VRAM)",
+  "torch": "2.11.0+cu130",
+  "cuda": "13.0",
+  "tests_collected": 404,
+  "tests_passed": 388,
+  "tests_failed": 14,
+  "tests_skipped": 2
+}

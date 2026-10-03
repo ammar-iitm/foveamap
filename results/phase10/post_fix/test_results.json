@@ -1,0 +1,18 @@
+{
+  "git_sha": "80cc01950280f654b19628622c5660a4b6370c02",
+  "colab_git_sha": "cad6594b7c2896bd10dc2657581ab610ae085dcf",
+  "git_dirty": false,
+  "exit_code": 0,
+  "total_duration_seconds": 280.33,
+  "collected": 404,
+  "passed": 402,
+  "failed": 0,
+  "skipped": 2,
+  "warnings": 23,
+  "summary": "=========== 402 passed, 2 skipped, 23 warnings in 280.33s (0:04:40) ============",
+  "failures": [],
+  "skipped_tests": [
+    "tests/test_phase8_ros.py::test_ros_node_lifecycle_with_rclpy",
+    "tests/test_phase8_ros.py::test_ros_qos_conversion_with_rclpy"
+  ]
+}

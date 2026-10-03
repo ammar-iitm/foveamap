@@ -1,0 +1,52 @@
+{
+  "total_failures": 4,
+  "P0_count": 0,
+  "P1_count": 3,
+  "P2_count": 1,
+  "P3_count": 0,
+  "failures": [
+    {
+      "test": "test_full_ros_like_cycle_numpy",
+      "priority": "P2",
+      "category_description": "Other failure",
+      "error_snippet": "E   assert None is not None",
+      "production_defect": false,
+      "test_defect": false
+    },
+    {
+      "test": "test_status_and_health_fields",
+      "priority": "P1",
+      "category_description": "Device compatibility defect: DevicePerceptionResult.validate() requires strict device equality (t.device == self.device), which fails when self.device is torch.device('cuda') (index=None) while tensor.device is torch.device('cuda:0') (index=0).",
+      "error_snippet": "E   foveamap.core.exceptions.ContractError: DevicePerceptionResult.class_probabilities device (cuda:0) mismatch with result device (cuda)",
+      "production_defect": true,
+      "test_defect": false
+    },
+    {
+      "test": "test_runtime_reset_cycle",
+      "priority": "P1",
+      "category_description": "Device compatibility defect: DevicePerceptionResult.validate() requires strict device equality (t.device == self.device), which fails when self.device is torch.device('cuda') (index=None) while tensor.device is torch.device('cuda:0') (index=0).",
+      "error_snippet": "E   foveamap.core.exceptions.ContractError: DevicePerceptionResult.class_probabilities device (cuda:0) mismatch with result device (cuda)",
+      "production_defect": true,
+      "test_defect": false
+    },
+    {
+      "test": "test_input_frame_immutability",
+      "priority": "P1",
+      "category_description": "Device compatibility defect: DevicePerceptionResult.validate() requires strict device equality (t.device == self.device), which fails when self.device is torch.device('cuda') (index=None) while tensor.device is torch.device('cuda:0') (index=0).",
+      "error_snippet": "E   foveamap.core.exceptions.ContractError: DevicePerceptionResult.class_probabilities device (cuda:0) mismatch with result device (cuda)",
+      "production_defect": true,
+      "test_defect": false
+    }
+  ],
+  "analysis": {
+    "device_mismatch": {
+      "root_cause": "PyTorch torch.device('cuda') has device.index == None, whereas all allocated CUDA tensors have device.index == 0 (cuda:0). In PyTorch, torch.device('cuda') == torch.device('cuda:0') evaluates to False. When resolve_device('auto') returns torch.device('cuda'), DevicePerceptionResult.validate() throws ContractError.",
+      "correct_architectural_fix": "resolve_device() should resolve 'auto' (and 'cuda') to the concrete device with current device index: torch.device(f'cuda:{torch.cuda.current_device()}'). Additionally, DevicePerceptionResult.validate() should canonicalize device comparisons so that unindexed 'cuda' and 'cuda:0' match when device types are 'cuda' and indices are compatible.",
+      "impact": "Fixing this single root cause resolves 12 out of the 14 baseline test failures."
+    },
+    "test_portability": {
+      "root_cause": "test_status_and_health_fields and test_metrics_measured_not_invented in test_phase9_sdk.py hardcode 'assert st.device == cpu', which is invalid on a CUDA machine.",
+      "impact": "Accounts for the remaining 2 test failures."
+    }
+  }
+}

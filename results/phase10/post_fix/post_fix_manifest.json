@@ -1,0 +1,13 @@
+{
+  "git_sha": "80cc01950280f654b19628622c5660a4b6370c02",
+  "baseline_sha": "9bd20cfe7addc80b6ed8830ba077fe5640437f67",
+  "dirty": false,
+  "note": "POST-FIX VALIDATION \u2014 MINIMAL CORRECTNESS FIXES APPLIED",
+  "hardware": "NVIDIA Tesla T4 (14.56 GB VRAM)",
+  "torch": "2.11.0+cu130",
+  "cuda": "13.0",
+  "tests_collected": 404,
+  "tests_passed": 402,
+  "tests_failed": 0,
+  "tests_skipped": 2
+}

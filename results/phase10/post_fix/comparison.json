@@ -1,0 +1,27 @@
+{
+  "baseline": {
+    "git_sha": "9bd20cfe7addc80b6ed8830ba077fe5640437f67",
+    "collected": 404,
+    "passed": 388,
+    "failed": 14,
+    "skipped": 2,
+    "duration_seconds": 261.71,
+    "cuda_failures": 12,
+    "test_portability_failures": 2
+  },
+  "post_fix": {
+    "git_sha": "80cc01950280f654b19628622c5660a4b6370c02",
+    "collected": 404,
+    "passed": 402,
+    "failed": 0,
+    "skipped": 2,
+    "duration_seconds": 280.33,
+    "cuda_failures": 0,
+    "test_portability_failures": 0
+  },
+  "diff": {
+    "passed_delta": "+14",
+    "failed_delta": "-14",
+    "unresolved_failures": 0
+  }
+}
