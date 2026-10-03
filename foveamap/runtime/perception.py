@@ -111,6 +111,16 @@ class DeviceTemporalState:
         return out
 
 
+def _devices_match(d1: torch.device, d2: torch.device) -> bool:
+    if d1 == d2:
+        return True
+    if d1.type == d2.type:
+        idx1 = d1.index if d1.index is not None else (torch.cuda.current_device() if d1.type == "cuda" else None)
+        idx2 = d2.index if d2.index is not None else (torch.cuda.current_device() if d2.type == "cuda" else None)
+        return idx1 == idx2
+    return False
+
+
 @dataclass
 class DevicePerceptionResult:
     """Device-resident perception inference results (PyTorch Tensors on active device).
@@ -130,6 +140,8 @@ class DevicePerceptionResult:
     strict_validation: bool = False
 
     def __post_init__(self) -> None:
+        if self.device.type == "cuda" and self.device.index is None and torch.cuda.is_available():
+            object.__setattr__(self, "device", torch.device(f"cuda:{torch.cuda.current_device()}"))
         self.validate()
 
     @property
@@ -161,7 +173,7 @@ class DevicePerceptionResult:
         ]:
             if not torch.is_tensor(t):
                 raise ContractError(f"DevicePerceptionResult.{name} must be a torch.Tensor; got {type(t).__name__}")
-            if t.device != self.device:
+            if not _devices_match(t.device, self.device):
                 raise ContractError(f"DevicePerceptionResult.{name} device ({t.device}) mismatch with result device ({self.device})")
 
         n = self.num_points

@@ -270,7 +270,7 @@ def _node_config(**over):
     # Same-frame operation (world == base) unless a test overrides it: the
     # node never silently substitutes identity world pose when TF is required.
     params = {"perception.backend_type": "classical", "runtime.grid_engine": "numpy",
-              "io.world_frame": "base_link"}
+              "runtime.device": "cpu", "io.world_frame": "base_link"}
     params.update(over)
     return from_ros_params(params)
 

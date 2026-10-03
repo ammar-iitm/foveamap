@@ -39,7 +39,8 @@ def _frame(n=60, cls_id=ROAD, x0=1.0, x1=3.0, ts=0.0, frame_id="f0"):
 
 
 def _active(**kw):
-    m = FoveaMap(perception_backend=_backend(), **kw)
+    cfg = kw.pop("config", {"runtime": {"device": "cpu"}})
+    m = FoveaMap(config=cfg, perception_backend=_backend(), **kw)
     m.configure()
     m.start()
     return m
