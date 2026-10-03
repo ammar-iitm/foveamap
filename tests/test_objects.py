@@ -69,11 +69,16 @@ def test_stale_cells_are_left_out():
 
 
 def test_matching_counts():
-    car = dict(cls=VEHICLE, x=5.0, y=0.0, moving=False)
-    gt = [car, dict(cls=PERSON, x=8.0, y=1.0, moving=True), dict(cls=VEHICLE, x=60.0, y=0.0, moving=False)]
-    pred = [dict(car, x=5.8), dict(cls=PERSON, x=8.0, y=2.5, moving=True), dict(cls=POLE, x=2.0, y=2.0, moving=False)]
-    counts, agree, pairs = match_objects(pred, gt, (0.0, 0.0))
-    assert counts[VEHICLE] == [1, 0, 0]          # the car 60 m away is out of range
+    car = dict(cls=VEHICLE, x=5.0, y=0.0, moving=False, n_cells=40)
+    gt = [car, dict(cls=PERSON, x=8.0, y=1.0, moving=True, n_cells=6), dict(cls=VEHICLE, x=60.0, y=0.0, moving=False, n_cells=9)]
+    pred = [dict(car, x=5.8), dict(car, x=3.0, n_cells=4),                  # the car, and a fragment of it
+            dict(cls=PERSON, x=8.0, y=2.5, moving=True, n_cells=5),
+            dict(cls=POLE, x=2.0, y=2.0, moving=False, n_cells=3)]
+    counts, agree, pairs, diag = match_objects(pred, gt, (0.0, 0.0))
+    assert counts[VEHICLE] == [1, 1, 0]          # the car 60 m away is out of range
     assert counts[PERSON] == [0, 1, 1]           # 1.5 m off: no match
     assert counts[POLE] == [0, 1, 0]
     assert (agree, pairs) == (1, 1)
+    assert diag[VEHICLE] == dict(tp_cells=[40], fp_cells=[4], fn_cells=[], fp_fragment=[True], fp_other_class=[False])
+    assert diag[PERSON]["fp_fragment"] == [True] and diag[PERSON]["fn_cells"] == [6]
+    assert diag[POLE]["fp_fragment"] == [False] and diag[POLE]["fp_other_class"] == [False]

@@ -247,6 +247,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
     curb_hit = curb_tot = pot_hit = pot_tot = 0
     obj_counts = {c: np.zeros(3, np.int64) for c in OBJECT_CLASSES}   # tp, fp, fn within 25 m
     obj_agree = obj_pairs = 0
+    obj_diag = {c: dict(tp_cells=[], fp_cells=[], fn_cells=[], fp_fragment=[], fp_other_class=[]) for c in OBJECT_CLASSES}
     dep_hit = dep_tot = 0           # drivable cells within 10 m flagged as potholes (false alarms on real roads)
     per_frame, pts_blob, pts_index = [], [], []
     rng = np.random.default_rng(0)
@@ -281,9 +282,11 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         gstats = gt_grid.bin_points(r["pw"][has, :2], r["pw"][has, 2], np.eye(C)[lab[has]], gm[has], pipe.grid.origins)
         # reference objects: the same extraction on a grid fused from this frame's labels
         gdyn = gt_grid.fuse_stats(gstats, pipe.grid.origins)
-        cnt, agree, pairs = match_objects(objs, extract_objects(gt_grid, gt_grid.state, gdyn), ego)
+        cnt, agree, pairs, dg = match_objects(objs, extract_objects(gt_grid, gt_grid.state, gdyn), ego)
         for c in OBJECT_CLASSES:
             obj_counts[c] += np.asarray(cnt[c])
+            for key, v in dg[c].items():
+                obj_diag[c][key] += v
         obj_agree += agree; obj_pairs += pairs
         path = os.path.join(frames_dir, f"f{t:03d}.png") if export_mode != "none" else None
         if export_mode == "async":
@@ -446,6 +449,14 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         objects_within_25m={info.class_names[c]: dict(
             precision=float(tp / (tp + fp)) if tp + fp else None, recall=float(tp / (tp + fn)) if tp + fn else None,
             tp=int(tp), fp=int(fp), fn=int(fn)) for c, (tp, fp, fn) in obj_counts.items()},
+        objects_diagnostics={info.class_names[c]: dict(
+            fp_fragment_share=float(np.mean(d["fp_fragment"])) if d["fp_fragment"] else None,
+            fp_other_class_share=float(np.mean(d["fp_other_class"])) if d["fp_other_class"] else None,
+            median_cells_tp=float(np.median(d["tp_cells"])) if d["tp_cells"] else None,
+            median_cells_fp=float(np.median(d["fp_cells"])) if d["fp_cells"] else None,
+            median_cells_fn=float(np.median(d["fn_cells"])) if d["fn_cells"] else None,
+            fp_cells_quartiles=[float(q) for q in np.percentile(d["fp_cells"], [25, 75])] if d["fp_cells"] else None)
+            for c, d in obj_diag.items()},
         objects_moving_flag_agreement=float(obj_agree / obj_pairs) if obj_pairs else None,
         objects_per_frame=float(np.mean([len(f["objects"]) for f in per_frame])),
         points_file_index=pts_index,

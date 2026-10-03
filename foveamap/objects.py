@@ -123,21 +123,29 @@ def extract_objects(grid, snap, dyn=None, max_age=0):
             for k in range(len(cls))]
 
 
+FRAGMENT_DIST = 3.0     # m: a false detection this close to a real object is counted as a fragment of it
+
+
 def match_objects(pred, gt, ego_xy, max_range=25.0):
-    """Greedy per-class matching by centre distance (MATCH_DIST) for ground-truth objects within
-    max_range of the ego. Returns {cls: [tp, fp, fn]} and the number of matched pairs whose
-    moving flags agree, out of the matched pairs."""
+    """Greedy per-class matching by centre distance (MATCH_DIST) for objects within max_range of
+    the ego. Returns ({cls: [tp, fp, fn]}, moving flags agreeing, matched pairs, diagnostics).
+
+    diagnostics[cls] lists the sizes (cells) of true positives, false positives and misses, and
+    for each false positive whether a ground-truth object of the same class (a fragment) or of
+    another class (a misclassification) lies within FRAGMENT_DIST."""
     near = lambda o: np.hypot(o["x"] - ego_xy[0], o["y"] - ego_xy[1]) < max_range
     counts = {c: [0, 0, 0] for c in OBJECT_CLASSES}
+    diag = {c: dict(tp_cells=[], fp_cells=[], fn_cells=[], fp_fragment=[], fp_other_class=[]) for c in OBJECT_CLASSES}
+    gxy = np.array([[o["x"], o["y"]] for o in gt]).reshape(-1, 2)
+    gcls = np.array([o["cls"] for o in gt])
     agree = pairs = 0
     for c in OBJECT_CLASSES:
         P = [o for o in pred if o["cls"] == c and near(o)]
         G = [o for o in gt if o["cls"] == c and near(o)]
+        used_p, used_g = set(), set()
         if P and G:
             d = np.hypot(np.array([p["x"] for p in P])[:, None] - np.array([g["x"] for g in G])[None],
                          np.array([p["y"] for p in P])[:, None] - np.array([g["y"] for g in G])[None])
-        used_p, used_g = set(), set()
-        if P and G:
             for flat in np.argsort(d, axis=None):
                 i, j = divmod(int(flat), len(G))
                 if d[i, j] > MATCH_DIST[c]:
@@ -151,7 +159,17 @@ def match_objects(pred, gt, ego_xy, max_range=25.0):
         counts[c][0] += tp
         counts[c][1] += len(P) - tp
         counts[c][2] += len(G) - tp
-    return counts, agree, pairs
+        dg = diag[c]
+        for i, o in enumerate(P):
+            if i in used_p:
+                dg["tp_cells"].append(o["n_cells"])
+                continue
+            dg["fp_cells"].append(o["n_cells"])
+            dist = np.hypot(gxy[:, 0] - o["x"], gxy[:, 1] - o["y"]) if len(gxy) else np.zeros(0)
+            dg["fp_fragment"].append(bool(np.any((dist < FRAGMENT_DIST) & (gcls == c))))
+            dg["fp_other_class"].append(bool(np.any((dist < FRAGMENT_DIST) & (gcls != c))))
+        dg["fn_cells"] += [o["n_cells"] for j, o in enumerate(G) if j not in used_g]
+    return counts, agree, pairs, diag
 
 
 def pack(objs):
