@@ -9,6 +9,23 @@ tiers meet.
 **Live dashboard: [foveamap-teal.vercel.app](https://foveamap-teal.vercel.app)**, a replay of real
 Lidar (nuScenes scene-0103) run through the GPU pipeline on a T4.
 
+## Quickstart & Product CLI
+
+Install with dependencies:
+```bash
+pip install -e ".[dev]"
+```
+
+Run core product commands:
+- **System Diagnostics:** `foveamap info`
+- **Canonical Live Demo:** `foveamap demo --frames 15`
+- **Compare vs. 5cm Uniform Baseline:** `foveamap compare`
+- **Serve HTTP API & Web Dashboard:** `foveamap serve --port 8000`
+- **Process Recorded Clouds / Sequences:** `foveamap run path/to/cloud.pcd`
+- **Multi-Frame Benchmark:** `foveamap bench --engine numpy --frames 100`
+
+See [`docs/QUICKSTART.md`](docs/QUICKSTART.md) for full instructions and Python SDK examples.
+
 It runs on three data sources through the same code:
 - **Simulated Lidar**: built in, no download needed, exact labels.
 - **Real Lidar from SemanticKITTI**: 64-beam, the main real-data training set, through its Colab notebook.

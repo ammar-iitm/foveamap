@@ -75,6 +75,35 @@ class LiDARFrame:
         """True if ground-truth semantic or motion annotations are attached."""
         return self.label is not None or self.moving is not None
 
+    @property
+    def has_semantics(self) -> bool:
+        """True if semantic annotations are attached."""
+        return self.label is not None
+
+    @property
+    def has_motion(self) -> bool:
+        """True if dynamic/motion annotations are attached."""
+        return self.moving is not None
+
+    @property
+    def data_origin_category(self) -> str:
+        """Categorize data provenance: 'REAL', 'SYNTHETIC', 'DEMO', or 'TEST'."""
+        explicit = self.metadata.get("data_type") or self.metadata.get("origin_category")
+        if explicit:
+            return str(explicit).upper()
+        src = (self.source_id or "").lower()
+        fid = (self.frame_id or "").lower()
+        if "sim" in src or "synthetic" in src or "sim" in fid:
+            return "SYNTHETIC"
+        if "kitti" in src or "nuscenes" in src or "velodyne" in src or "ouster" in src or "hesai" in src:
+            return "REAL"
+        if "golden" in fid or "test" in fid or "mock" in src:
+            return "TEST"
+        if "demo" in src or "demo" in fid:
+            return "DEMO"
+        return "REAL" if self.source_id else "TEST"
+
+
     def without_annotations(self) -> LiDARFrame:
         """Return a copy of this frame stripped of all ground-truth annotations."""
         return LiDARFrame(

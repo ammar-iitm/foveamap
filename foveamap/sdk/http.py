@@ -26,6 +26,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
+from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 import numpy as np
@@ -59,6 +60,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_file(self, file_path: Path, content_type: str) -> None:
+        try:
+            data = file_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as exc:
+            self._fail(500, "InternalError", f"Failed to serve file: {type(exc).__name__}")
+
     def _fail(self, code: int, kind: str, message: str) -> None:
         self._send(code, {"api_version": API_VERSION, "error": str(message)[:500], "type": kind})
 
@@ -88,6 +100,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, sdk.status().to_dict())
             elif parsed.path == "/metrics":
                 self._send(200, sdk.metrics().to_dict())
+            elif parsed.path in ("/map/snapshot", "/snapshot"):
+                try:
+                    self._send(200, sdk.snapshot().to_dict())
+                except SDKQueryError as exc:
+                    self._fail(409, "SDKQueryError", str(exc))
             elif parsed.path == "/map/query":
                 args = parse_qs(parsed.query)
                 try:
@@ -101,10 +118,38 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send(200, sdk.query_point(x, y).to_dict())
                 except SDKQueryError as exc:
                     self._fail(409, "SDKQueryError", str(exc))
+            elif getattr(self.server, "dashboard_dir", None) is not None:
+                # Safe dashboard file serving with traversal prevention (Part 14)
+                d_dir = Path(self.server.dashboard_dir).resolve()
+                clean_path = parsed.path.lstrip("/")
+                if clean_path in ("", "dashboard", "dashboard/"):
+                    clean_path = "index.html"
+                elif clean_path.startswith("dashboard/"):
+                    clean_path = clean_path[len("dashboard/"):]
+                target = (d_dir / clean_path).resolve()
+                try:
+                    target.relative_to(d_dir)
+                except ValueError:
+                    return self._fail(403, "Forbidden", "Path traversal forbidden")
+                if target.is_file():
+                    mime_types = {
+                        ".html": "text/html; charset=utf-8",
+                        ".css": "text/css; charset=utf-8",
+                        ".js": "application/javascript; charset=utf-8",
+                        ".json": "application/json; charset=utf-8",
+                        ".png": "image/png",
+                        ".jpg": "image/jpeg",
+                        ".txt": "text/plain; charset=utf-8",
+                    }
+                    content_type = mime_types.get(target.suffix.lower(), "application/octet-stream")
+                    return self._send_file(target, content_type)
+                else:
+                    self._fail(404, "NotFound", f"static asset not found: {parsed.path!r}")
             else:
                 self._fail(404, "NotFound", f"unknown endpoint {parsed.path!r}")
         except Exception as exc:  # never leak internals; never hang the server
             self._fail(500, "InternalError", f"{type(exc).__name__}")
+
 
     def do_POST(self) -> None:  # noqa: N802
         try:
@@ -223,15 +268,25 @@ def _frame_from_json(body: Any) -> tuple[LiDARFrame, list[str]]:
 class FoveaMapHttpServer:
     """Embeddable HTTP server bound to one SDK session (stdlib only)."""
 
-    def __init__(self, sdk: FoveaMap, *, host: str = "127.0.0.1", port: int = 0) -> None:
+    def __init__(
+        self,
+        sdk: FoveaMap,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        dashboard_dir: str | Path | None = None,
+    ) -> None:
         if not isinstance(sdk, FoveaMap):
             raise SDKError(f"HTTP server requires a FoveaMap session, got {type(sdk).__name__}")
         if host not in ("127.0.0.1", "localhost", "::1"):
             raise SDKError(f"Refusing non-loopback bind {host!r} (explicit local-only policy)")
         self.sdk = sdk
+        self.dashboard_dir = Path(dashboard_dir).resolve() if dashboard_dir is not None else None
         self._server = HTTPServer((host, int(port)), _Handler)
         self._server.sdk = sdk  # type: ignore[attr-defined]
+        self._server.dashboard_dir = self.dashboard_dir  # type: ignore[attr-defined]
         self._thread: threading.Thread | None = None
+
 
     @property
     def url(self) -> str:

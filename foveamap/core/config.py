@@ -379,3 +379,128 @@ class FoveaMapConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
     dynamic: DynamicConfig = field(default_factory=DynamicConfig)
+
+    @classmethod
+    def cpu_dev(cls) -> FoveaMapConfig:
+        """Explicit CPU development profile: all-NumPy, CPU device, standard preprocessing."""
+        return cls(
+            runtime=RuntimeConfig.cpu_profile(),
+            preprocess=PreprocessConfig(enabled=True),
+        )
+
+    @classmethod
+    def gpu_dev(cls, checkpoint_path: str | None = None) -> FoveaMapConfig:
+        """Explicit GPU production profile: Torch engines with auto device and FP16 inference."""
+        return cls(
+            runtime=RuntimeConfig.gpu_profile(),
+            perception=PerceptionConfig(
+                backend_type="range_unet",
+                checkpoint_path=checkpoint_path,
+                fp16=True,
+            ),
+            preprocess=PreprocessConfig(enabled=True),
+        )
+
+    @classmethod
+    def benchmark(cls, grid_engine: str = "torch", enable_profiling: bool = True) -> FoveaMapConfig:
+        """Benchmark profile: runtime profiling enabled, specified grid engine."""
+        return cls(
+            runtime=RuntimeConfig(
+                device="auto",
+                grid_engine=grid_engine,
+                features_engine=grid_engine,
+                enable_profiling=enable_profiling,
+            ),
+            preprocess=PreprocessConfig(enabled=True),
+        )
+
+    @classmethod
+    def demo(cls) -> FoveaMapConfig:
+        """Canonical demo profile: profiling enabled, safe bounds, auto device."""
+        return cls(
+            runtime=RuntimeConfig(
+                device="auto",
+                grid_engine="numpy",
+                features_engine="numpy",
+                enable_profiling=True,
+            ),
+            preprocess=PreprocessConfig(enabled=True),
+        )
+
+    @classmethod
+    def ros2(cls) -> FoveaMapConfig:
+        """ROS 2 deployment profile: standardized automotive sensor bounds and real-time settings."""
+        return cls(
+            sensor=SensorConfig(
+                n_rows=64,
+                min_range_m=0.5,
+                max_range_m=100.0,
+            ),
+            runtime=RuntimeConfig(
+                device="auto",
+                grid_engine="numpy",
+                features_engine="numpy",
+                enable_profiling=False,
+            ),
+            preprocess=PreprocessConfig(enabled=True, remove_invalid=True, remove_self_hits=True),
+        )
+
+    @classmethod
+    def from_env(cls) -> FoveaMapConfig:
+        """Construct FoveaMapConfig resolved deterministically from environment variables:
+
+        FOVEAMAP_PROFILE: cpu | gpu | demo | bench | ros2 (default: cpu)
+        FOVEAMAP_DEVICE: auto | cpu | cuda | cuda:0
+        FOVEAMAP_GRID_ENGINE: numpy | torch
+        FOVEAMAP_FEATURES_ENGINE: numpy | torch
+        FOVEAMAP_CHECKPOINT: path to model weights
+        FOVEAMAP_PROFILING: 1 | 0 | true | false
+        """
+        profile = os.environ.get("FOVEAMAP_PROFILE", "cpu").strip().lower()
+        if profile in ("gpu", "gpu_dev", "cuda"):
+            ckpt = os.environ.get("FOVEAMAP_CHECKPOINT")
+            base = cls.gpu_dev(checkpoint_path=ckpt)
+        elif profile in ("bench", "benchmark"):
+            base = cls.benchmark()
+        elif profile in ("demo", "canonical_demo"):
+            base = cls.demo()
+        elif profile in ("ros", "ros2"):
+            base = cls.ros2()
+        else:
+            base = cls.cpu_dev()
+
+        # Apply granular environment variable overrides
+        device = os.environ.get("FOVEAMAP_DEVICE")
+        grid_engine = os.environ.get("FOVEAMAP_GRID_ENGINE")
+        features_engine = os.environ.get("FOVEAMAP_FEATURES_ENGINE")
+        profiling_str = os.environ.get("FOVEAMAP_PROFILING")
+
+        runtime_kwargs = {
+            "device": device if device is not None else base.runtime.device,
+            "grid_engine": grid_engine if grid_engine is not None else base.runtime.grid_engine,
+            "features_engine": features_engine if features_engine is not None else base.runtime.features_engine,
+            "enable_profiling": (profiling_str.strip().lower() in ("1", "true", "yes"))
+            if profiling_str is not None else base.runtime.enable_profiling,
+        }
+
+        ckpt_env = os.environ.get("FOVEAMAP_CHECKPOINT")
+        perception_kwargs = {}
+        if ckpt_env:
+            perception_kwargs["checkpoint_path"] = ckpt_env
+
+        runtime = RuntimeConfig(**runtime_kwargs)
+        perception = (
+            PerceptionConfig(**{**base.perception.__dict__, **perception_kwargs})
+            if perception_kwargs else base.perception
+        )
+
+        return cls(
+            sensor=base.sensor,
+            grid=base.grid,
+            perception=perception,
+            terrain=base.terrain,
+            runtime=runtime,
+            preprocess=base.preprocess,
+            dynamic=base.dynamic,
+        )
+
