@@ -18,7 +18,7 @@ from foveamap.sdk import (
     RuntimeStatus, SDKError, SDKLifecycleError, SDKQueryError, SnapshotView,
 )
 from foveamap.sdk.errors import SDKConfigError
-from foveamap.core.config import FoveaMapConfig
+from foveamap.core.config import FoveaMapConfig, RuntimeConfig
 from foveamap.core.contracts import LiDARFrame
 from foveamap.core.exceptions import ConfigurationError, ContractError, FoveaMapError
 from foveamap.core.ontology import NUM_CLASSES, ROAD, VEHICLE
@@ -39,8 +39,19 @@ def _frame(n=60, cls_id=ROAD, x0=1.0, x1=3.0, ts=0.0, frame_id="f0"):
 
 
 def _active(**kw):
-    cfg = kw.pop("config", {"runtime": {"device": "cpu"}})
-    m = FoveaMap(config=cfg, perception_backend=_backend(), **kw)
+    # the backend runs on the CPU, so the runtime must too ("auto" picks CUDA or MPS when present)
+    if "config" in kw:
+        cfg = kw["config"]
+        if isinstance(cfg, dict):
+            cfg.setdefault("runtime", {})
+            if isinstance(cfg["runtime"], dict):
+                cfg["runtime"].setdefault("device", "cpu")
+        elif isinstance(cfg, FoveaMapConfig):
+            if cfg.runtime.device == "auto":
+                cfg.runtime.device = "cpu"
+    else:
+        kw["config"] = FoveaMapConfig(runtime=RuntimeConfig(device="cpu"))
+    m = FoveaMap(perception_backend=_backend(), **kw)
     m.configure()
     m.start()
     return m
