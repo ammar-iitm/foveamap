@@ -19,7 +19,7 @@ from PIL import Image
 from .sim import NUM_CLASSES, ROAD, PARKING, VEHICLE, PERSON
 from .model import load_model, predict, pick_device
 from .frames import DatasetInfo, make_features, prev_in_ego, transform
-from .grid import (FoveatedGrid, UNKNOWN, F_DYNAMIC, F_OVERHANG, F_STEP, F_DEPRESSION)
+from .grid import (FoveatedGrid, UNKNOWN, DRIVABLE, F_DYNAMIC, F_OVERHANG, F_STEP, F_DEPRESSION)
 from .grid_torch import TorchFoveatedGrid
 from . import features_torch
 
@@ -244,6 +244,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
     cm_grid = np.zeros((len(BANDS), C, C), np.int64)
     mov_tp = np.zeros(len(BANDS)); mov_un = np.zeros(len(BANDS))
     curb_hit = curb_tot = pot_hit = pot_tot = 0
+    dep_hit = dep_tot = 0           # drivable cells within 10 m flagged as potholes (false alarms on real roads)
     per_frame, pts_blob, pts_index = [], [], []
     rng = np.random.default_rng(0)
     from scipy.ndimage import binary_dilation
@@ -294,6 +295,13 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
             for b, (lo, hi) in enumerate(BANDS):
                 m = (dist >= lo) & (dist < hi) & ~finer
                 cm_grid[b] += confusion(pc[m], gc[m])
+
+        # ---- pothole flags on drivable ground within 10 m, this frame's cells ----
+        s0 = snap[0]
+        cen0 = pipe.grid.cell_centres(0)
+        drv0 = DRIVABLE[s0.eff_cls] & (s0.age == 0) & \
+            (np.hypot(cen0[..., 0] - ego[0], cen0[..., 1] - ego[1]) < 10)
+        dep_hit += int(np.sum(drv0 & ((s0.flags & F_DEPRESSION) > 0))); dep_tot += int(np.sum(drv0))
 
         # ---- curb + pothole detection (simulator only: needs exact geometry) ----
         if truth is not None:
@@ -417,6 +425,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         moving_iou=float(mov_tp.sum() / max(mov_un.sum(), 1)) if mov_un.sum() else None,
         curb_recall_10m=float(curb_hit / max(curb_tot, 1)) if truth is not None else None,
         pothole_recall_10m=float(pot_hit / max(pot_tot, 1)) if truth is not None else None,
+        pothole_flag_rate_drivable_10m=float(dep_hit / max(dep_tot, 1)),
         points_lost=int(sum(f["in_window"] - f["binned"] for f in per_frame)),
         nesting_ok=all(f["nest_ok"] for f in per_frame),
         points_file_index=pts_index,
