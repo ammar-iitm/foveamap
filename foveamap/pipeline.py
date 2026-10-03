@@ -22,7 +22,7 @@ from .frames import DatasetInfo, make_features, prev_in_ego, transform
 from .grid import (FoveatedGrid, UNKNOWN, DRIVABLE, F_DYNAMIC, F_OVERHANG, F_STEP, F_DEPRESSION)
 from .grid_torch import TorchFoveatedGrid
 from . import features_torch
-from .objects import OBJECT_CLASSES, extract_objects, match_objects, pack
+from .objects import AREA_SWEEP, OBJECT_CLASSES, extract_objects, match_objects, pack
 
 BANDS = [(0, 10), (10, 25), (25, 50), (50, 100)]
 BAND_NAMES = ["0–10 m", "10–25 m", "25–50 m", "50–100 m"]
@@ -247,6 +247,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
     curb_hit = curb_tot = pot_hit = pot_tot = 0
     obj_counts = {c: np.zeros(3, np.int64) for c in OBJECT_CLASSES}   # tp, fp, fn within 25 m
     obj_agree = obj_pairs = 0
+    obj_sweep = {c: np.zeros((len(AREA_SWEEP[c]), 3), np.int64) for c in OBJECT_CLASSES}
     obj_diag = {c: dict(tp_cells=[], fp_cells=[], fn_cells=[], fp_fragment=[], fp_other_class=[]) for c in OBJECT_CLASSES}
     dep_hit = dep_tot = 0           # drivable cells within 10 m flagged as potholes (false alarms on real roads)
     per_frame, pts_blob, pts_index = [], [], []
@@ -282,7 +283,12 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         gstats = gt_grid.bin_points(r["pw"][has, :2], r["pw"][has, 2], np.eye(C)[lab[has]], gm[has], pipe.grid.origins)
         # reference objects: the same extraction on a grid fused from this frame's labels
         gdyn = gt_grid.fuse_stats(gstats, pipe.grid.origins)
-        cnt, agree, pairs, dg = match_objects(objs, extract_objects(gt_grid, gt_grid.state, gdyn), ego)
+        gobjs = extract_objects(gt_grid, gt_grid.state, gdyn)
+        cnt, agree, pairs, dg = match_objects(objs, gobjs, ego)
+        for q in range(len(AREA_SWEEP[OBJECT_CLASSES[0]])):     # the same, keeping only detections this large
+            big = [o for o in objs if o["area"] >= AREA_SWEEP[o["cls"]][q]]
+            for c, v in match_objects(big, gobjs, ego)[0].items():
+                obj_sweep[c][q] += np.asarray(v)
         for c in OBJECT_CLASSES:
             obj_counts[c] += np.asarray(cnt[c])
             for key, v in dg[c].items():
@@ -457,6 +463,11 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
             median_cells_fn=float(np.median(d["fn_cells"])) if d["fn_cells"] else None,
             fp_cells_quartiles=[float(q) for q in np.percentile(d["fp_cells"], [25, 75])] if d["fp_cells"] else None)
             for c, d in obj_diag.items()},
+        objects_area_sweep={info.class_names[c]: [dict(
+            min_area_m2=a, precision=float(tp / (tp + fp)) if tp + fp else None,
+            recall=float(tp / (tp + fn)) if tp + fn else None,
+            f1=float(2 * tp / (2 * tp + fp + fn)) if tp + fp + fn else None)
+            for a, (tp, fp, fn) in zip(AREA_SWEEP[c], obj_sweep[c])] for c in OBJECT_CLASSES},
         objects_moving_flag_agreement=float(obj_agree / obj_pairs) if obj_pairs else None,
         objects_per_frame=float(np.mean([len(f["objects"]) for f in per_frame])),
         points_file_index=pts_index,

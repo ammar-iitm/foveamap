@@ -22,9 +22,14 @@ from scipy import ndimage
 from .sim import POLE, VEHICLE, PERSON
 
 OBJECT_CLASSES = (VEHICLE, PERSON, POLE)
+IS_OBJECT = np.zeros(256, bool)
+IS_OBJECT[list(OBJECT_CLASSES)] = True
 MIN_CELLS = {VEHICLE: 3, PERSON: 2, POLE: 2}     # fewer member cells than this is treated as noise
 MATCH_DIST = {VEHICLE: 1.5, PERSON: 0.75, POLE: 0.75}   # m, centre distance for a detection to match
-FIELDS = ("cls", "moving", "x", "y", "length", "width", "yaw", "z_top", "n_cells")
+FIELDS = ("cls", "moving", "x", "y", "length", "width", "yaw", "z_top", "n_cells", "area")
+# minimum footprint (m^2) of a detected object, tried by the benchmark to tune the size filter
+AREA_SWEEP = {VEHICLE: (0.0, 0.05, 0.1, 0.2, 0.5, 1.0), PERSON: (0.0, 0.01, 0.02, 0.05, 0.1, 0.2),
+              POLE: (0.0, 0.01, 0.02, 0.05, 0.1, 0.2)}
 
 
 def _members(grid, snap, dyn, max_age):
@@ -34,7 +39,7 @@ def _members(grid, snap, dyn, max_age):
     out = []
     for k, (t, s, o) in enumerate(zip(tiers, snap, origins)):
         eff = getattr(s, "eff_cls", s.cls)
-        cls = np.where(np.isin(eff, OBJECT_CLASSES) & (s.age <= max_age), eff, 255).astype(np.uint8)
+        cls = np.where(IS_OBJECT[eff] & (s.age <= max_age), eff, 255).astype(np.uint8)
         moving = np.zeros(cls.shape, bool)
         d = dyn[k] if dyn is not None else None
         if d is not None and len(d["i"]):
@@ -119,7 +124,8 @@ def extract_objects(grid, snap, dyn=None, max_age=0):
     moving = sw(m["moving"][sel].astype(np.float64)) > 0.5 * W
     return [dict(cls=int(cls[k]), moving=bool(moving[k]), x=float(cx[k]), y=float(cy[k]),
                  length=float(length[k]), width=float(width[k]), yaw=float(yaw[k]),
-                 z_top=None if np.isnan(z_top[k]) else float(z_top[k]), n_cells=int(count[k]))
+                 z_top=None if np.isnan(z_top[k]) else float(z_top[k]), n_cells=int(count[k]),
+                 area=float(W[k]))
             for k in range(len(cls))]
 
 
