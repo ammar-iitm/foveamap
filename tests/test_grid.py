@@ -1,6 +1,6 @@
 """Grid-engine invariants from the PRD acceptance criteria."""
 import numpy as np
-from foveamap.grid import FoveatedGrid
+from foveamap.grid import FoveatedGrid, depressions
 from foveamap.sim import NUM_CLASSES
 
 
@@ -66,3 +66,27 @@ def test_scroll_keeps_world_alignment():
 def test_memory_is_16_bytes_per_cell():
     g = FoveatedGrid("spec")
     assert g.nbytes == 16 * g.n_cells == 16 * 320000
+
+
+def ring_road(cell=0.05, n=400, ring_dz=0.03, depth=0.10, seed=0):
+    """Tier-sized ground seen the way sparse real scans see it: only along laser rings 0.35 m
+    apart whose heights alternate by +/-ring_dz (per-laser offsets), on a road with a 4% grade
+    and 2% camber each side of the crown, and a 0.4 m pothole `depth` deep at (4, 1.5)."""
+    r = np.random.default_rng(seed)
+    c = (np.arange(n) - n / 2 + 0.5) * cell
+    X, Y = np.meshgrid(c, c, indexing="ij")
+    rng = np.hypot(X, Y)
+    k = np.round((rng - 2.0) / 0.35)
+    seen = (k >= 0) & (np.abs(rng - (2.0 + 0.35 * k)) < cell / 2 + 1e-9) & (np.abs(Y) < 6)
+    z = 0.04 * X - 0.02 * np.abs(Y) + np.where(k % 2 == 0, ring_dz, -ring_dz) + r.normal(0, 0.005, X.shape)
+    hole = np.hypot(X - 4, Y - 1.5) < 0.4
+    z = np.where(hole, z - depth, z)
+    return np.where(seen, z, np.nan).astype(np.float32), seen, hole
+
+
+def test_potholes_on_a_graded_cambered_road_seen_by_offset_rings():
+    for cell in (0.05, 0.5):
+        gz, drv, hole = ring_road(cell)
+        dep = depressions(gz, drv, cell)
+        assert not (dep & ~hole).any()                         # no ring or camber mistaken for a pothole
+        assert (dep & hole).sum() >= 0.4 * (drv & hole).sum()  # the pothole is found

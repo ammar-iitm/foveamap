@@ -4,8 +4,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from scipy.ndimage import uniform_filter  # noqa: E402
-from foveamap.grid import FoveatedGrid, DRIVABLE, DEPRESSION_THRESH, DEPRESSION_WIN  # noqa: E402
+from foveamap.grid import (FoveatedGrid, DRIVABLE, DEPRESSION_THRESH, DEPRESSION_SIGMA_K,  # noqa: E402
+                           ground_plane)
 from foveamap.grid_torch import TorchFoveatedGrid, TorchTierLayers, stats_to_numpy  # noqa: E402
 from foveamap.sim import NUM_CLASSES, PERSON, VEHICLE  # noqa: E402
 from test_grid import _rand  # noqa: E402
@@ -89,16 +89,14 @@ def _drive(frames=6, n=40000, seed=2):
 def _depression_ties(t, s, eps=1e-6):
     """Cells whose pothole test sits within eps of its threshold in the NumPy reference.
 
-    The local-mean filter (scipy vs avg_pool2d) rounds differently in the last
-    float32 bit, so the depression flag of these cells is a coin toss either way.
+    The plane moments round differently in the two engines in the last bits,
+    so the depression flag of these cells is a coin toss either way.
     """
     gz = s.ground.astype(np.float32)
     drv = DRIVABLE[s.eff_cls] & np.isfinite(gz)
-    win = max(3, int(round(DEPRESSION_WIN / t.cell)) | 1)
-    num = uniform_filter(np.where(drv, gz, 0.0), win, mode="constant")
-    den = uniform_filter(drv.astype(np.float32), win, mode="constant")
-    ref = np.where(den > 0.05, num / np.maximum(den, 1e-6), np.nan)
-    return drv & (np.abs(gz - (ref - DEPRESSION_THRESH)) <= eps)
+    ref, sigma = ground_plane(gz, drv, t.cell)
+    thr = ref - np.maximum(DEPRESSION_THRESH, DEPRESSION_SIGMA_K * sigma)
+    return drv & (np.abs(gz - thr) <= eps)
 
 
 def _state_mismatch(ref_s, got_s, f16_tol, ignore=None):
@@ -135,7 +133,8 @@ def _run_parity(device, dtype, profile, fuse, max_frac, f16_tol, skip_ties=False
 def test_update_parity_float64_exact(profile, fuse):
     ref_g, _ = _run_parity("cpu", torch.float64, profile, fuse, max_frac=0.0, f16_tol=0.0, skip_ties=True)
     s0 = ref_g.state[0]         # the drive really exercises the derived layers
-    assert all(((s0.flags & fl) > 0).sum() > 10 for fl in (1 << 1, 1 << 2, 1 << 3))
+    assert all(((s0.flags & fl) > 0).sum() > 10 for fl in (1 << 1, 1 << 2))
+    assert ((s0.flags & (1 << 3)) > 0).sum() > 0     # depressions (realistic potholes: test_grid.py)
 
 
 @pytest.mark.parametrize("device", DEVICES)
@@ -184,3 +183,17 @@ def test_snapshot_matches_to_numpy(device):
             a, b = getattr(ref, f), getattr(snap, f)
             assert a.dtype == b.dtype and a.shape == b.shape, f
             np.testing.assert_array_equal(a, b, err_msg=f)     # nan == nan for the f16 layers
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_depressions_parity(device):
+    from foveamap.grid import depressions
+    from foveamap.grid_torch import depressions_t
+    from test_grid import ring_road
+    for cell in (0.05, 0.5):
+        gz, drv, _ = ring_road(cell)
+        ref = depressions(gz, drv, cell)
+        got = depressions_t(torch.as_tensor(gz, device=device), torch.as_tensor(drv, device=device), cell).cpu().numpy()
+        assert ref.any()
+        # float64 moments agree exactly; MPS runs them in float32 and may tip a cell at the threshold
+        assert (ref != got).sum() <= (0 if torch.device(device).type != "mps" else 3)

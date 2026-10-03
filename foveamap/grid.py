@@ -43,8 +43,49 @@ DRIVABLE = np.zeros(256, bool)
 DRIVABLE[[ROAD, PARKING]] = True
 VEHICLE_CLEARANCE = 2.5      # m: an obstacle higher than this above ground can be driven under
 STEP_THRESH = 0.08           # m: curb / pothole edge
-DEPRESSION_THRESH = 0.05     # m below the local drivable surface
-DEPRESSION_WIN = 2.5         # m, window for the local drivable-surface reference
+DEPRESSION_THRESH = 0.05     # m below the local drivable surface, at least
+DEPRESSION_SIGMA_K = 3.0     # ... and this many times the local scatter of the ground about its plane
+DEPRESSION_WIN = 5.0         # m, window for the local drivable-surface plane (a pothole is a small part of it)
+DEPRESSION_SUPPORT = 0.05    # fraction of the window that must be observed drivable ground
+PLANE_MIN_COND = 0.05        # below this conditioning (cells nearly on a line) fall back to the mean
+
+
+def ground_plane(gz, drv, cell):
+    """Least-squares plane of the drivable ground around every cell, from box-filtered moments.
+
+    Returns (ref, sigma): the plane's height at the cell (NaN where under DEPRESSION_SUPPORT of
+    the window is drivable ground) and the RMS scatter of the ground about that plane. The plane
+    absorbs road grade, camber and small pitch errors; sigma absorbs per-laser height offsets,
+    which on sparse real scans leave whole rings a few cm low. Where the observed cells lie
+    nearly on a line (one scan ring) the plane is undetermined and the mean is used instead.
+    """
+    n0, n1 = gz.shape
+    win = max(3, int(round(DEPRESSION_WIN / cell)) | 1)
+    w = drv.astype(np.float64)
+    z0 = float(gz[drv].mean()) if drv.any() else 0.0          # heights relative to the tier's road level
+    z = np.where(drv, gz - z0, 0.0)
+    X = np.broadcast_to((np.arange(n0) - n0 / 2)[:, None], (n0, n1))
+    Y = np.broadcast_to((np.arange(n1) - n1 / 2)[None, :], (n0, n1))
+    W = uniform_filter(w, win, mode="constant")
+    ok = W > DEPRESSION_SUPPORT
+    mean = lambda a: uniform_filter(w * a, win, mode="constant") / np.maximum(W, 1e-9)
+    mx, my, mz = mean(X), mean(Y), mean(z)
+    cxx, cyy, cxy = mean(X * X) - mx * mx, mean(Y * Y) - my * my, mean(X * Y) - mx * my
+    cxz, cyz, czz = mean(X * z) - mx * mz, mean(Y * z) - my * mz, mean(z * z) - mz * mz
+    det = cxx * cyy - cxy * cxy
+    planar = ok & (det > PLANE_MIN_COND * (cxx + cyy) ** 2 / 4)
+    det = np.where(planar, det, 1.0)
+    b = np.where(planar, (cxz * cyy - cyz * cxy) / det, 0.0)
+    c = np.where(planar, (cyz * cxx - cxz * cxy) / det, 0.0)
+    ref = np.where(ok, z0 + mz + b * (X - mx) + c * (Y - my), np.nan)
+    sigma = np.sqrt(np.maximum(czz - b * cxz - c * cyz, 0.0))
+    return ref, sigma
+
+
+def depressions(gz, drv, cell):
+    """Pothole cells: drivable ground clearly below its local plane (see `ground_plane`)."""
+    ref, sigma = ground_plane(gz, drv, cell)
+    return drv & (gz < ref - np.maximum(DEPRESSION_THRESH, DEPRESSION_SIGMA_K * sigma))
 
 
 @dataclass
@@ -306,13 +347,9 @@ class FoveatedGrid:
                 step = np.fmax(step, np.nan_to_num(b, nan=0.0))
         stepf = step > STEP_THRESH
         flags |= np.where(stepf & valid_g, F_STEP, 0).astype(np.uint8)
-        # depressions (potholes): below the local mean of drivable ground
+        # depressions (potholes): clearly below the local plane of drivable ground
         drv = DRIVABLE[np.clip(eff_cls, 0, 255)] & valid_g
-        win = max(3, int(round(DEPRESSION_WIN / t.cell)) | 1)
-        num = uniform_filter(np.where(drv, gz, 0.0), win, mode="constant")
-        den = uniform_filter(drv.astype(np.float32), win, mode="constant")
-        ref = np.where(den > 0.05, num / np.maximum(den, 1e-6), np.nan)
-        dep = drv & (gz < ref - DEPRESSION_THRESH)
+        dep = depressions(gz, drv, t.cell)
         flags |= np.where(dep, F_DEPRESSION, 0).astype(np.uint8)
         # cost
         cost = COST_PRIOR[np.clip(eff_cls, 0, 255)].copy()

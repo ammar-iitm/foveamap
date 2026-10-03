@@ -14,8 +14,8 @@ parity against it.
   two-pass variance so float32 does not lose it to cancellation.
 * The persistent state keeps the NumPy engine's 16-byte-per-cell layout, as
   device tensors. Fusion and derived flags / cost are ported op for op; the
-  box filter for the pothole reference is a separable `avg_pool2d` with zero
-  padding (= scipy `uniform_filter(mode="constant")`).
+  box filters for the pothole reference plane are a separable `avg_pool2d`
+  with zero padding (= scipy `uniform_filter(mode="constant")`).
 """
 from __future__ import annotations
 
@@ -25,7 +25,8 @@ import torch.nn.functional as F
 
 from .grid import (FoveatedGrid, TierLayers, GROUND_MASK, COST_PRIOR, DRIVABLE, UNKNOWN,
                    F_OVERHANG, F_STEP, F_DEPRESSION, VEHICLE_CLEARANCE, STEP_THRESH,
-                   DEPRESSION_THRESH, DEPRESSION_WIN)
+                   DEPRESSION_THRESH, DEPRESSION_SIGMA_K, DEPRESSION_WIN, DEPRESSION_SUPPORT,
+                   PLANE_MIN_COND)
 from .sim import PERSON, VEHICLE
 
 # clearance thresholds evaluated in float64 on the stored 2 cm code, exactly as the NumPy engine does
@@ -279,14 +280,10 @@ class TorchFoveatedGrid(FoveatedGrid):
                 step = torch.fmax(step, diff.nan_to_num(nan=0.0))
                 step = torch.fmax(step, diff.roll(-d, ax).nan_to_num(nan=0.0))
         stepf = step > STEP_THRESH
-        # depressions (potholes): below the local mean of drivable ground
+        # depressions (potholes): clearly below the local plane of drivable ground
         drv_cls = self._drivable[eff_cls]
         drv = drv_cls & valid_g
-        win = max(3, int(round(DEPRESSION_WIN / t.cell)) | 1)
-        num = _box(torch.where(drv, gz, 0.0), win)
-        den = _box(drv.float(), win)
-        ref = torch.where(den > 0.05, num / den.clamp(min=1e-6), float("nan"))
-        dep = drv & (gz < ref - DEPRESSION_THRESH)
+        dep = depressions_t(gz, drv, t.cell)
         flags = (torch.where(overhang, F_OVERHANG, 0) | torch.where(stepf & valid_g, F_STEP, 0)
                  | torch.where(dep, F_DEPRESSION, 0))
         # cost
@@ -304,6 +301,49 @@ class TorchFoveatedGrid(FoveatedGrid):
         s.cost[:] = torch.where(unknown, UNKNOWN, cost).to(torch.uint8)
         s.flags[:] = (s.flags & 0xF0) | flags.to(torch.uint8)
         s.eff_cls = torch.where(unknown, UNKNOWN, eff_cls).to(torch.uint8)
+
+
+def depressions_t(gz, drv, cell):
+    """Device version of `grid.depressions`."""
+    ref, sigma = ground_plane_t(gz, drv, cell)
+    return drv & (gz < ref - (DEPRESSION_SIGMA_K * sigma).clamp(min=DEPRESSION_THRESH))
+
+
+def ground_plane_t(gz, drv, cell):
+    """Device version of `grid.ground_plane`: the same moments, in float64 (float32 on MPS), no host sync."""
+    n0, n1 = gz.shape
+    win = max(3, int(round(DEPRESSION_WIN / cell)) | 1)
+    dt = torch.float32 if gz.device.type == "mps" else torch.float64    # the moments cancel; MPS has no float64
+    g = gz.to(dt)
+    w = drv.to(dt)
+    z0 = (torch.where(drv, g, 0.0).sum() / w.sum().clamp(min=1))       # tier road level, stays on the device
+    z = torch.where(drv, g - z0, 0.0)
+    X = (torch.arange(n0, device=gz.device, dtype=dt) - n0 / 2)[:, None].expand(n0, n1)
+    Y = (torch.arange(n1, device=gz.device, dtype=dt) - n1 / 2)[None, :].expand(n0, n1)
+    box = _box_sat if dt == torch.float64 else _box
+    W = box(w, win)
+    ok = W > DEPRESSION_SUPPORT
+    Wd = W.clamp(min=1e-9)
+    mean = lambda a: box(w * a, win) / Wd
+    mx, my, mz = mean(X), mean(Y), mean(z)
+    cxx, cyy, cxy = mean(X * X) - mx * mx, mean(Y * Y) - my * my, mean(X * Y) - mx * my
+    cxz, cyz, czz = mean(X * z) - mx * mz, mean(Y * z) - my * mz, mean(z * z) - mz * mz
+    det = cxx * cyy - cxy * cxy
+    planar = ok & (det > PLANE_MIN_COND * (cxx + cyy) ** 2 / 4)
+    det = torch.where(planar, det, 1.0)
+    b = torch.where(planar, (cxz * cyy - cyz * cxy) / det, 0.0)
+    c = torch.where(planar, (cyz * cxx - cxz * cxy) / det, 0.0)
+    ref = torch.where(ok, z0 + mz + b * (X - mx) + c * (Y - my), float("nan"))
+    sigma = (czz - b * cxz - c * cyz).clamp(min=0).sqrt()
+    return ref, sigma
+
+
+def _box_sat(x, win):
+    """Zero-padded box mean from a summed-area table: cost independent of `win`. Float64 only;
+    in float32 the running sums lose the precision the plane moments need."""
+    r = win // 2
+    c = F.pad(x, (r + 1, r, r + 1, r)).cumsum(0).cumsum(1)
+    return (c[win:, win:] - c[:-win, win:] - c[win:, :-win] + c[:-win, :-win]) / (win * win)
 
 
 def _box(x, win):
