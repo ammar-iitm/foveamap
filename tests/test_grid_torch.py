@@ -195,5 +195,5 @@ def test_depressions_parity(device):
         ref = depressions(gz, drv, cell)
         got = depressions_t(torch.as_tensor(gz, device=device), torch.as_tensor(drv, device=device), cell).cpu().numpy()
         assert ref.any()
-        # float64 moments agree exactly; MPS runs them in float32 and may tip a cell at the threshold
-        assert (ref != got).sum() <= (0 if torch.device(device).type != "mps" else 3)
+        # the CPU runs the moments in float64 and agrees exactly; GPUs use float32 and may tip a cell at the threshold
+        assert (ref != got).sum() <= (0 if torch.device(device).type == "cpu" else 3)

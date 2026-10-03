@@ -14,8 +14,8 @@ parity against it.
   two-pass variance so float32 does not lose it to cancellation.
 * The persistent state keeps the NumPy engine's 16-byte-per-cell layout, as
   device tensors. Fusion and derived flags / cost are ported op for op; the
-  box filters for the pothole reference plane are a separable `avg_pool2d`
-  with zero padding (= scipy `uniform_filter(mode="constant")`).
+  window moments of the pothole reference plane are two grouped convolutions
+  with zero padding (= scipy `correlate1d(mode="constant")` along each axis).
 """
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ import torch.nn.functional as F
 
 from .grid import (FoveatedGrid, TierLayers, GROUND_MASK, COST_PRIOR, DRIVABLE, UNKNOWN,
                    F_OVERHANG, F_STEP, F_DEPRESSION, VEHICLE_CLEARANCE, STEP_THRESH,
-                   DEPRESSION_THRESH, DEPRESSION_SIGMA_K, DEPRESSION_WIN, DEPRESSION_SUPPORT,
-                   PLANE_MIN_COND)
+                   DEPRESSION_THRESH, DEPRESSION_SIGMA_K, DEPRESSION_SUPPORT, PLANE_MIN_COND,
+                   PLANE_MOMENTS, plane_blocks, plane_offsets)
 from .sim import PERSON, VEHICLE
 
 # clearance thresholds evaluated in float64 on the stored 2 cm code, exactly as the NumPy engine does
@@ -310,48 +310,42 @@ def depressions_t(gz, drv, cell):
 
 
 def ground_plane_t(gz, drv, cell):
-    """Device version of `grid.ground_plane`: the same moments, in float64 (float32 on MPS), no host sync."""
+    """Device version of `grid.ground_plane`: the same block moments, as two grouped
+    convolutions, with no host sync. Float32 on GPUs (the moments are small, block-local
+    offsets) and float64 on the CPU, where it matches the NumPy engine exactly."""
     n0, n1 = gz.shape
-    win = max(3, int(round(DEPRESSION_WIN / cell)) | 1)
-    dt = torch.float32 if gz.device.type == "mps" else torch.float64    # the moments cancel; MPS has no float64
-    g = gz.to(dt)
+    B, win = plane_blocks(n0, cell)
+    dt = torch.float64 if gz.device.type == "cpu" else torch.float32     # block-local moments are float32-safe
+    dev = gz.device
     w = drv.to(dt)
-    z0 = (torch.where(drv, g, 0.0).sum() / w.sum().clamp(min=1))       # tier road level, stays on the device
-    z = torch.where(drv, g - z0, 0.0)
-    X = (torch.arange(n0, device=gz.device, dtype=dt) - n0 / 2)[:, None].expand(n0, n1)
-    Y = (torch.arange(n1, device=gz.device, dtype=dt) - n1 / 2)[None, :].expand(n0, n1)
-    box = _box_sat if dt == torch.float64 else _box
-    W = box(w, win)
-    ok = W > DEPRESSION_SUPPORT
-    Wd = W.clamp(min=1e-9)
-    mean = lambda a: box(w * a, win) / Wd
-    mx, my, mz = mean(X), mean(Y), mean(z)
-    cxx, cyy, cxy = mean(X * X) - mx * mx, mean(Y * Y) - my * my, mean(X * Y) - mx * my
-    cxz, cyz, czz = mean(X * z) - mx * mz, mean(Y * z) - my * mz, mean(z * z) - mz * mz
+    z0 = torch.where(drv, gz.to(dt), 0.0).sum() / w.sum().clamp(min=1)    # tier road level
+    z = torch.where(drv, gz.to(dt) - z0, 0.0)
+    blk = lambda a: a.reshape(n0 // B, B, n1 // B, B).sum((1, 3))
+    src = torch.stack([blk(w), blk(w * z), blk(w * z * z)])
+    k = torch.as_tensor(np.stack(plane_offsets(win)), dtype=dt, device=dev)
+    r = win // 2
+    first = sorted({(m[0], m[1]) for m in PLANE_MOMENTS})                     # (source, x power) pairs
+    x1 = F.conv2d(src[[q[0] for q in first]][None], k[[q[1] for q in first]][:, None, :, None],
+                  padding=(r, 0), groups=len(first))[0]
+    M = F.conv2d(x1[[first.index((m[0], m[1])) for m in PLANE_MOMENTS]][None],
+                 k[[m[2] for m in PLANE_MOMENTS]][:, None, None, :], padding=(0, r), groups=len(PLANE_MOMENTS))[0]
+    S0 = M[0].clamp(min=1e-9)
+    mx, my = M[1] / S0, M[2] / S0
+    cxx, cyy, cxy = M[3] / S0 - mx * mx, M[4] / S0 - my * my, M[5] / S0 - mx * my
+    mz = M[6] / S0
+    cxz, cyz, czz = M[7] / S0 - mx * mz, M[8] / S0 - my * mz, M[9] / S0 - mz * mz
+    ok = M[0] > DEPRESSION_SUPPORT * (win * B) ** 2
     det = cxx * cyy - cxy * cxy
     planar = ok & (det > PLANE_MIN_COND * (cxx + cyy) ** 2 / 4)
     det = torch.where(planar, det, 1.0)
     b = torch.where(planar, (cxz * cyy - cyz * cxy) / det, 0.0)
     c = torch.where(planar, (cyz * cxx - cxz * cxy) / det, 0.0)
-    ref = torch.where(ok, z0 + mz + b * (X - mx) + c * (Y - my), float("nan"))
+    ref_c = torch.where(ok, z0 + mz - b * mx - c * my, float("nan"))
     sigma = (czz - b * cxz - c * cyz).clamp(min=0).sqrt()
-    return ref, sigma
-
-
-def _box_sat(x, win):
-    """Zero-padded box mean from a summed-area table: cost independent of `win`. Float64 only;
-    in float32 the running sums lose the precision the plane moments need."""
-    r = win // 2
-    c = F.pad(x, (r + 1, r, r + 1, r)).cumsum(0).cumsum(1)
-    return (c[win:, win:] - c[:-win, win:] - c[win:, :-win] + c[:-win, :-win]) / (win * win)
-
-
-def _box(x, win):
-    """Separable zero-padded box mean, = scipy uniform_filter(x, win, mode="constant") for odd win."""
-    x = x[None, None]
-    x = F.avg_pool2d(x, (win, 1), stride=1, padding=(win // 2, 0), count_include_pad=True)
-    x = F.avg_pool2d(x, (1, win), stride=1, padding=(0, win // 2), count_include_pad=True)
-    return x[0, 0]
+    up = lambda a: a.repeat_interleave(B, 0).repeat_interleave(B, 1)
+    u = ((torch.arange(n0, device=dev) % B).to(dt) - (B - 1) / 2) / B
+    v = ((torch.arange(n1, device=dev) % B).to(dt) - (B - 1) / 2) / B
+    return up(ref_c) + up(b) * u[:, None] + up(c) * v[None, :], up(sigma)
 
 
 def stats_to_numpy(stats):

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import numpy as np
-from scipy.ndimage import uniform_filter
+from scipy.ndimage import correlate1d
 
 from .sim import (NUM_CLASSES, GROUND_CLASSES, ROAD, PARKING, SIDEWALK, TERRAIN,
                   VEGETATION, BUILDING, POLE, VEHICLE, PERSON)
@@ -48,38 +48,75 @@ DEPRESSION_SIGMA_K = 3.0     # ... and this many times the local scatter of the 
 DEPRESSION_WIN = 5.0         # m, window for the local drivable-surface plane (a pothole is a small part of it)
 DEPRESSION_SUPPORT = 0.05    # fraction of the window that must be observed drivable ground
 PLANE_MIN_COND = 0.05        # below this conditioning (cells nearly on a line) fall back to the mean
+PLANE_BLOCK = 0.25           # m, blocks the plane moments are summed over (the plane spans 5 m)
 
 
-def ground_plane(gz, drv, cell):
-    """Least-squares plane of the drivable ground around every cell, from box-filtered moments.
+def plane_blocks(n, cell):
+    """Block size (cells) for the ground-plane moments and the window width in blocks."""
+    B = max(1, int(round(PLANE_BLOCK / cell)))
+    if n % B:
+        B = 1
+    return B, max(3, int(round(DEPRESSION_WIN / (cell * B))) | 1)
 
-    Returns (ref, sigma): the plane's height at the cell (NaN where under DEPRESSION_SUPPORT of
-    the window is drivable ground) and the RMS scatter of the ground about that plane. The plane
-    absorbs road grade, camber and small pitch errors; sigma absorbs per-laser height offsets,
-    which on sparse real scans leave whole rings a few cm low. Where the observed cells lie
-    nearly on a line (one scan ring) the plane is undetermined and the mean is used instead.
-    """
-    n0, n1 = gz.shape
-    win = max(3, int(round(DEPRESSION_WIN / cell)) | 1)
-    w = drv.astype(np.float64)
-    z0 = float(gz[drv].mean()) if drv.any() else 0.0          # heights relative to the tier's road level
-    z = np.where(drv, gz - z0, 0.0)
-    X = np.broadcast_to((np.arange(n0) - n0 / 2)[:, None], (n0, n1))
-    Y = np.broadcast_to((np.arange(n1) - n1 / 2)[None, :], (n0, n1))
-    W = uniform_filter(w, win, mode="constant")
-    ok = W > DEPRESSION_SUPPORT
-    mean = lambda a: uniform_filter(w * a, win, mode="constant") / np.maximum(W, 1e-9)
-    mx, my, mz = mean(X), mean(Y), mean(z)
-    cxx, cyy, cxy = mean(X * X) - mx * mx, mean(Y * Y) - my * my, mean(X * Y) - mx * my
-    cxz, cyz, czz = mean(X * z) - mx * mz, mean(Y * z) - my * mz, mean(z * z) - mz * mz
+
+def plane_offsets(win):
+    """1-D correlation kernels 1, d, d^2 over the window's block offsets d."""
+    d = np.arange(win, dtype=np.float64) - win // 2
+    return np.ones(win), d, d * d
+
+
+# the ten window moments as (source, x power, y power): sources are w, w*z, w*z^2 summed per block
+PLANE_MOMENTS = ((0, 0, 0), (0, 1, 0), (0, 0, 1), (0, 2, 0), (0, 0, 2), (0, 1, 1),
+                 (1, 0, 0), (1, 1, 0), (1, 0, 1), (2, 0, 0))
+
+
+def plane_from_moments(M, B, win, gz, drv, z0):
+    """Plane height and scatter at every fine cell from the window moments M (10, nb, nb).
+
+    Offsets are in blocks relative to each block's centre, so the moments stay small and
+    well conditioned; a fine cell adds its own offset inside the block to the plane."""
+    S0 = np.maximum(M[0], 1e-9)
+    mx, my = M[1] / S0, M[2] / S0
+    cxx, cyy, cxy = M[3] / S0 - mx * mx, M[4] / S0 - my * my, M[5] / S0 - mx * my
+    mz = M[6] / S0
+    cxz, cyz, czz = M[7] / S0 - mx * mz, M[8] / S0 - my * mz, M[9] / S0 - mz * mz
+    ok = M[0] > DEPRESSION_SUPPORT * (win * B) ** 2
     det = cxx * cyy - cxy * cxy
     planar = ok & (det > PLANE_MIN_COND * (cxx + cyy) ** 2 / 4)
     det = np.where(planar, det, 1.0)
     b = np.where(planar, (cxz * cyy - cyz * cxy) / det, 0.0)
     c = np.where(planar, (cyz * cxx - cxz * cxy) / det, 0.0)
-    ref = np.where(ok, z0 + mz + b * (X - mx) + c * (Y - my), np.nan)
+    ref_c = np.where(ok, z0 + mz - b * mx - c * my, np.nan)          # the plane at the block centre
     sigma = np.sqrt(np.maximum(czz - b * cxz - c * cyz, 0.0))
-    return ref, sigma
+    up = lambda a: np.repeat(np.repeat(a, B, 0), B, 1)
+    u = (np.arange(gz.shape[0]) % B - (B - 1) / 2) / B                # a fine cell's offset in its block
+    v = (np.arange(gz.shape[1]) % B - (B - 1) / 2) / B
+    return up(ref_c) + up(b) * u[:, None] + up(c) * v[None, :], up(sigma)
+
+
+def ground_plane(gz, drv, cell):
+    """Least-squares plane of the drivable ground around every cell, and the scatter about it.
+
+    Returns (ref, sigma): the plane's height at each cell (NaN where under DEPRESSION_SUPPORT of
+    the window is drivable ground) and the RMS scatter of the ground about that plane. The plane
+    absorbs road grade, camber and small pitch errors; sigma absorbs per-laser height offsets,
+    which on sparse real scans leave whole rings a few cm low. Where the observed ground lies
+    nearly on a line (one scan ring) the plane is undetermined and the mean is used instead.
+
+    The moments are summed over PLANE_BLOCK blocks (25 cm on the 5 cm tier) and then over the
+    DEPRESSION_WIN window with offset kernels, which keeps them small enough for float32.
+    """
+    n0, n1 = gz.shape
+    B, win = plane_blocks(n0, cell)
+    w = drv.astype(np.float64)
+    z0 = float(gz[drv].mean()) if drv.any() else 0.0                 # heights relative to the tier's road level
+    z = np.where(drv, gz - z0, 0.0)
+    blk = lambda a: a.reshape(n0 // B, B, n1 // B, B).sum((1, 3))
+    src = (blk(w), blk(w * z), blk(w * z * z))
+    k = plane_offsets(win)
+    M = np.stack([correlate1d(correlate1d(src[s], k[px], 0, mode="constant"), k[py], 1, mode="constant")
+                  for s, px, py in PLANE_MOMENTS])
+    return plane_from_moments(M, B, win, gz, drv, z0)
 
 
 def depressions(gz, drv, cell):
