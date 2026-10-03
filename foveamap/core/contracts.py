@@ -12,6 +12,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from .exceptions import ContractError, NumericalConsistencyError
+from ..terrain import slope_at_cell
 
 
 @dataclass(frozen=True)
@@ -486,6 +487,13 @@ class MapSnapshot:
                     "max_z": float(tier.max_z[cx, cy]),
                     "ground": float(tier.ground[cx, cy]),
                     "roughness": float(tier.roughness[cx, cy]),
+                    "slope_rad": slope_at_cell(
+                        np.asarray(tier.ground, dtype=np.float64),
+                        np.isfinite(np.asarray(tier.ground, dtype=np.float64)),
+                        cx,
+                        cy,
+                        float(r),
+                    ),
                     "dominant_class": cls_v,
                     "confidence": float(tier.conf[cx, cy]),
                     "secondary_class": sec_c,

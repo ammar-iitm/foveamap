@@ -49,6 +49,7 @@ from .temporal import (
     TEMPORARILY_MISSING as DYN_MISSING,
     STALE as DYN_STALE,
 )
+from .terrain import slope_at_cell, report_layers
 
 # clearance thresholds evaluated in float64 on the stored 2 cm code, exactly as the NumPy engine does
 _CLEAR_CODES = np.arange(256) * 0.02
@@ -872,6 +873,20 @@ class TorchFoveatedGrid(FoveatedGrid):
         self.frame_index = -1
         self._last_timestamp = None
 
+    def terrain_report(self) -> dict[str, Any]:
+        """Aggregate terrain/traversability diagnostics (diagnostic-only).
+
+        Converts tiers to host via the existing snapshot path first; this is
+        an explicit diagnostic boundary and never runs in the hot path.
+        Shares the exact NumPy implementation with the reference engine.
+        """
+        stale_thresh = self.terrain.stale_age_threshold if self.terrain is not None else 20
+        return report_layers(
+            [s.to_numpy() for s in self.state],
+            [t.cell for t in self.tiers],
+            stale_age_threshold=stale_thresh,
+        )
+
     def query_point(self, x: float, y: float) -> dict[str, Any]:
         """Query spatial cell state at continuous world coordinate (x, y) on device."""
         if self.origins is None:
@@ -918,6 +933,20 @@ class TorchFoveatedGrid(FoveatedGrid):
                 z_max_v = s.z_max[i, j].item()
                 rough_v = s.rough[i, j].item()
                 clear_v = s.clear[i, j].item()
+                # On-demand slope from one 3x3 host patch (query is already a
+                # host boundary; a single small transfer, never per-point).
+                i0, i1 = max(0, i - 1), min(t.n, i + 2)
+                j0, j1 = max(0, j - 1), min(t.n, j + 2)
+                patch = s.ground[i0:i1, j0:j1].float().cpu().numpy().astype(np.float64)
+                slope_rad = slope_at_cell(
+                    np.pad(patch, ((i0 - (i - 1), (i + 2) - i1), (j0 - (j - 1), (j + 2) - j1)),
+                           mode="constant", constant_values=np.nan),
+                    np.isfinite(np.pad(patch, ((i0 - (i - 1), (i + 2) - i1), (j0 - (j - 1), (j + 2) - j1)),
+                                        mode="constant", constant_values=np.nan)),
+                    1,
+                    1,
+                    float(t.cell),
+                )
                 return {
                     "tier": k,
                     "cell_size_m": t.cell,
@@ -936,6 +965,7 @@ class TorchFoveatedGrid(FoveatedGrid):
                     "z_min": float(z_min_v) if not np.isnan(z_min_v) else None,
                     "z_max": float(z_max_v) if not np.isnan(z_max_v) else None,
                     "rough": float(rough_v) if not np.isnan(rough_v) else None,
+                    "slope_rad": slope_rad,
                     "clear": float(clear_v * 0.02) if clear_v != UNKNOWN else None,
                     "age": age,
                     "flags": int(s.flags[i, j].item()),

@@ -67,6 +67,7 @@ from .temporal import (
     TEMPORARILY_MISSING as DYN_MISSING,
     STALE as DYN_STALE,
 )
+from .terrain import slope_at_cell, report_layers
 
 UNKNOWN = 255
 F_SLOPE, F_OVERHANG, F_STEP, F_DEPRESSION = 1, 2, 4, 8
@@ -85,6 +86,21 @@ DEPRESSION_THRESH = 0.05     # m below the local drivable surface
 DEPRESSION_WIN = 2.5         # m, window for the local drivable-surface reference
 SLOPE_THRESH = 0.25          # rad (~14.3 deg)
 SLOPE_CRIT = 0.40            # rad (~22.9 deg)
+
+
+def _query_slope(s: TierLayers, i: int, j: int, cell_m: float) -> float | None:
+    """On-demand slope (radians) for query output; None when unknown.
+
+    Derived from stored ground elevation with the same neighbor policy as
+    ``_derive``. Adds no persistent state (see memory model).
+    """
+    return slope_at_cell(
+        np.asarray(s.ground, dtype=np.float64),
+        np.isfinite(np.asarray(s.ground, dtype=np.float64)),
+        int(i),
+        int(j),
+        float(cell_m),
+    )
 
 
 @dataclass
@@ -1046,6 +1062,7 @@ class FoveatedGrid:
                     "z_min": float(s.z_min[i, j]) if np.isfinite(s.z_min[i, j]) else None,
                     "z_max": float(s.z_max[i, j]) if np.isfinite(s.z_max[i, j]) else None,
                     "rough": float(s.rough[i, j]) if np.isfinite(s.rough[i, j]) else None,
+                    "slope_rad": _query_slope(s, i, j, t.cell),
                     "clear": float(s.clear[i, j] * 0.02) if s.clear[i, j] != UNKNOWN else None,
                     "age": age,
                     "flags": int(s.flags[i, j]),
@@ -1127,6 +1144,19 @@ class FoveatedGrid:
     def temporal_stats(self) -> dict[str, Any]:
         """Bounded temporal-model statistics (plain values)."""
         return self.temporal.stats()
+
+    def terrain_report(self) -> dict[str, Any]:
+        """Aggregate terrain/traversability diagnostics (plain values, diagnostic-only).
+
+        Vectorized over live tiers; adds no persistent state and allocates
+        only small per-tier temporaries (see memory model).
+        """
+        stale_thresh = self.terrain.stale_age_threshold if self.terrain is not None else 20
+        return report_layers(
+            self.state,
+            [t.cell for t in self.tiers],
+            stale_age_threshold=stale_thresh,
+        )
 
     def memory_report(self) -> dict[str, Any]:
         """Produce honest memory accounting matching PRD acceptance criteria."""
