@@ -43,9 +43,15 @@ def resolve_device(
     """
     requested = (runtime_config.device or "auto").strip().lower()
 
+    def _current_cuda_index() -> int:
+        try:
+            return torch.cuda.current_device()
+        except (Exception, AssertionError):
+            return 0
+
     if requested == "auto":
         if torch.cuda.is_available():
-            device = torch.device(f"cuda:{torch.cuda.current_device()}")
+            device = torch.device(f"cuda:{_current_cuda_index()}")
             use_cuda = True
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             device = torch.device("mps")
@@ -65,7 +71,7 @@ def resolve_device(
         try:
             device = torch.device(runtime_config.device)
             if device.type == "cuda" and device.index is None:
-                device = torch.device(f"cuda:{torch.cuda.current_device()}")
+                device = torch.device(f"cuda:{_current_cuda_index()}")
         except Exception as exc:
             raise ConfigurationError(f"Invalid CUDA device specification {runtime_config.device!r}: {exc}") from exc
         use_cuda = True
@@ -73,7 +79,7 @@ def resolve_device(
         try:
             device = torch.device(runtime_config.device)
             if device.type == "cuda" and device.index is None:
-                device = torch.device(f"cuda:{torch.cuda.current_device()}")
+                device = torch.device(f"cuda:{_current_cuda_index()}")
         except Exception as exc:
             raise ConfigurationError(f"Unsupported device specification {runtime_config.device!r}: {exc}") from exc
         use_cuda = (device.type == "cuda")
