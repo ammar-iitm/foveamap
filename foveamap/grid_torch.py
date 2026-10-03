@@ -744,19 +744,17 @@ class TorchFoveatedGrid(FoveatedGrid):
         """Conservative 2.5D ray clearing on device (Torch override).
 
         Mirrors :meth:`FoveatedGrid._clear_rays` semantics with identical
-        consecutive-frame, ground-class, and dynamic-obstacle guards. Ray
-        geometry uses a small host-side sampling loop (explicit host boundary;
-        ray clearing is disabled by default and not part of the production CUDA
-        hot path), while state updates remain on-device.
+        consecutive-frame, ground-class, and dynamic-obstacle guards. Only the
+        ray-geometry sampling loop is host-side (explicit opt-in boundary: ray
+        clearing is disabled by default and never runs in the default Torch hot
+        path). Streak updates and obstacle clearing are device-resident masked
+        tensor ops with no per-cell host synchronization.
         """
-        import numpy as _np
-
-        so = _np.asarray(
+        so = np.asarray(
             sensor_origin.cpu().numpy() if torch.is_tensor(sensor_origin) else sensor_origin,
-            dtype=_np.float64,
+            dtype=np.float64,
         )
         free_thresh = self.terrain.free_clear_frames if self.terrain is not None else 3
-        ground_ids = set(int(v) for v in GROUND_CLASSES)
 
         for tier_idx, (t, s, st) in enumerate(zip(self.tiers, self.state, stats)):
             key = st["key"]
@@ -765,7 +763,7 @@ class TorchFoveatedGrid(FoveatedGrid):
                 obs_mask = (n_static > 0).cpu().numpy()
                 k_obs = key.detach().cpu().numpy()[obs_mask]
             else:
-                k_obs = _np.asarray(key)[_np.asarray(n_static) > 0]
+                k_obs = np.asarray(key)[np.asarray(n_static) > 0]
             if len(k_obs) == 0:
                 s.free_passes.zero_()
                 continue
@@ -774,14 +772,14 @@ class TorchFoveatedGrid(FoveatedGrid):
             sample_keys = k_obs[::step_sz]
             ci = sample_keys // t.n
             cj = sample_keys % t.n
-            org = _np.asarray(
+            org = np.asarray(
                 self.origins[tier_idx].cpu().numpy()
                 if torch.is_tensor(self.origins[tier_idx])
                 else self.origins[tier_idx]
             )
-            target_xy = (_np.stack([ci, cj], 1) + org + 0.5) * t.cell
+            target_xy = (np.stack([ci, cj], 1) + org + 0.5) * t.cell
             vec = target_xy - so[:2]
-            dist = _np.hypot(vec[:, 0], vec[:, 1])
+            dist = np.hypot(vec[:, 0], vec[:, 1])
             valid = (dist > 1.0) & (dist < 80.0)
             if not valid.any():
                 s.free_passes.zero_()
@@ -795,9 +793,9 @@ class TorchFoveatedGrid(FoveatedGrid):
                 n_samples = max(1, int((d_ray - 1.5 * t.cell - 1.0) / t.cell))
                 if n_samples <= 0:
                     continue
-                samples = _np.linspace(1.0, d_ray - 1.5 * t.cell, n_samples)
+                samples = np.linspace(1.0, d_ray - 1.5 * t.cell, n_samples)
                 pts_ray = so[:2] + samples[:, None] * u_ray
-                ij_ray = _np.floor(pts_ray / t.cell).astype(_np.int64) - org
+                ij_ray = np.floor(pts_ray / t.cell).astype(np.int64) - org
                 in_w = (
                     (ij_ray[:, 0] >= 0) & (ij_ray[:, 0] < t.n)
                     & (ij_ray[:, 1] >= 0) & (ij_ray[:, 1] < t.n)
@@ -822,30 +820,35 @@ class TorchFoveatedGrid(FoveatedGrid):
                 s.free_passes[s.free_passes > 0] = 0
                 continue
 
-            # Clear obstacles reaching threshold (host-indexed, device-applied).
-            # Read minimal host copies for the traversed cells only.
-            cls_h = s.cls.cpu().numpy()
-            dyn_h = s.dynamic_mask.cpu().numpy()
-            for c_i, c_j in traversed:
-                if int(s.free_passes[c_i, c_j].item()) < free_thresh:
-                    continue
-                if bool(dyn_h[c_i, c_j]):
-                    s.free_passes[c_i, c_j] = 0
-                    continue
-                c = int(cls_h[c_i, c_j])
-                if c != UNKNOWN and c not in ground_ids:
-                    s.cls[c_i, c_j] = UNKNOWN
-                    s.conf[c_i, c_j] = 0
-                    s.cost[c_i, c_j] = UNKNOWN
-                    s.count16[c_i, c_j] = 0
-                    s.ground[c_i, c_j] = float("nan")
-                    s.z_min[c_i, c_j] = float("nan")
-                    s.z_max[c_i, c_j] = float("nan")
-                    s.rough[c_i, c_j] = float("nan")
-                    s.clear[c_i, c_j] = UNKNOWN
-                    s.flags[c_i, c_j] = 0xF0
-                    s.age[c_i, c_j] = UNKNOWN
-                    s.free_passes[c_i, c_j] = 0
+            # Clear obstacles reaching threshold: fully device-resident masked
+            # ops. Only the ray-geometry sampling above is host-side (explicit
+            # opt-in boundary); this application phase performs no host
+            # synchronization and no per-cell Python loop.
+            fp_hits = s.free_passes[ti, tj]
+            due = fp_hits >= int(free_thresh)
+            cls_t = s.cls[ti, tj]
+            ground_t = torch.isin(cls_t.long(), _GROUND_IDS.to(self.device))
+            dyn_t = s.dynamic_mask[ti, tj]
+            # Dynamic occupants reaching threshold only reset their streak.
+            s.free_passes[ti, tj] = torch.where(
+                due & dyn_t,
+                torch.zeros((), dtype=torch.uint8, device=self.device),
+                fp_hits,
+            )
+            clear_now = due & (cls_t != UNKNOWN) & ~ground_t & ~dyn_t
+            ci, cj = ti[clear_now], tj[clear_now]  # empty-safe: no-op when none
+            s.cls[ci, cj] = UNKNOWN
+            s.conf[ci, cj] = 0
+            s.cost[ci, cj] = UNKNOWN
+            s.count16[ci, cj] = 0
+            s.ground[ci, cj] = float("nan")
+            s.z_min[ci, cj] = float("nan")
+            s.z_max[ci, cj] = float("nan")
+            s.rough[ci, cj] = float("nan")
+            s.clear[ci, cj] = UNKNOWN
+            s.flags[ci, cj] = 0xF0
+            s.age[ci, cj] = UNKNOWN
+            s.free_passes[ci, cj] = 0
 
     def reset(self) -> None:
         """Reset internal grid state completely (including temporal dynamics)."""
@@ -1016,3 +1019,4 @@ def _box(x: torch.Tensor, win: int) -> torch.Tensor:
 def stats_to_numpy(stats: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Per-tier stats dicts with tensors moved to host NumPy arrays."""
     return [{k: v.cpu().numpy() if torch.is_tensor(v) else v for k, v in s.items()} for s in stats]
+

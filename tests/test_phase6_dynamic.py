@@ -371,20 +371,55 @@ def test_numpy_torch_temporal_parity():
            [(t["tier"], t["cell"], t["cls"], t["state"]) for t in st]
 
 
-def test_torch_structural_no_per_point_sync():
-    # Torch grid processes dynamic frames without error on CPU device tensors.
-    gt = TorchFoveatedGrid("spec", device="cpu")
-    xy = torch.zeros((4, 2))
-    xy[:, 0] = 10.0
+def test_torch_structural_no_per_point_sync(monkeypatch):
+    # Instruments host-transfer entry points during a Torch grid update and
+    # proves no transfer scales with the point count: every .cpu() payload is
+    # O(dynamic cells) and scalar .item() calls are O(1) diagnostics.
+    # Explicitly allowed host boundaries (snapshot/query/publication) are not
+    # exercised here; only the per-frame update path is measured.
+    N = 2000
+    gt = TorchFoveatedGrid("spec", device="cpu")  # ray clearing off by default
+    xy = torch.zeros((N, 2))
+    xy[:, 0] = torch.linspace(-9.0, 9.0, N)
     xy[:, 1] = 2.0
-    z = torch.full((4,), 0.5)
-    p = torch.zeros((4, NUM_CLASSES))
-    p[:, VEHICLE] = 0.95
-    m = torch.ones((4,), dtype=torch.bool)
+    z = torch.full((N,), 0.5)
+    p = torch.zeros((N, NUM_CLASSES))
+    p[:, VEHICLE] = 0.6
+    p[:, ROAD] = 0.4
+    m = torch.zeros((N,), dtype=torch.bool)
+    m[:6] = True  # a few dynamic points -> O(1) dynamic cells
+    p[:6, VEHICLE] = 0.95
+    p[:6, ROAD] = 0.05
+
+    cpu_elements: list[int] = []
+    orig_cpu = torch.Tensor.cpu
+    orig_item = torch.Tensor.item
+
+    def counting_cpu(self, *args, **kwargs):
+        cpu_elements.append(self.numel())
+        return orig_cpu(self, *args, **kwargs)
+
+    item_calls: list[int] = []
+
+    def counting_item(self, *args, **kwargs):
+        item_calls.append(1)
+        return orig_item(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "cpu", counting_cpu)
+    monkeypatch.setattr(torch.Tensor, "item", counting_item)
     gt.update(xy, z, p, m, (0.0, 0.0), timestamp=0.0)
     gt.update(xy, z, p, m, (0.0, 0.0), timestamp=0.1)
+
     assert len(gt.temporal) >= 1
-    assert gt.query_point(10.0, 2.0)["dynamic"] is True
+    # Every host payload must be sparse: far below the point count N. A single
+    # per-point (N,) transfer would contribute N=2000 elements and fail here,
+    # while the intentional sparse dynamic-cell boundary contributes O(cells).
+    total = sum(cpu_elements)
+    assert total < N, f"host transfer scales with points: {total} elements for {N} points"
+    assert total <= 64 * max(1, len(gt.temporal)) + 64
+    assert len(item_calls) <= 32
+    # Lifecycle still correct under instrumentation: track confirmed active.
+    assert gt.temporal_snapshot()[0]["state"] == "ACTIVE_DYNAMIC"
 
 
 # ------------------------------------------------------- bounded state
@@ -559,3 +594,55 @@ def test_temporal_soak_120_frames():
     gn.reset()
     gt.reset()
     assert len(gn.temporal) == 0 and len(gt.temporal) == 0
+
+
+# ------------------------------------------------------- correspondence span
+def test_correspondence_beyond_single_bucket():
+    # 4 m displacement with a 5 m correspondence distance must associate even
+    # though the track sits two 2 m buckets away (fixed 3x3 would miss it).
+    cfg = DynamicConfig(correspondence_distance_m=5.0)
+    g = FoveatedGrid("spec", dynamic_config=cfg)
+    _step(g, [[10.0, 2.0]], [0.5], _dyn_probs(VEHICLE), [True], ts=0.0)
+    t0 = g.temporal_snapshot()[0]["track_id"]
+    _step(g, [[14.0, 2.0]], [0.5], _dyn_probs(VEHICLE), [True], ts=0.1)
+    tracks = g.temporal_snapshot()
+    assert len(tracks) == 1
+    assert tracks[0]["track_id"] == t0
+
+
+def test_correspondence_boundary_separates_tracks():
+    cfg = DynamicConfig(correspondence_distance_m=1.5)
+    g = FoveatedGrid("spec", dynamic_config=cfg)
+    _step(g, [[10.0, 2.0]], [0.5], _dyn_probs(VEHICLE), [True], ts=0.0)
+    _step(g, [[20.0, 2.0]], [0.5], _dyn_probs(VEHICLE), [True], ts=0.1)
+    assert len(g.temporal_snapshot()) == 2
+
+
+def test_match_ring_covers_configured_distance():
+    from foveamap.temporal import _match_ring, _BUCKET_M
+    for dist in (0.1, 1.5, 2.0, 2.1, 5.0, 10.0):
+        ring = _match_ring(dist)
+        assert (ring * _BUCKET_M) >= dist
+    assert _match_ring(1.5) == 1  # default keeps the historic 3x3 neighborhood
+
+
+def test_stats_use_exact_lifecycle_names():
+    g = FoveatedGrid("spec")
+    _step(g, [[10.0, 2.0]], [0.5], _dyn_probs(VEHICLE), [True], ts=0.0)
+    s1 = g.temporal_stats()
+    assert s1["n_provisional"] == 1 and s1["n_active"] == 0
+    _step(g, [[10.0, 2.0]], [0.5], _dyn_probs(VEHICLE), [True], ts=0.1)
+    s2 = g.temporal_stats()
+    assert s2["n_provisional"] == 0 and s2["n_active"] == 1
+
+
+def test_dynamic_confidence_is_persistence_not_perception():
+    # A single observation reports initial_confidence no matter how strong the
+    # per-point class probability was: dynamic_confidence must not mirror
+    # perception confidence.
+    for prob in (0.55, 0.99):
+        g = FoveatedGrid("spec")
+        _step(g, [[10.0, 2.0]], [0.5], _dyn_probs(VEHICLE, p=prob), [True], ts=0.0)
+        q = g.query_point(10.0, 2.0)
+        assert q["dynamic_confidence"] == pytest.approx(0.5, abs=1e-6)
+        assert q["dynamic_state"] == "OBSERVED"

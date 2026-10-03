@@ -89,9 +89,10 @@ Queries additionally expose fine-grained `dynamic_state`,
   object in several tiers, and all of those observations feed a single track
   anchored at the finest reporting tier. Same-frame duplicates never
   double-count (one hit per track per frame).
-- Lookup is a 2 m spatial hash (3x3 buckets cover the correspondence
-  radius); per-frame cost is `O(dynamic cells)`, never `O(map)` or
-  `O(history)`.
+- Lookup is a 2 m spatial hash whose searched ring radius is derived from the
+  configured `correspondence_distance_m` (`ceil(distance / 2 m)`, so any
+  validated distance is fully covered by construction); per-frame cost is
+  `O(dynamic cells)`, never `O(map)` or `O(history)`.
 - Velocity is optional evidence derived from consecutive world positions
   (`(x_t - x_{t-1}) / dt`, timestamps from the frame; 10 Hz deterministic
   fallback). It is published for consumers, never required for association,
@@ -120,7 +121,12 @@ blocked by a transient occupant.
 
 ## 6. Confidence & decay
 
-Confidence is purely temporal persistence evidence:
+`dynamic_confidence` (query field and track `confidence`) means **temporal
+persistence confidence** — how consistently the region has been observed
+dynamic — and NOT neural perception confidence. Perception confidence already
+gated the observation itself (the per-point moving decision upstream); the
+lifecycle layer only counts repetitions. Conflating the two would let a
+single high-probability misclassification activate a track.
 
 - New track: `initial_confidence` (0.5).
 - Observed frame: `conf = min(1.0, conf + hit_increment)` (0.3).
@@ -138,8 +144,11 @@ Phase 5 guards are intact and extended by construction:
   a `MISSING` cell (no observation) is clearable by valid free-space rays,
   so a departed vehicle correctly yields to free space.
 - Ground classes, static obstacles behind returns, occluded regions, and
-  `UNKNOWN` handling are unchanged (`TorchFoveatedGrid._clear_rays` mirrors
-  the NumPy guards on-device).
+  `UNKNOWN` handling are unchanged. `TorchFoveatedGrid._clear_rays` mirrors
+  the NumPy guards; only its ray-geometry sampling loop is host-side
+  (explicit opt-in boundary — clearing is disabled by default and never runs
+  in the default Torch hot path), while streak updates and obstacle clearing
+  are device-resident masked tensor ops with no per-cell host sync.
 
 ## 8. Query & snapshot semantics
 

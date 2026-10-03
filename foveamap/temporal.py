@@ -24,6 +24,7 @@ Design rules:
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -41,8 +42,9 @@ REMOVED = "REMOVED"
 # (blocks traversability, reports dynamic=True).
 OCCUPIED_STATES = (OBSERVED, ACTIVE_DYNAMIC, TEMPORARILY_MISSING)
 
-# Coarse spatial hash bucket width (m). 3x3 bucket lookup spans 6 m, which
-# always covers correspondence_distance_m (validated <= bucket span at use).
+# Coarse spatial hash bucket width (m). The match neighborhood ring is derived
+# from the configured correspondence distance (see _match_ring), so any
+# validated correspondence_distance_m is fully covered by construction.
 _BUCKET_M = 2.0
 
 # Documented per-track memory estimate (bytes) used by memory_report().
@@ -89,9 +91,17 @@ class DynamicTrack:
 
 
 def _bucket(x: float, y: float) -> tuple[int, int]:
-    import math
-
     return (math.floor(x / _BUCKET_M), math.floor(y / _BUCKET_M))
+
+
+def _match_ring(correspondence_distance_m: float) -> int:
+    """Bucket ring radius covering the correspondence distance.
+
+    A track up to ``correspondence_distance_m`` away can sit at most
+    ``ceil(distance / _BUCKET_M)`` buckets from the observation bucket, so the
+    searched ``(2*ring+1)^2`` neighborhood always contains every candidate.
+    """
+    return max(1, math.ceil(float(correspondence_distance_m) / _BUCKET_M))
 
 
 class DynamicWorldModel:
@@ -100,7 +110,7 @@ class DynamicWorldModel:
     def __init__(self, config: DynamicConfig | None = None) -> None:
         self.config = config if config is not None else DynamicConfig()
         self._tracks: dict[int, DynamicTrack] = {}
-        self._buckets: dict[tuple[int, int, int], set[int]] = {}
+        self._buckets: dict[tuple[int, int], set[int]] = {}
         self._next_tid = 0
         self.frame_index = -1
         self.last_timestamp: float | None = None
@@ -108,6 +118,7 @@ class DynamicWorldModel:
         self.total_evicted = 0
         self._last_stats: dict[str, Any] = {
             "n_observed": 0,
+            "n_provisional": 0,
             "n_active": 0,
             "n_missing": 0,
             "n_stale": 0,
@@ -240,17 +251,22 @@ class DynamicWorldModel:
             evicted += 1
         self.total_evicted += evicted
 
-        n_active = n_missing = n_stale = 0
+        # State counters use exact lifecycle names: n_provisional counts
+        # OBSERVED tracks, n_active counts ACTIVE_DYNAMIC tracks only.
+        n_provisional = n_active = n_missing = n_stale = 0
         for track in self._tracks.values():
             st = self.state_of(track)
-            if st == ACTIVE_DYNAMIC or (st == OBSERVED):
+            if st == ACTIVE_DYNAMIC:
                 n_active += 1
+            elif st == OBSERVED:
+                n_provisional += 1
             elif st == TEMPORARILY_MISSING:
                 n_missing += 1
             elif st == STALE:
                 n_stale += 1
         self._last_stats = {
             "n_observed": n_observed,
+            "n_provisional": n_provisional,
             "n_active": n_active,
             "n_missing": n_missing,
             "n_stale": n_stale,
@@ -274,8 +290,9 @@ class DynamicWorldModel:
         best: DynamicTrack | None = None
         best_key: tuple[float, int, int] | None = None
         max_d2 = cfg.correspondence_distance_m * cfg.correspondence_distance_m
-        for dbx in (-1, 0, 1):
-            for dby in (-1, 0, 1):
+        ring = _match_ring(cfg.correspondence_distance_m)
+        for dbx in range(-ring, ring + 1):
+            for dby in range(-ring, ring + 1):
                 for tid in self._buckets.get((bx + dbx, by + dby), ()):
                     track = self._tracks.get(tid)
                     if track is None:
@@ -328,7 +345,9 @@ class DynamicWorldModel:
 
         Mirrors ``TierLayers.shifted``: a world-fixed cell at old (i, j) moves
         to (i - d0, j - d1) where d = new_origin - old_origin. Tracks leaving
-        every tier window are dropped (they will re-activate on re-observation).
+        every tier window are dropped (they will re-activate on re-observation;
+        window eviction is distinct from lifecycle expiry and is not counted in
+        ``total_expired``).
         """
         for track in list(self._tracks.values()):
             k = int(track.tier)
@@ -433,6 +452,7 @@ class DynamicWorldModel:
         self.total_evicted = 0
         self._last_stats = {
             "n_observed": 0,
+            "n_provisional": 0,
             "n_active": 0,
             "n_missing": 0,
             "n_stale": 0,
