@@ -322,13 +322,10 @@ def ground_plane_t(gz, drv, cell):
     z = torch.where(drv, gz.to(dt) - z0, 0.0)
     blk = lambda a: a.reshape(n0 // B, B, n1 // B, B).sum((1, 3))
     src = torch.stack([blk(w), blk(w * z), blk(w * z * z)])
-    k = torch.as_tensor(np.stack(plane_offsets(win)), dtype=dt, device=dev)
+    K = _plane_constants(dev, dt, n0, n1, B, win)
     r = win // 2
-    first = sorted({(m[0], m[1]) for m in PLANE_MOMENTS})                     # (source, x power) pairs
-    x1 = F.conv2d(src[[q[0] for q in first]][None], k[[q[1] for q in first]][:, None, :, None],
-                  padding=(r, 0), groups=len(first))[0]
-    M = F.conv2d(x1[[first.index((m[0], m[1])) for m in PLANE_MOMENTS]][None],
-                 k[[m[2] for m in PLANE_MOMENTS]][:, None, None, :], padding=(0, r), groups=len(PLANE_MOMENTS))[0]
+    x1 = F.conv2d(src[K["src"]][None], K["kx"], padding=(r, 0), groups=K["kx"].shape[0])[0]
+    M = F.conv2d(x1[K["x1"]][None], K["ky"], padding=(0, r), groups=K["ky"].shape[0])[0]
     S0 = M[0].clamp(min=1e-9)
     mx, my = M[1] / S0, M[2] / S0
     cxx, cyy, cxy = M[3] / S0 - mx * mx, M[4] / S0 - my * my, M[5] / S0 - mx * my
@@ -343,9 +340,28 @@ def ground_plane_t(gz, drv, cell):
     ref_c = torch.where(ok, z0 + mz - b * mx - c * my, float("nan"))
     sigma = (czz - b * cxz - c * cyz).clamp(min=0).sqrt()
     up = lambda a: a.repeat_interleave(B, 0).repeat_interleave(B, 1)
-    u = ((torch.arange(n0, device=dev) % B).to(dt) - (B - 1) / 2) / B
-    v = ((torch.arange(n1, device=dev) % B).to(dt) - (B - 1) / 2) / B
-    return up(ref_c) + up(b) * u[:, None] + up(c) * v[None, :], up(sigma)
+    return up(ref_c) + up(b) * K["u"][:, None] + up(c) * K["v"][None, :], up(sigma)
+
+
+_PLANE_CONST = {}
+
+
+def _plane_constants(dev, dt, n0, n1, B, win):
+    """Kernels, gather indices and in-block offsets for `ground_plane_t`, built once per device
+    and shape: copying them from the host every frame would stall the CUDA stream."""
+    key = (str(dev), dt, n0, n1, B, win)
+    if key not in _PLANE_CONST:
+        k = torch.as_tensor(np.stack(plane_offsets(win)), dtype=dt, device=dev)
+        first = sorted({(m[0], m[1]) for m in PLANE_MOMENTS})               # (source, x power) pairs
+        idx = lambda v: torch.as_tensor(v, dtype=torch.long, device=dev)
+        _PLANE_CONST[key] = dict(
+            src=idx([q[0] for q in first]),
+            kx=k[idx([q[1] for q in first])][:, None, :, None].contiguous(),
+            x1=idx([first.index((m[0], m[1])) for m in PLANE_MOMENTS]),
+            ky=k[idx([m[2] for m in PLANE_MOMENTS])][:, None, None, :].contiguous(),
+            u=((torch.arange(n0, device=dev) % B).to(dt) - (B - 1) / 2) / B,
+            v=((torch.arange(n1, device=dev) % B).to(dt) - (B - 1) / 2) / B)
+    return _PLANE_CONST[key]
 
 
 def stats_to_numpy(stats):
