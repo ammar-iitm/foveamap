@@ -53,7 +53,10 @@ hidden transforms). `intensity` (any standard name/storage) is normalized
 with the core `normalize_intensity` policy; when absent, ones are used and
 provenance records `default_ones_missing_field`. `ring` (any standard name)
 zero-fills with `ring_available=False` when absent — ring IDs are never
-invented. Little-endian only (explicit rejection otherwise); truncated,
+invented. A float `time` channel is parsed into per-point offsets when
+present (validated downstream; absent means normal processing with
+provenance, never fabricated de-skew). Binary layout honors field offsets,
+counts, `point_step`, and `row_step` (padded/shuffled/organized clouds). Little-endian only (explicit rejection otherwise); truncated,
 mismatched, duplicate-field, NaN/Inf clouds raise `DataAdapterError`.
 
 ## 5. Output contract
@@ -74,6 +77,12 @@ Otherwise a timestamped transform is REQUIRED: missing → typed
 stale (> `max_tf_age_s`, default 0.2 s) → `StaleTransformError` unless
 `allow_stale_tf` (then recorded). Output frames keep the cloud stamp; frames
 are never mixed across timestamps.
+The runtime pose (`LiDARFrame.pose`, ego/base → world) is resolved from the
+*same* cloud timestamp via a `(world_frame, base_frame)` lookup under the
+identical stale policy. Identity pose is legal only for explicitly configured
+same-frame operation (`world_frame == base_frame`, e.g. local-map startup),
+recorded as `identity_same_frame_operation`; with no provider and differing
+frames the frame fails loudly instead of drifting on a false identity.
 
 ## 7. Coordinate frames
 

@@ -49,7 +49,13 @@ The canonical representation across the entire system is `foveamap.core.contract
 - **Sensor Origin (`sensor_origin`)**: `(3,)` `float32` LiDAR optical center in the ego vehicle coordinate frame.
 - **Timestamp (`timestamp`)**: `float` seconds (monotonically non-decreasing across a sweep sequence).
 - **Source Identification (`source_id`, `frame_id`)**: Strings for provenance and diagnostic tracing.
-- **Optional Annotations (`label`, `moving`)**: `(N,)` `int8` / `(N,)` `bool`. Ground truth is strictly isolated and can be removed via `frame.without_annotations()`.
+- **Optional Annotations (`label`, `moving`)**: `(N,)` `int8` / `(N,)` `bool`. Ground truth
+is strictly isolated and can be removed via `frame.without_annotations()`.
+- **Optional Per-Point Time (`time_offsets`)**: `(N,)` `float32` seconds relative to the sweep
+`timestamp`. `None` means no per-point timing (process normally + provenance; de-skew is NOT
+performed — it additionally requires per-point ego motion, which no current source provides).
+Present values must be finite and within ±600 s; preprocessing keeps them aligned with
+surviving points; the ROS adapter parses `time` channels into this field.
 
 ---
 

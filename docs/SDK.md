@@ -55,7 +55,10 @@ count as dropped; the session stays usable.
 ## 7. Querying
 
 `query_point(x, y)`, `query_points(xs, ys)` (bounded, default limit 4096),
-`is_traversable(x, y, clearance_req=0.0)` — all answered from the latest
+`query_ray(x, y, theta, step_m, max_steps)` (bounded ray sampling that
+delegates every sample to the snapshot — no new mapping logic),
+`is_traversable(x, y, clearance_req=0.0)` and `export_numpy()` (detached
+tier-array copies for offline consumers) — all answered from the latest
 detached snapshot via the snapshot's authoritative implementation
 (including its traversability policy). `QueryResult` is frozen and carries
 tier, state, class, confidence, ground, roughness, slope, clearance, cost,
