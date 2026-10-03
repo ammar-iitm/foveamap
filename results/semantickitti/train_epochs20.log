@@ -1,0 +1,218 @@
+preparing 1922 training frames
+prepared 250/1922 frames
+prepared 500/1922 frames
+prepared 750/1922 frames
+prepared 1000/1922 frames
+prepared 1250/1922 frames
+prepared 1500/1922 frames
+prepared 1750/1922 frames
+semantickitti: 1922 training frames, range image 64 x 1024, device cuda
+training pixels by class: road 22.43%, sidewalk 16.62%, parking 1.67%, terrain 8.23%, vegetation 24.99%, building 20.17%, pole 0.41%, vehicle 5.43%, person 0.06%
+initialised from checkpoints/range_unet.pt
+step    25       3s  loss 1.098  lr 0.00050
+step    50       5s  loss 0.534  lr 0.00099
+step    75       7s  loss 0.372  lr 0.00098
+step   100       9s  loss 0.343  lr 0.00098
+step   125      11s  loss 0.307  lr 0.00097
+step   150      14s  loss 0.295  lr 0.00097
+step   175      16s  loss 0.284  lr 0.00096
+step   200      18s  loss 0.266  lr 0.00096
+step   225      20s  loss 0.259  lr 0.00095
+step   250      22s  loss 0.263  lr 0.00095
+step   275      23s  loss 0.263  lr 0.00094
+step   300      26s  loss 0.242  lr 0.00094
+step   325      28s  loss 0.241  lr 0.00093
+step   350      30s  loss 0.236  lr 0.00093
+step   375      32s  loss 0.246  lr 0.00092
+step   400      34s  loss 0.229  lr 0.00092
+step   425      36s  loss 0.223  lr 0.00091
+step   450      38s  loss 0.227  lr 0.00091
+step   475      40s  loss 0.212  lr 0.00090
+step   500      42s  loss 0.215  lr 0.00090
+step   525      44s  loss 0.223  lr 0.00089
+step   550      46s  loss 0.218  lr 0.00089
+step   575      48s  loss 0.216  lr 0.00088
+step   600      50s  loss 0.206  lr 0.00088
+step   625      52s  loss 0.206  lr 0.00087
+step   650      54s  loss 0.220  lr 0.00086
+step   675      56s  loss 0.215  lr 0.00086
+step   700      58s  loss 0.213  lr 0.00085
+step   725      60s  loss 0.194  lr 0.00085
+step   750      62s  loss 0.205  lr 0.00084
+step   775      64s  loss 0.208  lr 0.00084
+step   800      66s  loss 0.204  lr 0.00083
+step   825      68s  loss 0.199  lr 0.00083
+step   850      70s  loss 0.194  lr 0.00082
+step   875      72s  loss 0.192  lr 0.00082
+step   900      74s  loss 0.195  lr 0.00081
+step   925      77s  loss 0.189  lr 0.00081
+step   950      79s  loss 0.192  lr 0.00080
+step   975      81s  loss 0.201  lr 0.00080
+step  1000      83s  loss 0.192  lr 0.00079
+step  1025      85s  loss 0.194  lr 0.00079
+step  1050      87s  loss 0.187  lr 0.00078
+step  1075      89s  loss 0.194  lr 0.00078
+step  1100      91s  loss 0.190  lr 0.00077
+step  1125      93s  loss 0.183  lr 0.00077
+step  1150      95s  loss 0.188  lr 0.00076
+step  1175      97s  loss 0.190  lr 0.00076
+step  1200      99s  loss 0.183  lr 0.00075
+step  1225     101s  loss 0.186  lr 0.00075
+step  1250     103s  loss 0.187  lr 0.00074
+step  1275     105s  loss 0.193  lr 0.00073
+step  1300     107s  loss 0.178  lr 0.00073
+step  1325     109s  loss 0.184  lr 0.00072
+step  1350     111s  loss 0.171  lr 0.00072
+step  1375     113s  loss 0.179  lr 0.00071
+step  1400     115s  loss 0.182  lr 0.00071
+step  1425     117s  loss 0.174  lr 0.00070
+step  1450     119s  loss 0.171  lr 0.00070
+step  1475     121s  loss 0.177  lr 0.00069
+step  1500     123s  loss 0.165  lr 0.00069
+step  1525     125s  loss 0.181  lr 0.00068
+step  1550     128s  loss 0.176  lr 0.00068
+step  1575     130s  loss 0.173  lr 0.00067
+step  1600     132s  loss 0.172  lr 0.00067
+step  1625     134s  loss 0.172  lr 0.00066
+step  1650     136s  loss 0.175  lr 0.00066
+step  1675     138s  loss 0.181  lr 0.00065
+step  1700     140s  loss 0.170  lr 0.00065
+step  1725     142s  loss 0.167  lr 0.00064
+step  1750     144s  loss 0.170  lr 0.00064
+step  1775     146s  loss 0.170  lr 0.00063
+step  1800     148s  loss 0.175  lr 0.00063
+step  1825     150s  loss 0.174  lr 0.00062
+step  1850     152s  loss 0.168  lr 0.00061
+step  1875     154s  loss 0.165  lr 0.00061
+step  1900     156s  loss 0.161  lr 0.00060
+step  1925     158s  loss 0.167  lr 0.00060
+step  1950     160s  loss 0.161  lr 0.00059
+step  1975     162s  loss 0.166  lr 0.00059
+step  2000     164s  loss 0.164  lr 0.00058
+step  2025     167s  loss 0.158  lr 0.00058
+step  2050     169s  loss 0.161  lr 0.00057
+step  2075     171s  loss 0.171  lr 0.00057
+step  2100     173s  loss 0.164  lr 0.00056
+step  2125     175s  loss 0.164  lr 0.00056
+step  2150     177s  loss 0.160  lr 0.00055
+step  2175     179s  loss 0.163  lr 0.00055
+step  2200     181s  loss 0.160  lr 0.00054
+step  2225     183s  loss 0.161  lr 0.00054
+step  2250     185s  loss 0.158  lr 0.00053
+step  2275     187s  loss 0.161  lr 0.00053
+step  2300     189s  loss 0.163  lr 0.00052
+step  2325     191s  loss 0.158  lr 0.00052
+step  2350     193s  loss 0.149  lr 0.00051
+step  2375     195s  loss 0.157  lr 0.00051
+step  2400     197s  loss 0.163  lr 0.00050
+step  2425     199s  loss 0.156  lr 0.00049
+step  2450     201s  loss 0.158  lr 0.00049
+step  2475     203s  loss 0.159  lr 0.00048
+step  2500     206s  loss 0.152  lr 0.00048
+step  2525     208s  loss 0.153  lr 0.00047
+step  2550     210s  loss 0.149  lr 0.00047
+step  2575     212s  loss 0.150  lr 0.00046
+step  2600     214s  loss 0.155  lr 0.00046
+step  2625     216s  loss 0.156  lr 0.00045
+step  2650     218s  loss 0.153  lr 0.00045
+step  2675     220s  loss 0.159  lr 0.00044
+step  2700     222s  loss 0.162  lr 0.00044
+step  2725     224s  loss 0.148  lr 0.00043
+step  2750     226s  loss 0.144  lr 0.00043
+step  2775     228s  loss 0.147  lr 0.00042
+step  2800     230s  loss 0.150  lr 0.00042
+step  2825     232s  loss 0.159  lr 0.00041
+step  2850     234s  loss 0.155  lr 0.00041
+step  2875     236s  loss 0.154  lr 0.00040
+step  2900     238s  loss 0.154  lr 0.00040
+step  2925     240s  loss 0.153  lr 0.00039
+step  2950     242s  loss 0.146  lr 0.00039
+step  2975     244s  loss 0.147  lr 0.00038
+step  3000     246s  loss 0.147  lr 0.00038
+step  3025     248s  loss 0.149  lr 0.00037
+step  3050     250s  loss 0.150  lr 0.00036
+step  3075     252s  loss 0.149  lr 0.00036
+step  3100     255s  loss 0.148  lr 0.00035
+step  3125     257s  loss 0.149  lr 0.00035
+step  3150     259s  loss 0.146  lr 0.00034
+step  3175     261s  loss 0.143  lr 0.00034
+step  3200     263s  loss 0.150  lr 0.00033
+step  3225     265s  loss 0.148  lr 0.00033
+step  3250     267s  loss 0.147  lr 0.00032
+step  3275     269s  loss 0.145  lr 0.00032
+step  3300     271s  loss 0.143  lr 0.00031
+step  3325     273s  loss 0.139  lr 0.00031
+step  3350     275s  loss 0.147  lr 0.00030
+step  3375     277s  loss 0.151  lr 0.00030
+step  3400     279s  loss 0.146  lr 0.00029
+step  3425     281s  loss 0.149  lr 0.00029
+step  3450     283s  loss 0.141  lr 0.00028
+step  3475     285s  loss 0.140  lr 0.00028
+step  3500     287s  loss 0.146  lr 0.00027
+step  3525     289s  loss 0.141  lr 0.00027
+step  3550     291s  loss 0.149  lr 0.00026
+step  3575     294s  loss 0.136  lr 0.00026
+step  3600     296s  loss 0.145  lr 0.00025
+step  3625     298s  loss 0.136  lr 0.00024
+step  3650     300s  loss 0.139  lr 0.00024
+step  3675     302s  loss 0.141  lr 0.00023
+step  3700     304s  loss 0.141  lr 0.00023
+step  3725     306s  loss 0.150  lr 0.00022
+step  3750     308s  loss 0.135  lr 0.00022
+step  3775     310s  loss 0.142  lr 0.00021
+step  3800     312s  loss 0.135  lr 0.00021
+step  3825     314s  loss 0.140  lr 0.00020
+step  3850     316s  loss 0.144  lr 0.00020
+step  3875     318s  loss 0.136  lr 0.00019
+step  3900     320s  loss 0.144  lr 0.00019
+step  3925     322s  loss 0.143  lr 0.00018
+step  3950     324s  loss 0.135  lr 0.00018
+step  3975     326s  loss 0.142  lr 0.00017
+step  4000     328s  loss 0.138  lr 0.00017
+step  4025     330s  loss 0.139  lr 0.00016
+step  4050     333s  loss 0.140  lr 0.00016
+step  4075     335s  loss 0.138  lr 0.00015
+step  4100     337s  loss 0.138  lr 0.00015
+step  4125     339s  loss 0.139  lr 0.00014
+step  4150     341s  loss 0.135  lr 0.00014
+step  4175     343s  loss 0.137  lr 0.00013
+step  4200     345s  loss 0.139  lr 0.00013
+step  4225     347s  loss 0.134  lr 0.00012
+step  4250     349s  loss 0.134  lr 0.00011
+step  4275     351s  loss 0.138  lr 0.00011
+step  4300     353s  loss 0.146  lr 0.00010
+step  4325     355s  loss 0.133  lr 0.00010
+step  4350     357s  loss 0.137  lr 0.00009
+step  4375     359s  loss 0.137  lr 0.00009
+step  4400     361s  loss 0.137  lr 0.00008
+step  4425     363s  loss 0.133  lr 0.00008
+step  4450     365s  loss 0.132  lr 0.00007
+step  4475     367s  loss 0.131  lr 0.00007
+step  4500     370s  loss 0.138  lr 0.00006
+step  4525     372s  loss 0.138  lr 0.00006
+step  4550     374s  loss 0.133  lr 0.00005
+step  4575     376s  loss 0.132  lr 0.00005
+step  4600     378s  loss 0.136  lr 0.00005
+step  4625     380s  loss 0.129  lr 0.00005
+step  4650     382s  loss 0.136  lr 0.00005
+step  4675     384s  loss 0.136  lr 0.00005
+step  4700     386s  loss 0.135  lr 0.00005
+step  4725     388s  loss 0.137  lr 0.00005
+step  4750     390s  loss 0.132  lr 0.00005
+step  4775     392s  loss 0.137  lr 0.00005
+step  4800     394s  loss 0.135  lr 0.00005
+saved checkpoints/range_unet_semantickitti.pt (4800 steps, 394s)
+val mIoU 0.581  moving IoU 0.31705352018280925
+  0–10 m    mIoU 0.6240839345103861
+  10–25 m   mIoU 0.5377050419412961
+  25–50 m   mIoU 0.4007977282882305
+  50–100 m  mIoU 0.18335922485657316
+  road                   IoU 0.8788  recall 0.9193  points  8844442  confused with: sidewalk 5%, parking 2%
+  sidewalk               IoU 0.6929  recall 0.8194  points  6071493  confused with: terrain 7%, road 4%
+  parking                IoU 0.257  recall 0.4434  points   610017  confused with: sidewalk 29%, road 17%
+  terrain                IoU 0.6948  recall 0.7992  points  6417970  confused with: vegetation 11%, sidewalk 5%
+  vegetation             IoU 0.7643  recall 0.8776  points 15173471  confused with: building 6%, terrain 3%
+  building               IoU 0.6551  recall 0.7537  points  7888002  confused with: vegetation 17%, vehicle 4%
+  pole                   IoU 0.2293  recall 0.6688  points   205512  confused with: vegetation 20%, building 6%
+  vehicle                IoU 0.7607  recall 0.927  points  3413366  confused with: building 4%, vegetation 2%
+  person                 IoU 0.2937  recall 0.6078  points    81493  confused with: building 14%, vegetation 12%
