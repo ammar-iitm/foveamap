@@ -37,9 +37,15 @@ class LiDARFrame:
         sensor_origin: (3,) float32 LiDAR origin in the ego frame (default [0, 0, 1.73]).
         timestamp: float timestamp in seconds (epoch or sequence-relative).
         frame_id: string identifier for tracking and diagnostics.
-        label: optional (N,) int8 ground-truth semantic class ID (-1 = unlabelled/ignore).
-        moving: optional (N,) bool ground-truth dynamic status (True = moving).
-        prev_sweeps: optional list of prior sweeps as (pts_world (M,3) float64, ring (M,) int16)
+    label: optional (N,) int8 ground-truth semantic class ID (-1 = unlabelled/ignore).
+    moving: optional (N,) bool ground-truth dynamic status (True = moving).
+    time_offsets: optional (N,) float32 per-point time offset in seconds,
+        relative to ``timestamp`` (negative = measured earlier in the sweep).
+        Absent (None) means the sweep carries no per-point timing; consumers
+        must process the sweep normally and record provenance instead of
+        pretending de-skew happened. Motion de-skew additionally requires
+        per-point ego motion, which this contract does not provide.
+    prev_sweeps: optional list of prior sweeps as (pts_world (M,3) float64, ring (M,) int16)
                      or None entries, providing temporal motion cues.
         metadata: dictionary with dataset-specific or provenance metadata.
     """
@@ -53,6 +59,7 @@ class LiDARFrame:
     source_id: str = ""
     label: np.ndarray | None = None
     moving: np.ndarray | None = None
+    time_offsets: np.ndarray | None = None
     prev_sweeps: list[tuple[np.ndarray, np.ndarray] | None] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -81,6 +88,7 @@ class LiDARFrame:
             source_id=self.source_id,
             label=None,
             moving=None,
+            time_offsets=self.time_offsets.copy() if self.time_offsets is not None else None,
             prev_sweeps=self.prev_sweeps,
             metadata=dict(self.metadata),
         )
@@ -149,7 +157,20 @@ class LiDARFrame:
             if self.moving.dtype != bool and not np.issubdtype(self.moving.dtype, np.integer):
                 raise ContractError(f"LiDARFrame.moving must have boolean dtype; got {self.moving.dtype}")
 
-        # 7. Optional previous sweeps
+        # 7. Optional per-point time offsets (relative seconds, sweep-local)
+        if self.time_offsets is not None:
+            if not isinstance(self.time_offsets, np.ndarray) or self.time_offsets.shape != (n,):
+                raise ContractError(f"LiDARFrame.time_offsets must be ({n},) ndarray; got shape {getattr(self.time_offsets, 'shape', None)}")
+            if not np.issubdtype(self.time_offsets.dtype, np.floating):
+                raise ContractError(f"LiDARFrame.time_offsets must have floating dtype; got {self.time_offsets.dtype}")
+            if not np.all(np.isfinite(self.time_offsets)):
+                raise NumericalConsistencyError("LiDARFrame.time_offsets contains NaN or Inf values")
+            if n > 0 and np.any(np.abs(self.time_offsets) > 600.0):
+                raise NumericalConsistencyError(
+                    "LiDARFrame.time_offsets out of range (|offset| > 600 s is not a within-sweep offset)"
+                )
+
+        # 8. Optional previous sweeps
         if self.prev_sweeps is not None:
             for idx, item in enumerate(self.prev_sweeps):
                 if item is not None:
@@ -180,6 +201,7 @@ class LiDARFrame:
             "pose": self.pose,
             "sensor": self.sensor_origin,
             "prev": self.prev_sweeps,
+            "time_offsets": self.time_offsets.copy() if self.time_offsets is not None else None,
             "meta": legacy_meta,
         }
 
@@ -198,6 +220,9 @@ class LiDARFrame:
         label = np.asarray(frame_dict["label"], dtype=np.int8) if "label" in frame_dict and frame_dict["label"] is not None else None
         moving = np.asarray(frame_dict["moving"], dtype=bool) if "moving" in frame_dict and frame_dict["moving"] is not None else None
         prev = frame_dict.get("prev")
+        time_offsets = None
+        if "time_offsets" in frame_dict and frame_dict["time_offsets"] is not None:
+            time_offsets = np.asarray(frame_dict["time_offsets"], dtype=np.float32)
         return cls(
             pts=pts,
             intensity=inten,
@@ -209,6 +234,7 @@ class LiDARFrame:
             source_id=source_id,
             label=label,
             moving=moving,
+            time_offsets=time_offsets,
             prev_sweeps=prev,
             metadata=meta,
         )

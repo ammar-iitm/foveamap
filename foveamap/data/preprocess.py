@@ -59,12 +59,14 @@ class LiDARPreprocessor:
         if self.config.z_max_m is not None:
             keep_mask &= (pts[:, 2] <= self.config.z_max_m)
 
-        # Extract filtered arrays
+        # Extract filtered arrays (every per-point array follows keep_mask so
+        # time_offsets stay aligned with the surviving points).
         pts_filt = pts[keep_mask].astype(np.float32)
         inten_filt = frame.intensity[keep_mask].astype(np.float32)
         ring_filt = frame.ring[keep_mask].astype(np.int16)
         label_filt = frame.label[keep_mask].astype(np.int8) if frame.label is not None else None
         moving_filt = frame.moving[keep_mask].astype(bool) if frame.moving is not None else None
+        offsets_filt = frame.time_offsets[keep_mask].astype(np.float32) if frame.time_offsets is not None else None
 
         # Build updated metadata
         meta = dict(frame.metadata)
@@ -85,6 +87,7 @@ class LiDARPreprocessor:
             source_id=frame.source_id,
             label=label_filt,
             moving=moving_filt,
+            time_offsets=offsets_filt,
             prev_sweeps=frame.prev_sweeps,
             metadata=meta,
         )

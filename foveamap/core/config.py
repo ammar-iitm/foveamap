@@ -320,6 +320,20 @@ class RuntimeConfig:
         if self.features_engine not in ("numpy", "torch"):
             raise ConfigurationError(f"features_engine must be 'numpy' or 'torch', got {self.features_engine!r}")
 
+    @classmethod
+    def cpu_profile(cls) -> RuntimeConfig:
+        """Explicit CPU/development profile: all-NumPy on CPU, no CUDA needed."""
+        return cls(device="cpu", grid_engine="numpy", features_engine="numpy")
+
+    @classmethod
+    def gpu_profile(cls) -> RuntimeConfig:
+        """Explicit GPU/production profile: Torch engines with auto device.
+
+        ``device="auto"`` selects CUDA where physically present and falls back
+        to CPU otherwise (GPU performance itself is validated separately).
+        """
+        return cls(device="auto", grid_engine="torch", features_engine="torch")
+
 
 @dataclass(frozen=True)
 class PreprocessConfig:
