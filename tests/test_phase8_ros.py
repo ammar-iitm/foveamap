@@ -566,6 +566,37 @@ def test_count_multi_field_first_element_used():
     assert len(out["pts"]) == 3
 
 
+def test_uppercase_and_mixed_case_fields_parse():
+    xyz = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+    msg = RosPointCloud2(
+        fields=[RosPointField("X", 0, FLOAT32), RosPointField("Y", 4, FLOAT32),
+                RosPointField("Z", 8, FLOAT32)],
+        height=1, width=2, point_step=12, row_step=24, data=xyz.tobytes(),
+        header=RosHeader(RosStamp(1, 0), "lidar"))
+    out = cloud_to_arrays(msg)
+    np.testing.assert_allclose(out["pts"], xyz, rtol=1e-6)
+    mixed = RosPointCloud2(
+        fields=[RosPointField("x", 0, FLOAT32), RosPointField("y", 4, FLOAT32),
+                RosPointField("Intensity", 8, FLOAT32), RosPointField("z", 12, FLOAT32)],
+        height=1, width=2, point_step=16, row_step=32,
+        data=np.zeros((2, 4), dtype=np.float32).tobytes(),
+        header=RosHeader(RosStamp(1, 0), "lidar"))
+    out2 = cloud_to_arrays(mixed)
+    assert len(out2["pts"]) == 2
+    assert out2["intensity_provenance"] != "default_ones_missing_field"
+
+
+def test_case_insensitive_duplicates_rejected():
+    msg = RosPointCloud2(
+        fields=[RosPointField("x", 0, FLOAT32), RosPointField("X", 12, FLOAT32),
+                RosPointField("y", 4, FLOAT32), RosPointField("z", 8, FLOAT32)],
+        height=1, width=1, point_step=16, row_step=16,
+        data=np.zeros(16, dtype=np.uint8).tobytes(),
+        header=RosHeader(RosStamp(1, 0), "lidar"))
+    with pytest.raises(DataAdapterError):
+        cloud_to_arrays(msg)
+
+
 # --------------------------------------- C closure: TF world pose
 def _tf_node(world="map", provider=None):
     from foveamap_ros.node import FoveaMapNodeCore

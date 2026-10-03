@@ -113,13 +113,18 @@ def _field_map(msg: Any) -> dict[str, Any]:
 
 
 def _read_channel(raw: np.ndarray, spec: Any, n_pts: int) -> np.ndarray:
-    """Extract one logical channel from the raw structured record array."""
+    """Extract one logical channel from the raw structured record array.
+
+    Field matching is case-insensitive (``X``/``x``): the record dtype built
+    by :func:`cloud_to_arrays` stores lower-cased names, so the spec name is
+    lowered here too — lookup and access can never disagree on case.
+    """
     dtype_id = int(getattr(spec, "datatype", 0))
     count = int(getattr(spec, "count", 1))
     if dtype_id not in _DTYPE_OF:
         raise DataAdapterError(f"Unsupported PointCloud2 datatype {dtype_id} for field {spec.name!r}")
     fmt, np_dtype = _DTYPE_OF[dtype_id]
-    name = str(getattr(spec, "name", ""))
+    name = str(getattr(spec, "name", "")).lower()
     if count == 1:
         col = raw[name].astype(np_dtype)
     else:
@@ -181,14 +186,15 @@ def cloud_to_arrays(
         if int(fields[axis].datatype) not in (FLOAT32, FLOAT64):
             raise DataAdapterError(f"PointCloud2 '{axis}' must be float32/float64, got datatype {fields[axis].datatype}")
 
-    names = [str(getattr(f, "name", "")) for f in msg.fields]
+    names = [str(getattr(f, "name", "")).lower() for f in msg.fields]
     if len(set(names)) != len(names):
-        raise DataAdapterError(f"PointCloud2 has duplicate field names: {names}")
+        raise DataAdapterError(f"PointCloud2 has duplicate field names (case-insensitive): {names}")
     if any(not nm for nm in names):
         raise DataAdapterError("PointCloud2 has an empty field name")
     # Honor the wire layout exactly: offsets and point_step define placement,
     # so padded / shuffled / non-contiguous Velodyne/Ouster layouts parse
     # correctly instead of being misread as packed sequential fields.
+    # Dtype names are lower-cased to match the case-insensitive lookup above.
     layout: list[tuple[str, Any, int, int, int]] = []  # name, dtype, offset, count, size
     for f in msg.fields:
         dtype_id = int(getattr(f, "datatype", 0))
@@ -205,7 +211,7 @@ def cloud_to_arrays(
                 f"PointCloud2 field {f.name!r} spans bytes [{offset}, {offset + size}) "
                 f"beyond point_step {point_step}"
             )
-        layout.append((str(getattr(f, "name", "")), np_dtype, offset, count, size))
+        layout.append((str(getattr(f, "name", "")).lower(), np_dtype, offset, count, size))
     layout.sort(key=lambda e: e[2])
     for (_, _, off_a, _, size_a), (_, _, off_b, _, _) in zip(layout, layout[1:]):
         if off_b < off_a + size_a:

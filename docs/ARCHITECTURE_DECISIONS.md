@@ -21,6 +21,35 @@ by `age`; the dynamic flag by the per-frame dynamic layer + Phase 6
 lifecycle. Memory accounting distinguishes persistent/auxiliary/temporal
 bytes and never reports theory as allocation.
 
+Measured memory table (from `memory_report()`, spec profile required):
+
+```text
+Option A (current, dominant + secondary evidence):
+  spec:   320,000 cells x 16 B = 5,120,000 persistent (5.76 MB with aux) <= 8 MB PASS
+  graded: 570,000 cells x 16 B = 9,120,000 persistent (graded is not the
+          <= 8 MB profile; spec is the acceptance profile)
+Option B (full 9-class FP16 histogram, +18 B/cell, estimated):
+  spec:   320,000 x 34 B = 10,880,000 persistent -> EXCEEDS 8 MB target
+Option C (bounded auxiliary histogram): possible later only with measured
+  accounting; no current consumer requires it.
+```
+
+Downstream loss under Option A: per-class vote margins beyond top-2 are not
+retained per cell. Sufficient for v1 because costing, queries, and
+snapshots only ever consume dominant/secondary evidence (verified by
+contract tests); raw per-point labels remain available upstream of fusion.
+
+## D8. grid_map export — ROS-compatible payload now, grid_map_msgs later
+
+PRD FR-13 allows "ROS grid_map or NumPy" export. v1 provides NumPy tier
+export (`export_numpy`, detached copies) plus a ROS-compatible tier/cell
+payload (`/foveamap/grid`, documented geometry + semantics) and matching
+`.msg` definitions. A `grid_map_msgs/GridMap` converter is intentionally
+deferred: it binds deployment message generation (rosidl) without adding
+mapping value, and an unvalidated converter would be worse than the
+documented boundary. STATUS: NumPy + ROS-compatible payload IMPLEMENTED +
+TESTED; `grid_map_msgs` DEFERRED with rationale.
+
 ## D2. Perception backbone — RangeUNet actual, sparse-conv future
 
 PRD FR-6 and Vision §4 name sparse 3D conv the default. Actual default:
