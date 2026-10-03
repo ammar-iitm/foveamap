@@ -492,3 +492,34 @@ def test_export_numpy_detached_copies():
     exp["tiers"][0]["cost"][:] = 0
     exp["tiers"][0]["ground"][:] = 999.0
     assert m.query_point(2.0, 1.0).cost == before
+
+
+def test_last_error_stored_and_cleared_on_recovery():
+    m = _active()
+    assert m.status().last_error is None
+    with pytest.raises(Exception):
+        m.process({"bogus": True})
+    err = m.status().last_error
+    assert isinstance(err, str) and len(err) > 0  # typed failure preserved
+    assert any(r.startswith("last_error:") for r in m.health().reasons)
+    m.process(_frame())
+    assert m.status().last_error is None
+    assert not any(r.startswith("last_error:") for r in m.health().reasons)
+
+
+def test_snapshot_view_exposes_no_mutable_arrays():
+    import numpy as _np
+    m = _active()
+    view = m.process(_frame())
+    for name in dir(view):
+        if name.startswith("__"):
+            continue
+        try:
+            attr = getattr(view, name)
+        except Exception:
+            continue
+        assert not isinstance(attr, _np.ndarray), f"SnapshotView.{name} exposes ndarray"
+    snap = view.to_dict()
+    assert snap["api_version"] == "1"
+    # No accessor returns live tier arrays; origins are plain tuples.
+    assert view.origins[0] == tuple(view.origins[0])

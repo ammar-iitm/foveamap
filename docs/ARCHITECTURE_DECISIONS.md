@@ -31,16 +31,17 @@ factory) makes backbones swappable without touching mapping; swapping in a
 sparse-conv backbone later needs no grid changes. Sparse 3D U-Net:
 PLANNED/DEFERRED. No claim of equivalence is made.
 
-## D3. Dashboard scope — replay viewer, not live 3D (v1)
+## D3. Dashboard scope — replay viewer with analysis UI, not live 3D (v1)
 
-PRD FR-14 asks for live 2.5D + 3D with tier boundaries; FR-16 layer
-toggles; FR-17 replay/pause/step/scrub. Actual: a static replay dashboard
-(`dashboard/index.html`, 2D top-down tiles + scrub/replay of recorded
-frames; no live mode, no 3D view). FR-15 metrics/FR-18 harness/FR-19
-baselines: IMPLEMENTED via `pipeline.py`/benchmark scripts + results.
-Decision: v1 dashboard scope = recorded-frame replay (truthful in README);
-live 3D is DEFERRED (product surface, would not change mapping). Rendering
-stays outside measured core latency by methodology (`export after` default).
+Verified in `dashboard/index.html`: 2D top-down canvas with play/pause/step/
+scrub, semantic/elevation/traversability/ground-truth layer toggles, overlays
+(fovea tier, curb/pothole edges, moving agents, confidence, grid, raw points),
+foveated-vs-uniform split compare, per-frame inspector, and latency/memory/
+accuracy charts driven by recorded `dashboard/data` (FR-15 metrics, FR-16
+toggles/compare, FR-17 replay controls: IMPLEMENTED as replay UI).
+Deferred: live streaming mode and 3D view (FR-14 partially met).
+Rendering stays outside measured core latency by methodology (`export after`
+default). No dashboard redesign is in scope for closure.
 
 ## D4. Deployment export — ONNX/TensorRT deferred (PRD FR-20, P2)
 

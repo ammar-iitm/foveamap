@@ -11,16 +11,25 @@ models, and SemanticKITTI's classes map onto all 9 FoveaMap classes. The .bin
 files carry no laser id, so a point's range-image row comes from its
 elevation angle over the simulator's field of view (the RangeNet++ projection).
 Scans are 10 Hz, so the motion cue uses the previous two scans (0.1 s, 0.2 s).
+
+Trust boundary: frame caches (``<out_dir>/*.pkl``) are trusted-operator
+artifacts written by :func:`build_cache` on this machine. Cache reads are
+confined to ``out_dir`` basenames and failures raise typed errors; never
+point cache loading at untrusted directories or accept cache files over any
+public input boundary. Remote fetching uses :mod:`foveamap.remote_zip`
+(HTTP/HTTPS only, sized reads, disk-quota pre-check).
 """
 from __future__ import annotations
 
 import json
 import os
 import pickle
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
+from .core.exceptions import DataAdapterError
 from .frames import DatasetInfo, transform
 from .sim import (CLASSES, ROAD, SIDEWALK, PARKING, TERRAIN, VEGETATION, BUILDING, POLE,
                   VEHICLE, PERSON, N_BEAMS, FOV_UP, FOV_DOWN, SENSOR_H)
@@ -205,13 +214,31 @@ def cached_info(out_dir):
         return kitti_info(json.load(fh).get("n_cols", 1024))
 
 
+def _cache_pkl_path(out_dir, name):
+    """Confine trusted-local-cache reads to ``out_dir`` (see nuscenes.py)."""
+    name = str(name)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
+        raise DataAdapterError(f"Refusing unsafe cache name {name!r} (trusted local cache, basenames only)")
+    return os.path.join(out_dir, f"{name}.pkl")
+
+
+def _load_pkl_frames(path):
+    try:
+        with open(path, "rb") as fh:
+            frames = pickle.load(fh)
+    except (OSError, pickle.UnpicklingError, EOFError, ValueError, AttributeError) as exc:
+        raise DataAdapterError(f"Trusted local cache unreadable at {path!r}: {exc}") from exc
+    if not isinstance(frames, list):
+        raise DataAdapterError(f"Trusted local cache at {path!r} did not contain a frame list")
+    return frames
+
+
 def iter_cached(out_dir, split):
     """Frames of a split, one sequence in memory at a time."""
     with open(os.path.join(out_dir, "index.json")) as fh:
         index = json.load(fh)
     for seq in index[split]:
-        with open(os.path.join(out_dir, f"{seq}.pkl"), "rb") as fh:
-            frames = pickle.load(fh)
+        frames = _load_pkl_frames(_cache_pkl_path(out_dir, seq))
         frames.reverse()
         while frames:              # drop each frame once used, so the sequence's memory shrinks as it goes
             yield frames.pop()
@@ -224,8 +251,7 @@ def count_cached(out_dir, split):
 
 
 def load_scene(out_dir, seq):
-    with open(os.path.join(out_dir, f"{seq}.pkl"), "rb") as fh:
-        return pickle.load(fh)
+    return _load_pkl_frames(_cache_pkl_path(out_dir, seq))
 
 
 # ----------------------------------------------------------------------------

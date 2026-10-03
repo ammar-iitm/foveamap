@@ -9,7 +9,7 @@ import os
 import numpy as np
 import pytest
 
-from foveamap.core.config import RuntimeConfig
+from foveamap.core.config import FoveaMapConfig, RuntimeConfig
 from foveamap.core.contracts import LiDARFrame
 from foveamap.core.exceptions import ConfigurationError, NumericalConsistencyError, ContractError
 from foveamap.data.preprocess import LiDARPreprocessor
@@ -41,6 +41,19 @@ def test_cpu_and_gpu_profiles_explicit():
     # Defaults stay development-safe (no silent CUDA requirement).
     default = RuntimeConfig()
     assert default.grid_engine == "numpy" and default.features_engine == "numpy"
+
+
+def test_cpu_profile_propagates_to_runtime():
+    import dataclasses
+    from foveamap.runtime.runtime import FoveaMapRuntime
+    from foveamap.runtime.perception import ClassicalFallbackBackend
+    import torch
+    base = FoveaMapConfig()
+    cfg = dataclasses.replace(base, runtime=RuntimeConfig.cpu_profile())
+    rt = FoveaMapRuntime(config=cfg,
+                         perception_backend=ClassicalFallbackBackend(device=torch.device("cpu")))
+    assert type(rt.grid).__name__ == "FoveatedGrid"
+    assert str(rt.device_ctx.device) == "cpu"
 
 
 # ------------------------------------------------------- remote/archive bounds

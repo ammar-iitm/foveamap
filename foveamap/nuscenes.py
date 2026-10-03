@@ -12,14 +12,23 @@ Expected layout (what the official tarballs extract to):
     <dataroot>/lidarseg/v1.0-mini/*_lidarseg.bin
 
 Each .pcd.bin holds float32 (x, y, z, intensity, ring) in the LIDAR_TOP frame.
+
+Trust boundary: frame caches (``<out_dir>/*.pkl``) are trusted-operator
+artifacts written by :func:`build_cache` on this machine. Cache reads are
+confined to ``out_dir`` basenames and failures raise typed errors; never
+point cache loading at untrusted directories or accept cache files over any
+public input boundary.
 """
 from __future__ import annotations
 
 import json
 import os
 import pickle
+import re
 
 import numpy as np
+
+from .core.exceptions import DataAdapterError
 
 from .sim import (NUM_CLASSES, ROAD, SIDEWALK, PARKING, TERRAIN, VEGETATION, BUILDING,
                   POLE, VEHICLE, PERSON)
@@ -319,16 +328,39 @@ def cached_info(out_dir):
         return nuscenes_info(json.load(fh)["n_rows"])
 
 
+def _cache_pkl_path(out_dir, name):
+    """Confine trusted-local-cache reads to ``out_dir``.
+
+    Pickle executes code while loading, so cache paths are never derived from
+    unvalidated input: names must be plain basenames (no separators, no
+    parent references). The cache directory itself remains a
+    trusted-operator artifact (see module trust boundary).
+    """
+    name = str(name)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
+        raise DataAdapterError(f"Refusing unsafe cache name {name!r} (trusted local cache, basenames only)")
+    return os.path.join(out_dir, f"{name}.pkl")
+
+
+def _load_pkl_frames(path):
+    try:
+        with open(path, "rb") as fh:
+            frames = pickle.load(fh)
+    except (OSError, pickle.UnpicklingError, EOFError, ValueError, AttributeError) as exc:
+        raise DataAdapterError(f"Trusted local cache unreadable at {path!r}: {exc}") from exc
+    if not isinstance(frames, list):
+        raise DataAdapterError(f"Trusted local cache at {path!r} did not contain a frame list")
+    return frames
+
+
 def load_cached(out_dir, split):
     with open(os.path.join(out_dir, "index.json")) as fh:
         index = json.load(fh)
     frames = []
     for name in index[split]:
-        with open(os.path.join(out_dir, f"{name}.pkl"), "rb") as fh:
-            frames.extend(pickle.load(fh))
+        frames.extend(_load_pkl_frames(_cache_pkl_path(out_dir, name)))
     return frames
 
 
 def load_scene(out_dir, name):
-    with open(os.path.join(out_dir, f"{name}.pkl"), "rb") as fh:
-        return pickle.load(fh)
+    return _load_pkl_frames(_cache_pkl_path(out_dir, name))
