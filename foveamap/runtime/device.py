@@ -25,6 +25,25 @@ class DeviceContext:
     description: str
 
 
+def canonical_device(device: torch.device | str) -> torch.device:
+    """The device with its index filled in, as tensors report it.
+
+    ``torch.device("cuda") != torch.device("cuda:0")`` even though tensors
+    created on the first spells their device ``cuda:0``; the same holds for
+    ``mps``. Comparing canonical devices avoids false mismatches.
+    """
+    d = torch.device(device)
+    if d.index is None:
+        if d.type == "cuda":
+            try:
+                return torch.device("cuda", torch.cuda.current_device())
+            except (AssertionError, RuntimeError):     # no usable CUDA (e.g. CPU-only build): the default is 0
+                return torch.device("cuda", 0)
+        if d.type == "mps":
+            return torch.device("mps", 0)
+    return d
+
+
 def resolve_device(
     runtime_config: RuntimeConfig,
     perception_config: PerceptionConfig | None = None,
@@ -93,6 +112,7 @@ def resolve_device(
     else:
         desc = f"CPU ({os.cpu_count() or 1} vCPU threads)"
 
+    device = canonical_device(device)
     return DeviceContext(
         device=device,
         device_type=device.type,
