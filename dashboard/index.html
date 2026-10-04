@@ -91,8 +91,11 @@ button, input, select { font: inherit; color: inherit; }
 .frameno { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--fg2); white-space: nowrap; }
 
 @media (max-width: 1100px) {
-  .app { height: auto; grid-template-rows: auto auto auto; }
-  .main { grid-template-columns: 1fr; }
+  /* one column: the controls go right under the map they drive, the panels after them */
+  .app { height: auto; grid-template-rows: none; }
+  .main { display: contents; }
+  .top { order: 0; } .mapwrap { order: 1; } .bottom { order: 2; } .rail { order: 3; }
+  .play { order: -1; flex-basis: 100%; }
   .mapwrap { height: 70vh; }
   .rail { overflow: visible; }
 }
@@ -404,7 +407,7 @@ function scene(rect, T, fovea, label) {
   }
   const labels = S.ov.objects ? drawObjects(f, toD, rot) : [];
   ctx.restore();
-  for (const [text, x, y] of labels) objLabel(text, x, y);
+  placeLabels(labels);
   if (tagAt) tag(`${fmtCm(tiers[0].cell)} | ${fmtCm(tiers[1].cell)}`, tagAt[0], tagAt[1] - 4);
   // ego-frame overlays (never rotated): range marks along the heading, points, footprint
   ctx.font = `11px ${css("--font-num")}`; ctx.fillStyle = css("--fg2"); ctx.strokeStyle = css("--fg2"); ctx.lineWidth = 1;
@@ -440,19 +443,26 @@ function drawObjects(f, toD, rot) {
     ctx.setLineDash(mv ? [5, 3] : []);     // moving: dashed
     ctx.stroke();
     ctx.setLineDash([]);
-    if (cls !== 6 && Math.hypot(x - f.ego[0], y - f.ego[1]) < 30) {
+    const dist = Math.hypot(x - f.ego[0], y - f.ego[1]);
+    if (cls !== 6 && dist < 30) {
       const [lx, ly] = rot(toD(x, y));
-      out.push([`${CLASS_NAMES[cls].split(" ")[0]}${mv ? " · moving" : ""}`, lx, ly]);
+      out.push([`${CLASS_NAMES[cls].split(" ")[0]}${mv ? " · moving" : ""}`, lx, ly, dist]);
     }
   }
   return out;
 }
 
-function objLabel(text, x, y) {
+// labels nearest the vehicle first; a label that would overlap one already drawn is left out
+function placeLabels(labels) {
   ctx.font = `600 10.5px ${css("--font-ui")}`; ctx.textAlign = "center";
-  const w = ctx.measureText(text).width + 8;
-  ctx.fillStyle = css("--panel"); ctx.globalAlpha = 0.85; ctx.fillRect(x - w / 2, y - 22, w, 14); ctx.globalAlpha = 1;
-  ctx.fillStyle = css("--fg"); ctx.fillText(text, x, y - 11.5);
+  const placed = [];
+  for (const [text, x, y] of labels.sort((a, b) => a[3] - b[3])) {
+    const w = ctx.measureText(text).width + 8, r = [x - w / 2, y - 22, x + w / 2, y - 8];
+    if (placed.some(q => r[0] < q[2] + 2 && q[0] < r[2] + 2 && r[1] < q[3] + 1 && q[1] < r[3] + 1)) continue;
+    placed.push(r);
+    ctx.fillStyle = css("--panel"); ctx.globalAlpha = 0.85; ctx.fillRect(r[0], r[1], w, 14); ctx.globalAlpha = 1;
+    ctx.fillStyle = css("--fg"); ctx.fillText(text, x, y - 11.5);
+  }
 }
 
 function tag(text, x, y) {
