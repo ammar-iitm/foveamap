@@ -267,6 +267,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         export_queue = []
 
     for t, fr in enumerate(frames):
+        wall = time.time()                     # when the frame started, to line up with machine monitors
         r = pipe.step(fr)
         ego = r["ego_xy"]
 
@@ -369,7 +370,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         pose = fr["pose"]
         timing_ms = {k: round(v * 1000, 2) for k, v in r["timing"].items()}
         per_frame.append(dict(
-            t=t, ego=[round(float(ego[0]), 3), round(float(ego[1]), 3)],
+            t=t, wall=round(wall, 3), ego=[round(float(ego[0]), 3), round(float(ego[1]), 3)],
             yaw=round(float(np.arctan2(pose[1, 0], pose[0, 0])), 5),
             origins=[[int(o[0]), int(o[1])] for o in g.origins],
             timing_ms=timing_ms, total_ms=round(sum(timing_ms.values()), 2),

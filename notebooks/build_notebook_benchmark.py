@@ -134,8 +134,30 @@ md("""
 Each run writes its metrics, per-frame log and dashboard frames to `results/<DATASET>_run<N>/`. Colab's shared CPUs have busy spells, so compare the runs: a p95 that differs a lot between them is the machine, not the code. On CUDA the first frames include compiling the derive step (they are not counted).
 """)
 code("""
-import pandas as pd
+import pandas as pd, threading, time
 pct = lambda v: '—' if v is None else f'{100 * v:.1f}%'
+!pip -q install nvidia-ml-py
+
+def monitor(path, stop):
+    # every 0.5 s: CPU steal and busy share (/proc/stat), and the GPU's SM clock, power, temperature,
+    # performance state and utilisation (NVML), to line slow frames up with what the machine was doing
+    import pynvml
+    pynvml.nvmlInit()
+    h = pynvml.nvmlDeviceGetHandleByIndex(0)
+    cpu = lambda: [int(v) for v in open('/proc/stat').readline().split()[1:9]]
+    prev = cpu()
+    with open(path, 'w') as fh:
+        fh.write('time,steal_pct,busy_pct,sm_mhz,power_w,temp_c,pstate,gpu_util\\n')
+        while not stop.wait(0.5):
+            cur = cpu()
+            d = [c - p for c, p in zip(cur, prev)]
+            prev, tot = cur, max(sum(d), 1)       # user nice system idle iowait irq softirq steal
+            fh.write(f'{time.time():.3f},{100 * d[7] / tot:.1f},{100 * (tot - d[3] - d[4]) / tot:.1f},'
+                     f'{pynvml.nvmlDeviceGetClockInfo(h, pynvml.NVML_CLOCK_SM)},'
+                     f'{pynvml.nvmlDeviceGetPowerUsage(h) / 1000:.1f},'
+                     f'{pynvml.nvmlDeviceGetTemperature(h, pynvml.NVML_TEMPERATURE_GPU)},'
+                     f'{pynvml.nvmlDeviceGetPerformanceState(h)},{pynvml.nvmlDeviceGetUtilizationRates(h).gpu}\\n')
+            fh.flush()
 
 def run(n):
     out, log = f'results/{DATASET}_run{n}', f'benchmark_{DATASET}_run{n}.log'
@@ -143,10 +165,20 @@ def run(n):
            '--scene', SCENE, '--ckpt', CKPT, '--grid', 'torch', '--out', out]
     if FRAMES:
         cmd += ['--max-frames', str(FRAMES)]
-    with open(log, 'w') as fh:
-        if subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT).returncode:
-            print(open(log).read()[-3000:])
-            raise RuntimeError(f'benchmark run {n} failed (log above)')
+    stop = threading.Event()
+    mon = threading.Thread(target=monitor, args=(f'monitor_{DATASET}_run{n}.csv', stop), daemon=True)
+    mon.start()
+    try:
+        with open(log, 'w') as fh:
+            if subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT).returncode:
+                print(open(log).read()[-3000:])
+                raise RuntimeError(f'benchmark run {n} failed (log above)')
+    finally:
+        stop.set()
+        mon.join()
+    m = pd.read_csv(f'monitor_{DATASET}_run{n}.csv')
+    print(f'run {n} machine: CPU steal max {m.steal_pct.max():.0f}%, mean {m.steal_pct.mean():.1f}%; '
+          f'GPU SM clock {m.sm_mhz.min()}-{m.sm_mhz.max()} MHz, {m.temp_c.max()} C max, P-states {sorted(m.pstate.unique())}')
     return json.load(open(f'{out}/metrics.json'))['summary']
 
 for n in range(1, RUNS + 1):
@@ -179,12 +211,13 @@ code("""
 md("""
 ## 5. Download the results
 
-The zip holds the profile, every run's metrics and log, and run 1's dashboard frames. A copy is also saved to `MyDrive/foveamap_data/benchmark_results/`.
+The zip holds the profile, every run's metrics, log and machine monitor (CPU steal, GPU clock and power every 0.5 s), and run 1's dashboard frames. A copy is also saved to `MyDrive/foveamap_data/benchmark_results/`.
 """)
 code("""
 import time
 name = f'foveamap_{DATASET}_benchmark_{time.strftime("%Y%m%d_%H%M")}.zip'
 files_ = ['profile.txt'] + [f'benchmark_{DATASET}_run{n}.log' for n in range(1, RUNS + 1)] + \\
+         [f'monitor_{DATASET}_run{n}.csv' for n in range(1, RUNS + 1)] + \\
          [f'results/{DATASET}_run{n}/metrics.json' for n in range(1, RUNS + 1)] + [f'results/{DATASET}_run1']
 !zip -qr /content/$name {' '.join(files_)}
 drive.mount('/content/drive')
