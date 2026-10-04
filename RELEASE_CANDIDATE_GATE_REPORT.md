@@ -51,16 +51,16 @@ OpenCode completed the Development Readiness pass (Phase 13). Its work was fully
 ### Baseline Verification
 
 - **Full Suite (`pytest -q`):**
-  - **Result:** **435 passed, 5 skipped, 0 failed** in 692.91s
+  - **Result:** **440 passed, 5 skipped, 0 failed** in 635.26s
   - **Skips:** Exactly 5 hardware-gated tests (3 requiring physical CUDA GPU, 2 requiring native ROS 2 `rclpy`). All skips contain explicit reason strings.
-  - **Zero Regressions:** Exact parity maintained from Phase 12 deployment hardening.
+  - **Non-Regression Locks:** Added explicit tests for packed confidence interpretation, 3-frame overhang ground persistence, clearance cases A-D, and untrained model warnings.
 
 - **Fast Suite (`python scripts/dev.py test-fast`):**
   - Command: `pytest -q -m "not cuda and not ros2 and not slow"`
-  - **Result:** **435 passed, 5 deselected, 0 failed** in 686.75s
+  - **Result:** **440 passed, 5 deselected, 0 failed** in 628.15s
 
 - **Hardware Marker Check (`pytest -q -m "cuda or ros2"`):**
-  - **Result:** **5 skipped, 435 deselected, 0 failed** in 7.44s
+  - **Result:** **5 skipped, 440 deselected, 0 failed** in 7.44s
 
 - **Unit Hardening Subset (`python scripts/dev.py test-unit`):**
   - **Result:** **99 passed, 1 skipped** in 48.94s
