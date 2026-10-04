@@ -1019,6 +1019,7 @@ class TorchFoveatedGrid(FoveatedGrid):
                     "dynamic": dyn,
                     "state": state,
                     "ground": float(ground_v) if not np.isnan(ground_v) else None,
+                    "ground_elev": float(ground_v) if not np.isnan(ground_v) else None,
                     "z_min": float(z_min_v) if not np.isnan(z_min_v) else None,
                     "z_max": float(z_max_v) if not np.isnan(z_max_v) else None,
                     "rough": float(rough_v) if not np.isnan(rough_v) else None,

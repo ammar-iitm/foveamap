@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import os
 import time
 from typing import Any, Sequence, Type
+import warnings
 
 import numpy as np
 import torch
@@ -422,6 +423,12 @@ class RangeUNetBackend(PerceptionBackend):
                     "Randomly initialized weights are forbidden to prevent silent perception corruption. "
                     "Specify a valid checkpoint path or use ClassicalFallbackBackend."
                 )
+            warnings.warn(
+                "RangeUNetBackend is running with UNTRAINED / RANDOM WEIGHTS (allow_untrained=True). "
+                "This mode is strictly for development and testing and must NEVER be used in production.",
+                UserWarning,
+                stacklevel=2,
+            )
         else:
             if not os.path.isfile(config.checkpoint_path):
                 raise CheckpointNotFoundError(

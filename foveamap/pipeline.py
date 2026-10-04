@@ -279,7 +279,7 @@ def _export_frame(snap, dyn, gstats, tiers, path):
     tiles = [encode_tier(s, d, tr.n) for s, d, tr in zip(snap, dyn, tiers)]
     pub_buf = io.BytesIO()
     Image.fromarray(np.concatenate(tiles, 1)).save(pub_buf, format="PNG", compress_level=1)
-    gt_tiles = [encode_gt(gs, ((s.conf >> 4) * 17).astype(np.uint8), tr.n) for gs, s, tr in zip(gstats, snap, tiers)]
+    gt_tiles = [encode_gt(gs, np.clip(np.round(s.primary_confidence * 255.0), 0, 255).astype(np.uint8), tr.n) for gs, s, tr in zip(gstats, snap, tiers)]
     buf = io.BytesIO()
     Image.fromarray(np.concatenate(tiles + gt_tiles, 1)).save(buf, format="PNG", optimize=False, compress_level=6)
     if path is not None:

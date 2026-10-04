@@ -24,7 +24,7 @@ from foveamap.core.confidence import (
     unpack_primary_confidence_torch,
     unpack_secondary_confidence_torch,
 )
-from foveamap.core.config import FoveaMapConfig
+from foveamap.core.config import FoveaMapConfig, PerceptionConfig, SensorConfig
 from foveamap.core.ontology import NUM_CLASSES, ROAD, BUILDING, VEHICLE
 from foveamap.grid import UNKNOWN
 from foveamap.core.contracts import MapSnapshot
@@ -35,6 +35,7 @@ from foveamap.core.exceptions import (
 from foveamap.runtime.perception import (
     CheckpointNotFoundError,
     DevicePerceptionResult,
+    RangeUNetBackend,
 )
 from foveamap.grid import FoveatedGrid
 from foveamap.grid_torch import TorchFoveatedGrid
@@ -149,6 +150,37 @@ class TestBug2PackedConfidenceInterpretation:
         assert b_mixed2 == 0x0F
         assert unpack_primary_confidence_np(b_mixed2) == 0.0
         assert unpack_secondary_confidence_np(b_mixed2) == 1.0
+
+    def test_packed_confidence_not_interpreted_as_scalar(self):
+        """Proves primary and secondary confidence are not equal to the packed byte."""
+        # For byte 0xF0 (240 in decimal), primary is 1.0 (not 240.0)
+        packed_byte = 0xF0
+        p = unpack_primary_confidence_np(packed_byte)
+        s = unpack_secondary_confidence_np(packed_byte)
+        assert p == 1.0
+        assert p != float(packed_byte)
+        assert s == 0.0
+
+        # For byte 0x0F (15 in decimal), secondary is 1.0 (not 15.0)
+        packed_byte2 = 0x0F
+        p2 = unpack_primary_confidence_np(packed_byte2)
+        s2 = unpack_secondary_confidence_np(packed_byte2)
+        assert p2 == 0.0
+        assert s2 == 1.0
+        assert s2 != float(packed_byte2)
+
+    def test_round_trip_all_nibbles(self):
+        """All 16 nibble combinations from 0 to 15 must round-trip exactly."""
+        for p_nibble in range(16):
+            for s_nibble in range(16):
+                p_in = p_nibble / 15.0
+                s_in = s_nibble / 15.0
+                packed = pack_confidence_np(p_in, s_in)
+                assert packed == ((p_nibble << 4) | s_nibble)
+                p_out = unpack_primary_confidence_np(packed)
+                s_out = unpack_secondary_confidence_np(packed)
+                assert pytest.approx(p_out, abs=1e-5) == p_in
+                assert pytest.approx(s_out, abs=1e-5) == s_in
 
     def test_pack_unpack_bounds_torch(self):
         p = torch.tensor([0.0, 1.0, 1.0, 0.0], dtype=torch.float32)
@@ -283,6 +315,58 @@ class TestBug3GroundClassPersistence:
         assert q_np["secondary_class"] == ROAD
         assert q_th["secondary_class"] == ROAD
 
+    def test_ground_persists_under_overhang_three_frames_adversarial_numpy_and_torch(self):
+        """Frame 1: Ground/road beneath an overhang.
+        Frame 2: Elevated obstacle/overhang observed above the same horizontal location.
+        Frame 3: Query the underlying ground -> remains road and is_traversable.
+        """
+        for engine, GridClass in [("numpy", FoveatedGrid), ("torch", TorchFoveatedGrid)]:
+            kwargs = {"device": "cpu"} if engine == "torch" else {}
+            grid = GridClass("spec", fuse=True, **kwargs)
+
+            # Frame 1: Road beneath overhang
+            xy_f1 = np.array([[2.0, 0.0], [2.05, 0.05], [1.95, -0.05]], dtype=np.float32)
+            z_f1 = np.zeros(3, dtype=np.float32)
+            p_f1 = np.repeat(np.eye(NUM_CLASSES)[[ROAD]].astype(np.float32), 3, axis=0)
+            m_f1 = np.zeros(3, dtype=bool)
+            if engine == "torch":
+                grid.update(torch.from_numpy(xy_f1), torch.from_numpy(z_f1), torch.from_numpy(p_f1), torch.from_numpy(m_f1), (0.0, 0.0))
+            else:
+                grid.update(xy_f1, z_f1, p_f1, m_f1, (0.0, 0.0))
+
+            q1 = grid.query_point(2.0, 0.0)
+            assert q1["primary_class"] == ROAD
+            assert grid.is_traversable(2.0, 0.0, clearance_req=2.0) is True
+
+            # Frame 2: Elevated obstacle/overhang at 2.5m above ground (1 frame of overhang)
+            xy_f2 = np.array([[2.0, 0.0], [2.05, 0.05]], dtype=np.float32)
+            z_f2 = np.full(2, 2.5, dtype=np.float32)
+            p_f2 = np.repeat(np.eye(NUM_CLASSES)[[BUILDING]].astype(np.float32), 2, axis=0)
+            m_f2 = np.zeros(2, dtype=bool)
+            if engine == "torch":
+                grid.update(torch.from_numpy(xy_f2), torch.from_numpy(z_f2), torch.from_numpy(p_f2), torch.from_numpy(m_f2), (0.0, 0.0))
+            else:
+                grid.update(xy_f2, z_f2, p_f2, m_f2, (0.0, 0.0))
+
+            # Query after ONE frame of overhang: single frame must NOT erase ground
+            q2 = grid.query_point(2.0, 0.0)
+            assert q2["primary_class"] == ROAD
+            assert q2["ground_elev"] == pytest.approx(0.0, abs=0.05)
+            assert grid.is_traversable(2.0, 0.0, clearance_req=2.0) is True
+
+            # Frame 3: Additional observation of elevated obstacle/overhang
+            if engine == "torch":
+                grid.update(torch.from_numpy(xy_f2), torch.from_numpy(z_f2), torch.from_numpy(p_f2), torch.from_numpy(m_f2), (0.0, 0.0))
+            else:
+                grid.update(xy_f2, z_f2, p_f2, m_f2, (0.0, 0.0))
+
+            # Query after repeated overhang: ground persists in secondary evidence and remains traversable
+            q3 = grid.query_point(2.0, 0.0)
+            assert q3["primary_class"] == BUILDING
+            assert q3["secondary_class"] == ROAD
+            assert q3["ground_elev"] == pytest.approx(0.0, abs=0.05)
+            assert grid.is_traversable(2.0, 0.0, clearance_req=2.0) is True
+
     def test_reset_clears_ground_persistence(self):
         grid = FoveatedGrid("spec")
         xy = np.array([[2.0, 0.0]], dtype=np.float32)
@@ -379,6 +463,45 @@ class TestBug4ClearanceTraversabilitySemantics:
         assert grid_np.is_traversable(1.0, 0.0, clearance_req=2.5) is True
         assert grid_th.is_traversable(1.0, 0.0, clearance_req=2.5) is True
 
+    def test_clearance_cases_a_b_c_d(self):
+        """Explicitly tests Cases A, B, C, D:
+        Case A: clearance=None, clearance_req=0.0 -> True (traversable)
+        Case B: clearance=None, clearance_req=2.5 -> True (unlimited headroom)
+        Case C: finite clearance (1.5m) < req (2.5m) -> False (blocked)
+        Case D: finite clearance (3.5m) >= req (2.5m) -> True (accepted)
+        """
+        for engine, GridClass in [("numpy", FoveatedGrid), ("torch", TorchFoveatedGrid)]:
+            kwargs = {"device": "cpu"} if engine == "torch" else {}
+            grid = GridClass("spec", **kwargs)
+
+            xy = np.array([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]], dtype=np.float32)
+            z = np.zeros(3, dtype=np.float32)
+            p = np.repeat(np.eye(NUM_CLASSES)[[ROAD]].astype(np.float32), 3, axis=0)
+            m = np.zeros(3, dtype=bool)
+
+            if engine == "torch":
+                grid.update(torch.from_numpy(xy), torch.from_numpy(z), torch.from_numpy(p), torch.from_numpy(m), (0.0, 0.0))
+            else:
+                grid.update(xy, z, p, m, (0.0, 0.0))
+
+            # Point 1 (1.0, 0.0): no overhead returns -> clearance is None
+            # Case A:
+            assert grid.is_traversable(1.0, 0.0, clearance_req=0.0) is True
+            # Case B:
+            assert grid.is_traversable(1.0, 0.0, clearance_req=2.5) is True
+
+            # Point 2 (2.0, 0.0): Set clearance to 1.5m (below 2.5m)
+            c2 = grid.query_point(2.0, 0.0)["cell_coord"]
+            grid.state[0].clear[c2[0], c2[1]] = int(1.5 / 0.02)
+            # Case C:
+            assert grid.is_traversable(2.0, 0.0, clearance_req=2.5) is False
+
+            # Point 3 (3.0, 0.0): Set clearance to 3.5m (above 2.5m)
+            c3 = grid.query_point(3.0, 0.0)["cell_coord"]
+            grid.state[0].clear[c3[0], c3[1]] = int(3.5 / 0.02)
+            # Case D:
+            assert grid.is_traversable(3.0, 0.0, clearance_req=2.5) is True
+
 
 # ==============================================================================
 # BUG #5: CHECKPOINT SAFETY / UNTRAINED MODEL PATH REGRESSION TESTS
@@ -426,3 +549,10 @@ class TestBug5CheckpointSafety:
             assert "fps" in summary
             assert "latency_ms" in summary
             assert len(per_frame) == 1
+
+    def test_range_unet_backend_untrained_warning(self):
+        p_cfg = PerceptionConfig(checkpoint_path=None, num_classes=9)
+        s_cfg = SensorConfig(name="sim", n_rows=64, n_cols=1024)
+        with pytest.warns(UserWarning, match="UNTRAINED / RANDOM WEIGHTS"):
+            backend = RangeUNetBackend(p_cfg, s_cfg, torch.device("cpu"), allow_untrained=True)
+            assert backend.is_ready is True
