@@ -100,6 +100,7 @@ button, input, select { font: inherit; color: inherit; }
   .rail { overflow: visible; }
 }
 .legbtn { display: none; position: absolute; right: 10px; bottom: 10px; }
+.livetag { color: var(--good, #2e9d5b); font-weight: 600; }
 @media (max-width: 520px) { .legend { display: none; bottom: 48px; } .legend.open { display: grid; } .legbtn { display: inline-block; } .tiles { grid-template-columns: 1fr 1fr; } .tile .val { font-size: 21px; } .mapwrap { height: 60vh; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -199,10 +200,16 @@ const S = {
 // ---------------------------------------------------------------- data
 // Which replay to show: site/data/datasets.json lists them ([{id, label, title}], first is the
 // default) and ?data=<id> picks one; without the list (a local run) the data sits in data/ itself.
-async function dataDir() {
-  let list;
-  try { list = await (await fetch("data/datasets.json")).json(); } catch (e) { return "data"; }
-  if (!Array.isArray(list) || !list.length) return "data";
+async function datasetList() {
+  try {
+    const r = await fetch("data/datasets.json");
+    const list = r.ok ? await r.json() : null;
+    return Array.isArray(list) && list.length ? list : null;
+  } catch (e) { return null; }
+}
+
+function dataDir(list) {
+  if (!list) return "data";
   const want = new URLSearchParams(location.search).get("data");
   const pick = list.find(d => d.id === want) || list[0];
   if (list.length > 1) {
@@ -219,8 +226,62 @@ async function dataDir() {
   return `data/${pick.id}`;
 }
 
+// Live mode: scripts/live_server.py serves this page next to live/state.json and live/tiles.bin
+async function liveState() {
+  try {
+    const r = await fetch("live/state.json", { cache: "no-store" });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+async function startLive(st) {
+  S.live = true;
+  S.M = { summary: st.summary, frames: st.history || [] };
+  for (const id of ["b-prev", "b-play", "b-next", "scrub"]) $(id).hidden = true;
+  $("frameno").classList.add("livetag");
+  $("acc-sub").textContent = "not computed live";
+  $("c-acc").innerHTML = `<p class="sec" style="margin:4px 0">Accuracy needs ground truth, so the live view does not compute it. The benchmark notebook measures it on the same recording.</p>`;
+  $("loading").textContent = "Waiting for the first frame…";
+  drawMemory();
+  pollLive();
+}
+
+async function pollLive() {
+  try {
+    const st = await liveState();
+    if (st && st.frame && st.frame.t !== S.lastT) {
+      const r = await fetch("live/tiles.bin", { cache: "no-store" });
+      const t = +r.headers.get("X-Frame"), buf = new Uint8Array(await r.arrayBuffer());
+      const tiers = st.summary.tiers, pred = [], gt = [];
+      let off = 0;
+      for (const tr of tiers) { const n3 = tr.n * tr.n * 3; pred.push(buf.subarray(off, off + n3)); gt.push(new Uint8Array(n3)); off += n3; }
+      if (off === buf.length) {
+        S.raw.set(t, { pred, gt });
+        if (S.raw.size > 12) S.raw.delete(S.raw.keys().next().value);
+        S.M = { summary: st.summary, frames: st.history };
+        const i = S.M.frames.findIndex(f => f.t === t);
+        if (i >= 0) {
+          S.lastT = t;
+          $("loading").hidden = true;
+          const s = st.summary;
+          $("source").textContent = $("source").title = `${s.source} · live: fed at ${s.hz} Hz · ${s.frames_processed} frames processed${s.late_frames ? `, ${s.late_frames} late` : ""}${s.finished ? " · finished" : ""}`;
+          if (s.fps != null) fillKpis();
+          setFrame(i);
+          $("frameno").textContent = `● live · frame ${t}`;
+        }
+      }
+    }
+  } catch (e) { /* the server may be restarting: try again */ }
+  setTimeout(pollLive, 150);
+}
+
 async function load() {
-  const D = await dataDir();
+  const list = await datasetList();
+  if (!list) {                          // no published replays here: maybe the live server
+    const st = await liveState();
+    if (st) return startLive(st);
+  }
+  const D = dataDir(list);
   const M = await (await fetch(`${D}/metrics.json`)).json();
   S.M = M;
   const sum = M.summary;
@@ -251,8 +312,12 @@ async function load() {
 }
 const fmtCm = m => m < 1 ? `${Math.round(m * 100)} cm` : `${m} m`;
 
+const frameKey = i => (S.M.frames[i] && S.M.frames[i].t != null) ? S.M.frames[i].t : i;
+
 function rawFrame(t) {
-  if (S.raw.has(t)) return S.raw.get(t);
+  const key = frameKey(t);
+  if (S.raw.has(key)) return S.raw.get(key);
+  if (S.live) return null;
   const im = S.imgs[t];
   if (!im || !im.complete || !im.naturalWidth) return null;
   const c = document.createElement("canvas");
@@ -274,7 +339,7 @@ function rawFrame(t) {
       off += n;
     }
   }
-  S.raw.set(t, out);
+  S.raw.set(key, out);
   if (S.raw.size > 12) S.raw.delete(S.raw.keys().next().value);
   return out;
 }
@@ -326,7 +391,7 @@ const ramp = (stops, u) => { const x = u * (stops.length - 1), i = Math.min(stop
 const mix = (a, b, f) => [0, 1, 2].map(i => Math.round(a[i] + (b[i] - a[i]) * f));
 
 function tiles() {
-  const key = `${S.t}|${S.layer}|${JSON.stringify(S.ov)}|${isLight()}`;
+  const key = `${frameKey(S.t)}|${S.layer}|${JSON.stringify(S.ov)}|${isLight()}`;
   if (S.painted && S.painted.key === key) return S.painted.c;
   const raw = rawFrame(S.t);
   if (!raw) return null;
@@ -546,6 +611,7 @@ function drawMemory() {
     ["FoveaMap, 2 tiers", m.foveated_spec, 1],
     ["Uniform 2.5D grid, 50 cm", m["uniform_50cm_2.5d"], 3],
   ];
+  for (let i = rows.length - 1; i >= 0; i--) if (rows[i][1] == null) rows.splice(i, 1);    // not measured (live)
   const W = 356, left = 140, right = 58, rowH = 21, top = 8, H = top + rows.length * rowH + 22;
   const lo = 5, hi = 10, X = b => left + 6 + (Math.log10(b) - lo) / (hi - lo) * (W - left - right - 12);
   let g = "";
@@ -593,7 +659,8 @@ function drawLatency() {
   g += T(0, H - 2, `total per frame, ${S.M.frames.length} frames`, { size: 10 });
   $("c-lat").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Latency by stage">${g}</svg>`;
   $("lat-frame").textContent = `frame ${S.t}: ${total.toFixed(0)} ms${S.t < WARM && S.M.frames.length > WARM ? " (warm-up, not counted)" : ""}`;
-  $("lat-facts").innerHTML = `<dt>Foveated grid engine, mean</dt><dd>${s.grid_only_ms.toFixed(0)} ms</dd><dt>Same engine, uniform 5 cm grid</dt><dd>${Math.round(s.uniform5_grid_ms).toLocaleString("en-US")} ms</dd><dt style="grid-column:1/-1">Measured on a ${s.hardware.replace("cloud VM, ", "cloud VM with ")}</dt>`;
+  const ms = v => v == null ? "—" : `${Math.round(v).toLocaleString("en-US")} ms`;
+  $("lat-facts").innerHTML = `<dt>Foveated grid engine, mean</dt><dd>${ms(s.grid_only_ms)}</dd>${s.uniform5_grid_ms == null ? "" : `<dt>Same engine, uniform 5 cm grid</dt><dd>${ms(s.uniform5_grid_ms)}</dd>`}<dt style="grid-column:1/-1">${S.live ? "Running on" : "Measured on"} a ${s.hardware.replace("cloud VM, ", "cloud VM with ")}</dt>`;
 }
 
 function drawAccuracy() {
@@ -716,7 +783,7 @@ $("b-next").onclick = () => { pause(); setFrame(S.t + 1); };
 $("b-play").onclick = () => S.playing ? pause() : play();
 $("scrub").oninput = e => { pause(); setFrame(+e.target.value); };
 let timer = null;
-function play() { S.playing = true; $("b-play").textContent = "❚❚"; $("b-play").setAttribute("aria-label", "Pause"); timer = setInterval(() => setFrame(S.t + 1 >= S.M.frames.length ? 0 : S.t + 1), 1000 / (S.M.summary.hz || 10)); }
+function play() { if (S.live) return; S.playing = true; $("b-play").textContent = "❚❚"; $("b-play").setAttribute("aria-label", "Pause"); timer = setInterval(() => setFrame(S.t + 1 >= S.M.frames.length ? 0 : S.t + 1), 1000 / (S.M.summary.hz || 10)); }
 function pause() { S.playing = false; $("b-play").textContent = "▶︎"; $("b-play").setAttribute("aria-label", "Play"); clearInterval(timer); }
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" && e.key !== " ") return;
