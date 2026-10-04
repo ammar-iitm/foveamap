@@ -447,6 +447,97 @@ def test_http_rejects_non_loopback_bind():
     m = _active()
     with pytest.raises(SDKError):
         FoveaMapHttpServer(m, host="0.0.0.0")
+    # Allowed when api_key is configured
+    s_auth = FoveaMapHttpServer(m, host="0.0.0.0", api_key="auth-secret")
+    assert s_auth.api_key == "auth-secret"
+    # Allowed when allow_insecure_remote is explicitly True
+    s_remote = FoveaMapHttpServer(m, host="0.0.0.0", allow_insecure_remote=True)
+    assert s_remote is not None
+
+
+def test_http_security_auth_and_cors():
+    from foveamap.sdk.http import FoveaMapHttpServer
+    m = _active()
+    server = FoveaMapHttpServer(
+        m,
+        api_key="secret-token-42",
+        allowed_origins=["https://dashboard.example.com"],
+    )
+    url = server.start_background()
+    try:
+        # GET /health remains accessible for unauthenticated orchestrator health checks
+        code, health = _get(url, "/health")
+        assert code == 200
+
+        # POST /reset requires authentication
+        code, err = _post(url, "/reset", {})
+        assert code == 401
+        assert err["type"] == "Unauthorized"
+
+        # POST with wrong bearer token fails
+        req_bad = urllib.request.Request(
+            url + "/reset",
+            data=b"{}",
+            headers={"Content-Type": "application/json", "Authorization": "Bearer wrong-token"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req_bad, timeout=10) as r:
+                assert r.status == 200
+        except urllib.error.HTTPError as e:
+            assert e.code == 401
+
+        # POST with correct Bearer token succeeds
+        req_ok = urllib.request.Request(
+            url + "/reset",
+            data=b"{}",
+            headers={"Content-Type": "application/json", "Authorization": "Bearer secret-token-42"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req_ok, timeout=10) as r:
+            assert r.status == 200
+
+        # POST with correct X-API-Key succeeds
+        req_api_key = urllib.request.Request(
+            url + "/reset",
+            data=b"{}",
+            headers={"Content-Type": "application/json", "X-API-Key": "secret-token-42"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req_api_key, timeout=10) as r:
+            assert r.status == 200
+
+        # CORS on POST: unauthorized origin is not reflected and wildcard is NOT sent
+        req_cors_bad = urllib.request.Request(
+            url + "/reset",
+            data=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer secret-token-42",
+                "Origin": "https://evil.attacker.com",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req_cors_bad, timeout=10) as r:
+            cors_hdr = r.headers.get("Access-Control-Allow-Origin")
+            assert cors_hdr != "*"
+            assert cors_hdr != "https://evil.attacker.com"
+
+        # CORS on POST: allowed origin is reflected
+        req_cors_ok = urllib.request.Request(
+            url + "/reset",
+            data=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer secret-token-42",
+                "Origin": "https://dashboard.example.com",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req_cors_ok, timeout=10) as r:
+            assert r.headers.get("Access-Control-Allow-Origin") == "https://dashboard.example.com"
+    finally:
+        server.stop()
 
 
 # --------------------------------------- closure: error state, rays, export

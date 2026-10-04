@@ -22,10 +22,12 @@ Endpoints:
 """
 from __future__ import annotations
 
+import hmac
 import json
+import logging
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -42,6 +44,8 @@ from .errors import SDKError, SDKLifecycleError, SDKQueryError
 MAX_BODY_BYTES = 8 * 1024 * 1024
 MAX_POINTS_PER_REQUEST = 200_000
 
+logger = logging.getLogger("foveamap.http")
+
 
 def _json_bytes(payload: Any) -> bytes:
     return json.dumps(payload).encode("utf-8")
@@ -49,24 +53,69 @@ def _json_bytes(payload: Any) -> bytes:
 
 class _Handler(BaseHTTPRequestHandler):
     server: FoveaMapHttpServer  # type: ignore[assignment]
+    timeout = 10.0
 
-    def log_message(self, *args: Any) -> None:  # keep quiet by default
-        pass
+    def log_message(self, format: str, *args: Any) -> None:
+        # Structured access logging via standard logger instead of stderr prints
+        logger.debug("HTTP %s: %s", self.client_address[0], format % args)
 
-    def _send(self, code: int, payload: Any) -> None:
+    def _get_allowed_origin(self) -> str | None:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return None
+        allowed = getattr(self.server, "allowed_origins", None)
+        if allowed:
+            return origin if origin in allowed else None
+        # Default policy: allow same-host and loopback origins
+        try:
+            parsed = urlparse(origin)
+            if parsed.hostname in ("127.0.0.1", "localhost", "::1"):
+                return origin
+        except Exception:
+            return None
+        return None
+
+    def _check_auth(self) -> bool:
+        expected = getattr(self.server, "api_key", None)
+        if not expected:
+            return True
+        auth_hdr = self.headers.get("Authorization", "")
+        if auth_hdr.startswith("Bearer "):
+            token = auth_hdr[7:].strip()
+            if hmac.compare_digest(token, expected):
+                return True
+        api_key_hdr = self.headers.get("X-API-Key", "").strip()
+        if api_key_hdr and hmac.compare_digest(api_key_hdr, expected):
+            return True
+        return False
+
+    def _send(self, code: int, payload: Any, is_state_changing: bool = False) -> None:
         body = _json_bytes(payload)
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self._get_allowed_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        elif not is_state_changing:
+            # Allow read-only monitoring dashboards wildcard access if no origin specified
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
+        if is_state_changing:
+            logger.info("HTTP state modification: %s %s from %s -> status %d", self.command, self.path, self.client_address[0], code)
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self._get_allowed_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        else:
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -82,6 +131,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._fail(500, "InternalError", f"Failed to serve file: {type(exc).__name__}")
 
     def _fail(self, code: int, kind: str, message: str) -> None:
+        logger.warning("HTTP %d (%s): %s %s from %s - %s", code, kind, self.command, self.path, self.client_address[0], message)
         self._send(code, {"api_version": API_VERSION, "error": str(message)[:500], "type": kind})
 
     def _read_json(self) -> Any:
@@ -164,6 +214,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         try:
             parsed = urlparse(self.path)
+            if not self._check_auth():
+                return self._fail(401, "Unauthorized", "Valid Bearer token or X-API-Key required")
             sdk = self.server.sdk
             if parsed.path == "/frames":
                 try:
@@ -181,13 +233,13 @@ class _Handler(BaseHTTPRequestHandler):
                 except FoveaMapError as exc:
                     return self._fail(422, type(exc).__name__, str(exc))
                 self._send(200, {"api_version": API_VERSION, "snapshot": view.to_dict(),
-                                 "defaults_applied": defaults})
+                                 "defaults_applied": defaults}, is_state_changing=True)
             elif parsed.path == "/reset":
                 try:
                     sdk.reset()
                 except SDKLifecycleError as exc:
                     return self._fail(409, "SDKLifecycleError", str(exc))
-                self._send(200, {"api_version": API_VERSION, "status": sdk.status().to_dict()})
+                self._send(200, {"api_version": API_VERSION, "status": sdk.status().to_dict()}, is_state_changing=True)
             elif parsed.path == "/lifecycle":
                 try:
                     body = self._read_json()
@@ -205,7 +257,7 @@ class _Handler(BaseHTTPRequestHandler):
                         return self._fail(400, "SDKError", "action must be 'configure', 'start' or 'stop'")
                 except SDKLifecycleError as exc:
                     return self._fail(409, "SDKLifecycleError", str(exc))
-                self._send(200, {"api_version": API_VERSION, "status": sdk.status().to_dict()})
+                self._send(200, {"api_version": API_VERSION, "status": sdk.status().to_dict()}, is_state_changing=True)
             else:
                 self._fail(404, "NotFound", f"unknown endpoint {parsed.path!r}")
         except Exception as exc:
@@ -287,21 +339,32 @@ class FoveaMapHttpServer:
         port: int = 0,
         dashboard_dir: str | Path | None = None,
         allow_insecure_remote: bool = False,
+        api_key: str | None = None,
+        allowed_origins: list[str] | None = None,
     ) -> None:
         if not isinstance(sdk, FoveaMap):
             raise SDKError(f"HTTP server requires a FoveaMap session, got {type(sdk).__name__}")
-        remote_allowed = allow_insecure_remote or os.environ.get("FOVEAMAP_ALLOW_INSECURE_REMOTE", "").strip().lower() in ("1", "true", "yes")
+        self.api_key = api_key or os.environ.get("FOVEAMAP_API_KEY") or None
+        remote_allowed = (
+            allow_insecure_remote
+            or (self.api_key is not None)
+            or os.environ.get("FOVEAMAP_ALLOW_INSECURE_REMOTE", "").strip().lower() in ("1", "true", "yes")
+        )
         if host not in ("127.0.0.1", "localhost", "::1"):
             if not remote_allowed:
                 raise SDKError(
                     f"Refusing non-loopback bind {host!r} (explicit local-only policy). "
-                    f"To enable external/container exposure, pass allow_insecure_remote=True or set FOVEAMAP_ALLOW_INSECURE_REMOTE=1."
+                    f"To enable external/container exposure, configure api_key (or FOVEAMAP_API_KEY) or pass allow_insecure_remote=True."
                 )
         self.sdk = sdk
         self.dashboard_dir = Path(dashboard_dir).resolve() if dashboard_dir is not None else None
-        self._server = HTTPServer((host, int(port)), _Handler)
+        self.allowed_origins = allowed_origins
+        self._server = ThreadingHTTPServer((host, int(port)), _Handler)
+        self._server.timeout = 10.0
         self._server.sdk = sdk  # type: ignore[attr-defined]
         self._server.dashboard_dir = self.dashboard_dir  # type: ignore[attr-defined]
+        self._server.api_key = self.api_key  # type: ignore[attr-defined]
+        self._server.allowed_origins = self.allowed_origins  # type: ignore[attr-defined]
         self._thread: threading.Thread | None = None
 
 
