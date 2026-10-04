@@ -77,13 +77,14 @@ DRIVE_CKPT = f'{DATA}/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" 
 restore(f'{DRIVE_CACHE}/index.json', f'{CACHE}/index.json')
 restore(f'{DRIVE_CACHE}/{SCENE}.pkl', f'{CACHE}/{SCENE}.pkl')
 restore(f'{DRIVE_CKPT}/range_unet_semantickitti.pt', 'checkpoints/range_unet_semantickitti.pt')
-print('ready')
+drive.flush_and_unmount()       # the Drive client's background work competes for the 2 vCPUs while timing
+print('ready (Drive unmounted until the results are saved)')
 """)
 
 md("""
 ## 3. Benchmark
 
-Each run writes its metrics, per-frame log and dashboard frames to `results/semantickitti_run<N>/`. Colab's shared CPUs have busy spells, so compare the runs: a p95 that differs a lot between them is the machine, not the code.
+Each run writes its metrics, per-frame log and dashboard frames to `results/semantickitti_run<N>/`. Colab's shared CPUs have busy spells, so compare the runs: a p95 that differs a lot between them is the machine, not the code. Google Drive stays unmounted while timing, and on CUDA the first frames include compiling the derive step (they are not counted).
 """)
 code("""
 import pandas as pd
@@ -137,6 +138,7 @@ name = f'foveamap_semantickitti_benchmark_{time.strftime("%Y%m%d_%H%M")}.zip'
 files_ = ['profile.txt'] + [f'benchmark_run{n}.log' for n in range(1, RUNS + 1)] + \\
          [f'results/semantickitti_run{n}/metrics.json' for n in range(1, RUNS + 1)] + ['results/semantickitti_run1']
 !zip -qr /content/$name {' '.join(files_)}
+drive.mount('/content/drive')
 os.makedirs(f'{DATA}/benchmark_results', exist_ok=True)
 shutil.copy(f'/content/{name}', f'{DATA}/benchmark_results/{name}')
 from google.colab import files

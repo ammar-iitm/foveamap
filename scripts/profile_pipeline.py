@@ -89,10 +89,15 @@ if __name__ == "__main__":
     print(f"\n{n} frames on {pipe.device} ({torch.cuda.get_device_name(pipe.device) if cuda else 'no CUDA'})")
     print(f"{'stage':10s} {'CPU ms/frame':>13s} {'GPU ms/frame':>13s}")
     by = {e.key: e for e in ka}
+    stage = {}                                  # a stage appears twice: its CPU range and its GPU range
+    for e in ka:
+        if e.key.startswith("stage:"):
+            c, g = stage.get(e.key, (0.0, 0.0))
+            stage[e.key] = (c + total(e, "cpu"), g + total(e, "cuda"))
     for s in STAGES:
-        e = by.get(f"stage:{s}")
-        if e is not None:
-            print(f"{s:10s} {total(e, 'cpu') / 1e3 / n:13.2f} {total(e, 'cuda') / 1e3 / n:13.2f}")
+        if f"stage:{s}" in stage:
+            c, g = stage[f"stage:{s}"]
+            print(f"{s:10s} {c / 1e3 / n:13.2f} {g / 1e3 / n:13.2f}")
     print("\nhost waits per frame:")
     for w in WAITS:
         if w in by:
