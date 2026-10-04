@@ -194,6 +194,33 @@ from google.colab import files
 files.download(f'/content/{name}')
 """)
 
+md("""
+## 6. Live view (optional)
+
+Runs the pipeline live on the same recording: one frame per sensor tick, through features, network, grid, fusion and objects, and opens the dashboard as it goes. The map, objects and latency update as each frame is processed; frames the pipeline can't keep up with are skipped and counted, not queued. `RATE` is how many frames per second are fed in: the recording's own rate by default (1 Hz for SemanticKITTI's every 10th scan, 2 Hz for nuScenes keyframes); a T4 keeps up with 10 Hz or more. Accuracy is not computed live (it needs ground truth; section 3 measures it).
+
+Run `live.terminate()` to stop it.
+""")
+code("""
+import time, urllib.request
+RATE, PORT = None, 8000
+cmd = [sys.executable, 'scripts/live_server.py', '--dataset', DATASET, '--cache', CACHE, '--scene', SCENE,
+       '--ckpt', CKPT, '--port', str(PORT)] + (['--rate', str(RATE)] if RATE else [])
+live = subprocess.Popen(cmd, stdout=open('live.log', 'w'), stderr=subprocess.STDOUT)
+for _ in range(180):                      # the first frame compiles the derive step: up to a minute
+    if live.poll() is not None:
+        print(open('live.log').read())
+        raise RuntimeError('the live server stopped (log above)')
+    try:
+        if json.load(urllib.request.urlopen(f'http://localhost:{PORT}/live/state.json'))['frame']:
+            break
+    except Exception:
+        pass
+    time.sleep(1)
+from google.colab import output
+output.serve_kernel_port_as_window(PORT, anchor_text='Open the live view')
+""")
+
 nb = dict(cells=cells, metadata=dict(
     accelerator="GPU", colab=dict(provenance=[], gpuType="T4"),
     kernelspec=dict(display_name="Python 3", name="python3"),
