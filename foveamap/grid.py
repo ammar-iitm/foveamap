@@ -414,15 +414,18 @@ class FoveatedGrid:
         jj = (org[1] + np.arange(t.n) + 0.5) * t.cell
         return np.stack(np.meshgrid(ii, jj, indexing="ij"), -1)
 
-    def inner_mask(self, k):
-        """Cells of tier k that lie inside tier k-1's window (covered at finer resolution)."""
-        if k == 0:
-            return np.zeros((self.tiers[0].n,) * 2, bool)
+    def inner_box(self, k):
+        """(lo, hi) cell bounds in tier k of tier k-1's window (k >= 1), as integer arrays."""
         tp, op = self.tiers[k - 1], self.origins[k - 1]
         t, o = self.tiers[k], self.origins[k]
         r = t.ratio // tp.ratio
         lo = op // r - o
-        hi = lo + tp.n // r
-        m = np.zeros((t.n, t.n), bool)
-        m[lo[0]:hi[0], lo[1]:hi[1]] = True
+        return lo, lo + tp.n // r
+
+    def inner_mask(self, k):
+        """Cells of tier k that lie inside tier k-1's window (covered at finer resolution)."""
+        m = np.zeros((self.tiers[k].n,) * 2, bool)
+        if k > 0:
+            lo, hi = self.inner_box(k)
+            m[lo[0]:hi[0], lo[1]:hi[1]] = True
         return m

@@ -37,31 +37,38 @@ AREA_SWEEP = {VEHICLE: (0.0, 0.2, 0.5, 1.0, 1.5, 2.0, 3.0), PERSON: (0.0, 0.01, 
 
 
 def _members(grid, snap, dyn, max_age):
-    """Object-class cells of every tier: (cls, moving, x, y, cell size, z_max, coarse i, coarse j)."""
+    """Object-class cells of every tier: (cls, moving, x, y, cell size, z_max, coarse i, coarse j).
+    Moving cells (the dynamic layer) take precedence over static ones in the same place."""
     tiers, origins = grid.tiers, grid.origins
     tc, oc = tiers[-1], np.asarray(origins[-1])
     out = []
     for k, (t, s, o) in enumerate(zip(tiers, snap, origins)):
+        n = t.n
         eff = getattr(s, "eff_cls", s.cls)
-        cls = np.where(IS_OBJECT[eff] & (s.age <= max_age), eff, 255).astype(np.uint8)
-        moving = np.zeros(cls.shape, bool)
+        static = IS_OBJECT[eff] & (s.age <= max_age)
         d = dyn[k] if dyn is not None else None
-        if d is not None and len(d["i"]):
-            di, dj = np.asarray(d["i"]), np.asarray(d["j"])
-            cls[di, dj] = np.asarray(d["cls"], np.uint8)
-            moving[di, dj] = True
-        sel = cls != 255
-        if k > 0:
-            sel &= ~grid.inner_mask(k)             # covered by the finer tier
-        i, j = np.nonzero(sel)
-        if not len(i):
+        didx = (np.asarray(d["i"], np.int64) * n + np.asarray(d["j"], np.int64)) if d is not None else np.zeros(0, np.int64)
+        dcls = np.asarray(d["cls"], np.uint8) if d is not None else np.zeros(0, np.uint8)
+        if k > 0:                                       # cells under the finer tier are covered there
+            lo, hi = grid.inner_box(k)
+            static[lo[0]:hi[0], lo[1]:hi[1]] = False
+            di, dj = didx // n, didx % n
+            out_box = (di < lo[0]) | (di >= hi[0]) | (dj < lo[1]) | (dj >= hi[1])
+            didx, dcls = didx[out_box], dcls[out_box]
+        sidx = np.flatnonzero(static)
+        if len(didx):
+            sidx = sidx[~np.isin(sidx, didx)]
+        idx = np.concatenate([sidx, didx])
+        if not len(idx):
             continue
+        i, j = idx // n, idx % n
         o = np.asarray(o)
         r = tc.ratio // t.ratio
         out.append(dict(
-            cls=cls[i, j], moving=moving[i, j],
+            cls=np.concatenate([eff.ravel()[sidx], dcls]).astype(np.uint8),
+            moving=np.r_[np.zeros(len(sidx), bool), np.ones(len(didx), bool)],
             x=(o[0] + i + 0.5) * t.cell, y=(o[1] + j + 0.5) * t.cell,
-            cell=np.full(len(i), t.cell), z=s.z_max[i, j].astype(np.float32),
+            cell=np.full(len(i), t.cell), z=s.z_max.ravel()[idx].astype(np.float32),
             ci=(o[0] + i) // r - oc[0], cj=(o[1] + j) // r - oc[1]))
     if not out:
         return None
