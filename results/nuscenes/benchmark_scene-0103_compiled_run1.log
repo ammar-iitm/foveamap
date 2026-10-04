@@ -1,0 +1,347 @@
+W1004 07:30:51.462000 3782 torch/_inductor/utils.py:1731] [0/0] Not enough SMs to use max_autotune_gemm mode
+frame   0  total 33751.2 ms  preprocess 417  inference 463  projection 203  fusion 32655  publish 5  objects 8
+frame   1  total    38.7 ms  preprocess 10  inference 4  projection 5  fusion 12  publish 2  objects 5
+frame   2  total    36.9 ms  preprocess 9  inference 4  projection 6  fusion 11  publish 2  objects 5
+frame   3  total    34.1 ms  preprocess 8  inference 4  projection 5  fusion 10  publish 2  objects 5
+frame   4  total    34.6 ms  preprocess 9  inference 4  projection 5  fusion 10  publish 2  objects 5
+frame   5  total    35.8 ms  preprocess 9  inference 4  projection 6  fusion 10  publish 2  objects 5
+frame   6  total    37.2 ms  preprocess 8  inference 5  projection 6  fusion 12  publish 2  objects 5
+frame   7  total    46.0 ms  preprocess 10  inference 6  projection 7  fusion 14  publish 4  objects 5
+frame   8  total    42.6 ms  preprocess 11  inference 5  projection 6  fusion 13  publish 2  objects 5
+frame   9  total    39.6 ms  preprocess 11  inference 5  projection 6  fusion 11  publish 2  objects 5
+frame  10  total    39.8 ms  preprocess 9  inference 4  projection 5  fusion 13  publish 3  objects 5
+frame  11  total    43.0 ms  preprocess 10  inference 5  projection 6  fusion 15  publish 2  objects 4
+frame  12  total    45.3 ms  preprocess 11  inference 5  projection 7  fusion 15  publish 2  objects 5
+frame  13  total    36.9 ms  preprocess 11  inference 5  projection 7  fusion 9  publish 2  objects 3
+frame  14  total    28.6 ms  preprocess 7  inference 3  projection 4  fusion 9  publish 2  objects 3
+frame  15  total    27.9 ms  preprocess 7  inference 3  projection 5  fusion 8  publish 2  objects 3
+frame  16  total    27.3 ms  preprocess 7  inference 3  projection 4  fusion 8  publish 2  objects 3
+frame  17  total    28.0 ms  preprocess 7  inference 3  projection 5  fusion 8  publish 2  objects 3
+frame  18  total    37.1 ms  preprocess 7  inference 4  projection 6  fusion 13  publish 2  objects 5
+frame  19  total    28.8 ms  preprocess 7  inference 3  projection 5  fusion 8  publish 2  objects 3
+frame  20  total    29.3 ms  preprocess 7  inference 3  projection 4  fusion 8  publish 2  objects 4
+frame  21  total    28.4 ms  preprocess 8  inference 3  projection 4  fusion 8  publish 2  objects 3
+frame  22  total    27.3 ms  preprocess 7  inference 3  projection 4  fusion 8  publish 2  objects 3
+frame  23  total    29.8 ms  preprocess 7  inference 3  projection 5  fusion 11  publish 2  objects 3
+frame  24  total    28.2 ms  preprocess 7  inference 3  projection 4  fusion 9  publish 2  objects 3
+frame  25  total    27.2 ms  preprocess 7  inference 3  projection 4  fusion 8  publish 1  objects 3
+frame  26  total    28.2 ms  preprocess 7  inference 3  projection 5  fusion 8  publish 2  objects 3
+frame  27  total    28.8 ms  preprocess 7  inference 3  projection 5  fusion 8  publish 2  objects 4
+frame  28  total    27.6 ms  preprocess 7  inference 3  projection 4  fusion 8  publish 2  objects 3
+frame  29  total    34.9 ms  preprocess 9  inference 5  projection 6  fusion 10  publish 2  objects 3
+frame  30  total    28.6 ms  preprocess 7  inference 3  projection 5  fusion 9  publish 2  objects 3
+frame  31  total    27.7 ms  preprocess 7  inference 3  projection 5  fusion 8  publish 2  objects 3
+frame  32  total    28.0 ms  preprocess 7  inference 3  projection 4  fusion 8  publish 2  objects 3
+frame  33  total    30.2 ms  preprocess 7  inference 4  projection 5  fusion 9  publish 2  objects 4
+frame  34  total    28.2 ms  preprocess 7  inference 3  projection 5  fusion 8  publish 2  objects 3
+frame  35  total    28.6 ms  preprocess 7  inference 3  projection 5  fusion 8  publish 2  objects 4
+frame  36  total    33.2 ms  preprocess 7  inference 3  projection 4  fusion 11  publish 2  objects 6
+frame  37  total    33.2 ms  preprocess 8  inference 4  projection 5  fusion 10  publish 2  objects 4
+frame  38  total    32.2 ms  preprocess 8  inference 4  projection 5  fusion 9  publish 2  objects 4
+frame  39  total    28.9 ms  preprocess 7  inference 3  projection 5  fusion 9  publish 2  objects 3
+{
+  "dataset": "nuscenes",
+  "source": "nuScenes scene-0103 \u00b7 32-beam Lidar \u00b7 labelled keyframes at 2 Hz",
+  "sensor_rows": 32,
+  "hz": 2.0,
+  "profile": "spec",
+  "hardware": "Tesla T4 GPU (FP16 inference) + GPU grid engine",
+  "grid_engine": "torch",
+  "features_engine": "torch",
+  "export_mode": "after",
+  "frames": 40,
+  "latency_ms": {
+    "p50": 29.585,
+    "p95": 43.3165,
+    "p99": 45.752500000000005,
+    "mean": 32.57973684210527
+  },
+  "fps": 30.693925026049442,
+  "grid_only_ms": 15.082368421052628,
+  "uniform5_grid_ms": 4742.434777666706,
+  "stages_ms": {
+    "preprocess": 8.039473684210526,
+    "inference": 3.8010526315789464,
+    "projection": 5.2018421052631565,
+    "fusion": 9.880526315789472,
+    "publish": 1.8950000000000002,
+    "objects": 3.7618421052631574
+  },
+  "export_ms": 112.7242105263158,
+  "memory_bytes": {
+    "foveated_spec": 5120000,
+    "foveated_graded": 9120000,
+    "uniform_50cm_2.5d": 2560000,
+    "uniform_5cm_2.5d": 256000000,
+    "occupancy_2d_5cm": 16000000,
+    "dense_voxel_5cm": 5120000000,
+    "sparse_voxel_5cm_one_sweep": 219850,
+    "raw_sweep": 414368
+  },
+  "memory_saving_vs_uniform5": 50.0,
+  "cells": {
+    "foveated_spec": 320000,
+    "uniform_5cm": 16000000
+  },
+  "tiers": [
+    {
+      "cell": 0.05,
+      "half": 10.0,
+      "n": 400
+    },
+    {
+      "cell": 0.5,
+      "half": 100.0,
+      "n": 400
+    }
+  ],
+  "classes": [
+    "drivable surface",
+    "sidewalk / other flat",
+    "(unused)",
+    "terrain",
+    "vegetation",
+    "manmade / static",
+    "barrier / cone",
+    "vehicle",
+    "person"
+  ],
+  "active_classes": [
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "bands": [
+    "0\u201310 m",
+    "10\u201325 m",
+    "25\u201350 m",
+    "50\u2013100 m"
+  ],
+  "point_miou_by_band": [
+    0.44140749216853303,
+    0.4371742767788836,
+    0.309323427284694,
+    0.15154782878987338
+  ],
+  "grid_miou_by_band": [
+    0.44394763191262226,
+    0.4287876116244216,
+    0.2922698207472815,
+    0.15151276151304155
+  ],
+  "point_miou": 0.44388988131751905,
+  "drivable_iou_grid_0_10": 0.9411597537509159,
+  "drivable_iou_points_0_10": 0.950785275841164,
+  "moving_iou_by_band": [
+    0.4653593922472567,
+    0.33539982735619556,
+    0.13933584388907908,
+    0.13172043010752688
+  ],
+  "moving_iou": 0.37843941851957885,
+  "curb_recall_10m": null,
+  "pothole_recall_10m": null,
+  "pothole_flag_rate_drivable_10m": 0.000390532379318521,
+  "points_lost": 0,
+  "nesting_ok": true,
+  "objects_within_25m": {
+    "vehicle": {
+      "precision": 0.6510416666666666,
+      "recall": 0.6544502617801047,
+      "tp": 250,
+      "fp": 134,
+      "fn": 132
+    },
+    "person": {
+      "precision": 0.3951612903225806,
+      "recall": 0.1828358208955224,
+      "tp": 49,
+      "fp": 75,
+      "fn": 219
+    },
+    "barrier / cone": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "tp": 0,
+      "fp": 64,
+      "fn": 16
+    }
+  },
+  "objects_diagnostics": {
+    "vehicle": {
+      "fp_fragment_share": 0.26119402985074625,
+      "fp_other_class_share": 0.22388059701492538,
+      "median_cells_tp": 12.0,
+      "median_cells_fp": 5.0,
+      "median_cells_fn": 10.0,
+      "fp_cells_quartiles": [
+        4.0,
+        9.75
+      ]
+    },
+    "person": {
+      "fp_fragment_share": 0.13333333333333333,
+      "fp_other_class_share": 0.18666666666666668,
+      "median_cells_tp": 3.0,
+      "median_cells_fp": 2.0,
+      "median_cells_fn": 3.0,
+      "fp_cells_quartiles": [
+        2.0,
+        3.0
+      ]
+    },
+    "barrier / cone": {
+      "fp_fragment_share": 0.015625,
+      "fp_other_class_share": 0.390625,
+      "median_cells_tp": null,
+      "median_cells_fp": 9.0,
+      "median_cells_fn": 7.5,
+      "fp_cells_quartiles": [
+        3.0,
+        16.25
+      ]
+    }
+  },
+  "objects_area_sweep": {
+    "vehicle": [
+      {
+        "min_area_m2": 0.0,
+        "precision": 0.3865652724968314,
+        "recall": 0.7984293193717278,
+        "f1": 0.5209222886421861
+      },
+      {
+        "min_area_m2": 0.2,
+        "precision": 0.5627376425855514,
+        "recall": 0.774869109947644,
+        "f1": 0.6519823788546255
+      },
+      {
+        "min_area_m2": 0.5,
+        "precision": 0.5700389105058365,
+        "recall": 0.7670157068062827,
+        "f1": 0.6540178571428571
+      },
+      {
+        "min_area_m2": 1.0,
+        "precision": 0.6510416666666666,
+        "recall": 0.6544502617801047,
+        "f1": 0.6527415143603134
+      },
+      {
+        "min_area_m2": 1.5,
+        "precision": 0.7606177606177607,
+        "recall": 0.5157068062827225,
+        "f1": 0.6146645865834633
+      },
+      {
+        "min_area_m2": 2.0,
+        "precision": 0.7810945273631841,
+        "recall": 0.4109947643979058,
+        "f1": 0.5385934819897084
+      },
+      {
+        "min_area_m2": 3.0,
+        "precision": 0.8016528925619835,
+        "recall": 0.25392670157068065,
+        "f1": 0.3856858846918489
+      }
+    ],
+    "person": [
+      {
+        "min_area_m2": 0.0,
+        "precision": 0.2757009345794392,
+        "recall": 0.22014925373134328,
+        "f1": 0.24481327800829875
+      },
+      {
+        "min_area_m2": 0.01,
+        "precision": 0.33727810650887574,
+        "recall": 0.2126865671641791,
+        "f1": 0.2608695652173913
+      },
+      {
+        "min_area_m2": 0.02,
+        "precision": 0.37583892617449666,
+        "recall": 0.208955223880597,
+        "f1": 0.2685851318944844
+      },
+      {
+        "min_area_m2": 0.05,
+        "precision": 0.3951612903225806,
+        "recall": 0.1828358208955224,
+        "f1": 0.25
+      },
+      {
+        "min_area_m2": 0.1,
+        "precision": 0.35964912280701755,
+        "recall": 0.15298507462686567,
+        "f1": 0.21465968586387435
+      },
+      {
+        "min_area_m2": 0.2,
+        "precision": 0.35514018691588783,
+        "recall": 0.1417910447761194,
+        "f1": 0.20266666666666666
+      },
+      {
+        "min_area_m2": 0.3,
+        "precision": 0.37623762376237624,
+        "recall": 0.1417910447761194,
+        "f1": 0.20596205962059622
+      }
+    ],
+    "barrier / cone": [
+      {
+        "min_area_m2": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "min_area_m2": 0.01,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "min_area_m2": 0.02,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "min_area_m2": 0.05,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "min_area_m2": 0.1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "min_area_m2": 0.2,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "min_area_m2": 0.3,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    ]
+  },
+  "objects_moving_flag_agreement": 0.7525083612040134,
+  "objects_per_frame": 20.575
+}
