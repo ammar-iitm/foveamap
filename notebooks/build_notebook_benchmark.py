@@ -66,6 +66,12 @@ importlib.invalidate_caches()
 %cd /content/foveamap
 !pip -q install -r requirements.txt
 !git log --oneline -1
+import torch
+if not torch.cuda.is_available():
+    raise RuntimeError('This runtime has no GPU, so the benchmark would measure the CPU instead. Choose '
+                       'Runtime > Change runtime type > T4 GPU (if Colab offers none, the free GPU time '
+                       'may be used up for now) and run all again.')
+print('GPU:', torch.cuda.get_device_name(0))
 """)
 
 md("""
