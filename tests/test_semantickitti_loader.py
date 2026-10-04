@@ -127,3 +127,30 @@ def test_fetch_logs_a_summary(kitti, tmp_path, monkeypatch):
                    log=lines.append, progress_every=0.001)
     assert lines[0].startswith(f"fetching {len(sim)} scans") and "GB to download" in lines[1]
     assert lines[-1].startswith(f"fetched {len(sim)} scans (") and "GB) in" in lines[-1]
+
+
+def test_cache_in_chunks_resumes_and_reads_old_single_files(kitti, tmp_path, monkeypatch):
+    root, _, _ = kitti
+    whole = str(tmp_path / "whole")
+    SK.build_cache(root, whole, splits=("val",), stride=1)
+    ref = list(SK.iter_cached(whole, "val"))
+    monkeypatch.setattr(SK, "CHUNK", 2)                     # several files for the small mock sequence
+    chunked = str(tmp_path / "chunked")
+    SK.build_cache(root, chunked, splits=("val",), stride=1)
+    parts = sorted(f for f in os.listdir(chunked) if f.endswith(".pkl"))
+    assert len(parts) == (len(ref) + 1) // 2 and parts[0] == "08_000.pkl"
+    os.remove(os.path.join(chunked, parts[-1]))               # a stopped build: only the missing file is made again
+    SK.build_cache(root, chunked, splits=("val",), stride=1)
+    assert sorted(f for f in os.listdir(chunked) if f.endswith(".pkl")) == parts
+    for got in (list(SK.iter_cached(chunked, "val")), SK.load_scene(chunked, "08")):
+        assert len(got) == len(ref)
+        for x, y in zip(ref, got):
+            np.testing.assert_array_equal(x["pts"], y["pts"])
+            np.testing.assert_array_equal(x["label"], y["label"])
+    legacy = str(tmp_path / "legacy")                          # one pickle per sequence, as older caches have
+    os.makedirs(legacy)
+    import pickle
+    pickle.dump(ref, open(os.path.join(legacy, "08.pkl"), "wb"))
+    import shutil
+    shutil.copy(os.path.join(whole, "index.json"), legacy)
+    assert len(SK.load_scene(legacy, "08")) == len(list(SK.iter_cached(legacy, "val"))) == len(ref)

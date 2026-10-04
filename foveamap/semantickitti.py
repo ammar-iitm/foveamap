@@ -14,6 +14,7 @@ Scans are 10 Hz, so the motion cue uses the previous two scans (0.1 s, 0.2 s).
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import pickle
@@ -159,23 +160,43 @@ def needed_scans(frames, prev_steps=(1, 2)):
     return sorted(need)
 
 
+CHUNK = 100       # frames per cache file: a whole stride-5 sequence 00 (~900 frames) is ~6 GB in memory
+
+
 def _cache_sequence(root, out_dir, seq, stride, info):
-    """Build one sequence's pickle (unless present). Returns its frame count."""
+    """Build one sequence's cache files, CHUNK frames each (`<seq>_000.pkl`, ...), skipping files
+    already there, so a stopped build resumes. Returns the sequence's frame count."""
     ds = SemanticKITTI(root)
-    path = os.path.join(out_dir, f"{seq}.pkl")
     ids = selected_scans(len(read_poses(os.path.join(ds.seq_dir(seq), "poses.txt"))), stride)
-    if not os.path.exists(path):
-        poses = ds.poses_ego(seq)
-        frames = [ds.frame(seq, i, poses, info) for i in ids]
+    if os.path.exists(os.path.join(out_dir, f"{seq}.pkl")):          # an older single-file cache
+        return len(ids)
+    poses = None
+    for k, start in enumerate(range(0, len(ids), CHUNK)):
+        path = os.path.join(out_dir, f"{seq}_{k:03d}.pkl")
+        if os.path.exists(path):
+            continue
+        poses = poses if poses is not None else ds.poses_ego(seq)
+        frames = [ds.frame(seq, i, poses, info) for i in ids[start:start + CHUNK]]
         with open(path + ".part", "wb") as fh:
             pickle.dump(frames, fh, protocol=4)
         os.replace(path + ".part", path)
     return len(ids)
 
 
+def _seq_files(out_dir, seq):
+    """A sequence's cache files in order: the chunks, or one file from an older cache."""
+    single = os.path.join(out_dir, f"{seq}.pkl")
+    if os.path.exists(single):
+        return [single]
+    parts = sorted(glob.glob(os.path.join(out_dir, f"{seq}_[0-9][0-9][0-9].pkl")))
+    if not parts:
+        raise FileNotFoundError(f"no cached frames for sequence {seq} in {out_dir}")
+    return parts
+
+
 def build_cache(root, out_dir, splits=("train", "val"), stride=10, info=None, workers=1):
-    """Convert the selected scans to cached Frame lists (one pickle per sequence),
-    `workers` sequences at a time (processes; each holds one sequence in memory)."""
+    """Convert the selected scans to cached Frame lists (CHUNK frames per pickle),
+    `workers` sequences at a time (processes; each holds one chunk in memory)."""
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     info = info or kitti_info()
@@ -206,15 +227,16 @@ def cached_info(out_dir):
 
 
 def iter_cached(out_dir, split):
-    """Frames of a split, one sequence in memory at a time."""
+    """Frames of a split, one cache file in memory at a time."""
     with open(os.path.join(out_dir, "index.json")) as fh:
         index = json.load(fh)
     for seq in index[split]:
-        with open(os.path.join(out_dir, f"{seq}.pkl"), "rb") as fh:
-            frames = pickle.load(fh)
-        frames.reverse()
-        while frames:              # drop each frame once used, so the sequence's memory shrinks as it goes
-            yield frames.pop()
+        for path in _seq_files(out_dir, seq):
+            with open(path, "rb") as fh:
+                frames = pickle.load(fh)
+            frames.reverse()
+            while frames:          # drop each frame once used, so memory shrinks as it goes
+                yield frames.pop()
 
 
 def count_cached(out_dir, split):
@@ -224,8 +246,11 @@ def count_cached(out_dir, split):
 
 
 def load_scene(out_dir, seq):
-    with open(os.path.join(out_dir, f"{seq}.pkl"), "rb") as fh:
-        return pickle.load(fh)
+    frames = []
+    for path in _seq_files(out_dir, seq):
+        with open(path, "rb") as fh:
+            frames += pickle.load(fh)
+    return frames
 
 
 # ----------------------------------------------------------------------------
