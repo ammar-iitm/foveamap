@@ -1,0 +1,406 @@
+frame   0  total  8623.3 ms  preprocess 462  inference 1887  projection 187  fusion 6061  publish 3  objects 23
+frame   1  total    47.6 ms  preprocess 15  inference 6  projection 7  fusion 11  publish 2  objects 6
+frame   2  total    45.7 ms  preprocess 12  inference 6  projection 7  fusion 11  publish 2  objects 8
+frame   3  total    42.7 ms  preprocess 11  inference 5  projection 7  fusion 11  publish 2  objects 7
+frame   4  total    56.5 ms  preprocess 13  inference 6  projection 8  fusion 18  publish 2  objects 10
+frame   5  total    44.6 ms  preprocess 11  inference 5  projection 7  fusion 12  publish 2  objects 7
+frame   6  total    46.1 ms  preprocess 12  inference 5  projection 7  fusion 11  publish 2  objects 8
+frame   7  total    74.3 ms  preprocess 16  inference 11  projection 14  fusion 25  publish 2  objects 7
+frame   8  total    61.1 ms  preprocess 20  inference 10  projection 12  fusion 10  publish 2  objects 7
+frame   9  total    62.4 ms  preprocess 16  inference 7  projection 9  fusion 16  publish 2  objects 12
+frame  10  total    78.5 ms  preprocess 19  inference 10  projection 12  fusion 24  publish 4  objects 9
+frame  11  total    49.2 ms  preprocess 11  inference 5  projection 7  fusion 10  publish 2  objects 14
+frame  12  total    38.9 ms  preprocess 11  inference 5  projection 6  fusion 9  publish 2  objects 5
+frame  13  total    38.4 ms  preprocess 10  inference 5  projection 6  fusion 10  publish 2  objects 5
+frame  14  total    82.6 ms  preprocess 23  inference 11  projection 12  fusion 19  publish 5  objects 11
+frame  15  total    65.9 ms  preprocess 26  inference 7  projection 6  fusion 16  publish 2  objects 9
+frame  16  total    37.3 ms  preprocess 10  inference 5  projection 6  fusion 10  publish 2  objects 5
+frame  17  total    41.2 ms  preprocess 10  inference 5  projection 7  fusion 12  publish 3  objects 5
+frame  18  total    51.7 ms  preprocess 16  inference 6  projection 8  fusion 13  publish 2  objects 6
+frame  19  total    31.4 ms  preprocess 8  inference 4  projection 5  fusion 8  publish 2  objects 4
+frame  20  total    30.4 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  21  total    29.9 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  22  total    28.9 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  23  total    39.4 ms  preprocess 8  inference 4  projection 7  fusion 12  publish 2  objects 5
+frame  24  total    28.9 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  25  total    30.3 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  26  total    30.6 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  27  total    29.4 ms  preprocess 9  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  28  total    29.2 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  29  total    28.7 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 2
+frame  30  total    29.5 ms  preprocess 9  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  31  total    29.6 ms  preprocess 9  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  32  total    29.6 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  33  total    30.1 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  34  total    28.6 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 2
+frame  35  total    29.0 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  36  total    30.0 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  37  total    30.4 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  38  total    29.8 ms  preprocess 9  inference 4  projection 5  fusion 7  publish 2  objects 2
+frame  39  total    30.1 ms  preprocess 8  inference 4  projection 5  fusion 8  publish 2  objects 3
+frame  40  total    28.5 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  41  total    30.3 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  42  total    30.4 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  43  total    29.3 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  44  total    40.1 ms  preprocess 12  inference 5  projection 8  fusion 10  publish 2  objects 3
+frame  45  total    29.9 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  46  total    31.4 ms  preprocess 10  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  47  total    30.1 ms  preprocess 8  inference 5  projection 6  fusion 7  publish 2  objects 3
+frame  48  total    29.9 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  49  total    29.4 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  50  total    34.5 ms  preprocess 8  inference 4  projection 7  fusion 10  publish 2  objects 3
+frame  51  total    30.9 ms  preprocess 9  inference 5  projection 5  fusion 7  publish 2  objects 4
+frame  52  total    28.9 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  53  total    29.9 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  54  total    29.4 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  55  total    34.3 ms  preprocess 12  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  56  total    31.6 ms  preprocess 8  inference 4  projection 5  fusion 9  publish 2  objects 4
+frame  57  total    30.1 ms  preprocess 8  inference 4  projection 6  fusion 7  publish 2  objects 3
+frame  58  total    32.2 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 5
+frame  59  total    29.7 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  60  total    30.1 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  61  total    29.4 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  62  total    30.6 ms  preprocess 8  inference 4  projection 6  fusion 8  publish 2  objects 3
+frame  63  total    31.6 ms  preprocess 8  inference 4  projection 6  fusion 8  publish 2  objects 4
+frame  64  total    30.9 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  65  total    30.5 ms  preprocess 9  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  66  total    29.7 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  67  total    30.1 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  68  total    30.0 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  69  total    30.4 ms  preprocess 8  inference 4  projection 5  fusion 8  publish 2  objects 3
+frame  70  total    42.5 ms  preprocess 12  inference 5  projection 7  fusion 12  publish 2  objects 5
+frame  71  total    39.8 ms  preprocess 11  inference 5  projection 7  fusion 9  publish 2  objects 6
+frame  72  total    38.5 ms  preprocess 10  inference 5  projection 7  fusion 10  publish 2  objects 5
+frame  73  total    38.2 ms  preprocess 11  inference 5  projection 7  fusion 10  publish 2  objects 4
+frame  74  total    35.1 ms  preprocess 11  inference 5  projection 6  fusion 9  publish 2  objects 4
+frame  75  total    35.0 ms  preprocess 10  inference 5  projection 6  fusion 9  publish 2  objects 4
+frame  76  total    36.6 ms  preprocess 11  inference 5  projection 6  fusion 9  publish 2  objects 4
+frame  77  total    37.8 ms  preprocess 11  inference 5  projection 7  fusion 9  publish 2  objects 4
+frame  78  total    44.5 ms  preprocess 10  inference 5  projection 6  fusion 12  publish 4  objects 7
+frame  79  total    38.7 ms  preprocess 10  inference 5  projection 6  fusion 10  publish 2  objects 6
+frame  80  total    40.9 ms  preprocess 11  inference 5  projection 7  fusion 12  publish 2  objects 5
+frame  81  total    42.8 ms  preprocess 11  inference 5  projection 8  fusion 12  publish 2  objects 6
+frame  82  total    40.2 ms  preprocess 11  inference 5  projection 7  fusion 10  publish 2  objects 5
+frame  83  total    42.4 ms  preprocess 11  inference 5  projection 6  fusion 11  publish 2  objects 7
+frame  84  total    45.8 ms  preprocess 13  inference 6  projection 8  fusion 12  publish 2  objects 5
+frame  85  total    30.6 ms  preprocess 9  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  86  total    29.7 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  87  total    31.1 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  88  total    31.4 ms  preprocess 8  inference 4  projection 5  fusion 8  publish 2  objects 4
+frame  89  total    30.0 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  90  total    29.2 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  91  total    29.7 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  92  total    30.4 ms  preprocess 8  inference 5  projection 5  fusion 7  publish 2  objects 3
+frame  93  total    30.1 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  94  total    31.5 ms  preprocess 8  inference 4  projection 5  fusion 8  publish 2  objects 4
+frame  95  total    29.6 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 4
+frame  96  total    30.3 ms  preprocess 9  inference 4  projection 6  fusion 7  publish 2  objects 3
+frame  97  total    28.8 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+frame  98  total    28.7 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 2
+frame  99  total    30.5 ms  preprocess 8  inference 4  projection 5  fusion 7  publish 2  objects 3
+{
+  "dataset": "semantickitti",
+  "source": "SemanticKITTI sequence 08 \u00b7 64-beam Lidar \u00b7 every 5th scan",
+  "sensor_rows": 64,
+  "hz": 2.0,
+  "profile": "spec",
+  "hardware": "Tesla T4 GPU (FP16 inference) + GPU grid engine",
+  "grid_engine": "torch",
+  "features_engine": "torch",
+  "export_mode": "after",
+  "frames": 100,
+  "latency_ms": {
+    "p50": 30.57,
+    "p95": 61.29799999999999,
+    "p99": 78.5754,
+    "mean": 35.97428571428571
+  },
+  "fps": 27.797633230084983,
+  "grid_only_ms": 15.051224489795919,
+  "uniform5_grid_ms": 6225.205191999218,
+  "stages_ms": {
+    "preprocess": 9.849285714285715,
+    "inference": 4.821734693877551,
+    "projection": 6.088367346938776,
+    "fusion": 8.962857142857143,
+    "publish": 1.865510204081633,
+    "objects": 4.386530612244899
+  },
+  "export_ms": 149.31897959183675,
+  "memory_bytes": {
+    "foveated_spec": 5120000,
+    "foveated_graded": 9120000,
+    "uniform_50cm_2.5d": 2560000,
+    "uniform_5cm_2.5d": 256000000,
+    "occupancy_2d_5cm": 16000000,
+    "dense_voxel_5cm": 5120000000,
+    "sparse_voxel_5cm_one_sweep": 940470,
+    "raw_sweep": 2041216
+  },
+  "memory_saving_vs_uniform5": 50.0,
+  "cells": {
+    "foveated_spec": 320000,
+    "uniform_5cm": 16000000
+  },
+  "tiers": [
+    {
+      "cell": 0.05,
+      "half": 10.0,
+      "n": 400
+    },
+    {
+      "cell": 0.5,
+      "half": 100.0,
+      "n": 400
+    }
+  ],
+  "classes": [
+    "road",
+    "sidewalk",
+    "parking",
+    "terrain",
+    "vegetation",
+    "building",
+    "pole",
+    "vehicle",
+    "person"
+  ],
+  "active_classes": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "bands": [
+    "0\u201310 m",
+    "10\u201325 m",
+    "25\u201350 m",
+    "50\u2013100 m"
+  ],
+  "point_miou_by_band": [
+    0.632496281875125,
+    0.5368926802893801,
+    0.42880718898609205,
+    0.1401901332435642
+  ],
+  "grid_miou_by_band": [
+    0.5859938202006122,
+    0.48409272482260934,
+    0.3845336867818321,
+    0.22662270333901613
+  ],
+  "point_miou": 0.5828819613773718,
+  "drivable_iou_grid_0_10": 0.9326918626337872,
+  "drivable_iou_points_0_10": 0.9328534904985315,
+  "moving_iou_by_band": [
+    0.34783500502533177,
+    0.343307757885763,
+    0.17509850275807723,
+    0.0
+  ],
+  "moving_iou": 0.3324128979716489,
+  "curb_recall_10m": null,
+  "pothole_recall_10m": null,
+  "pothole_flag_rate_drivable_10m": 0.0005612949437378613,
+  "points_lost": 0,
+  "nesting_ok": true,
+  "objects_within_25m": {
+    "vehicle": {
+      "precision": 0.6628099173553719,
+      "recall": 0.7072310405643739,
+      "tp": 401,
+      "fp": 204,
+      "fn": 166
+    },
+    "person": {
+      "precision": 0.12686567164179105,
+      "recall": 0.265625,
+      "tp": 17,
+      "fp": 117,
+      "fn": 47
+    },
+    "pole": {
+      "precision": 0.23672230652503792,
+      "recall": 0.5777777777777777,
+      "tp": 156,
+      "fp": 503,
+      "fn": 114
+    }
+  },
+  "objects_diagnostics": {
+    "vehicle": {
+      "fp_fragment_share": 0.20588235294117646,
+      "fp_other_class_share": 0.09313725490196079,
+      "median_cells_tp": 27.0,
+      "median_cells_fp": 7.0,
+      "median_cells_fn": 13.5,
+      "fp_cells_quartiles": [
+        5.0,
+        17.25
+      ]
+    },
+    "person": {
+      "fp_fragment_share": 0.1794871794871795,
+      "fp_other_class_share": 0.2905982905982906,
+      "median_cells_tp": 5.0,
+      "median_cells_fp": 3.0,
+      "median_cells_fn": 4.0,
+      "fp_cells_quartiles": [
+        2.0,
+        11.0
+      ]
+    },
+    "pole": {
+      "fp_fragment_share": 0.1610337972166998,
+      "fp_other_class_share": 0.1312127236580517,
+      "median_cells_tp": 10.0,
+      "median_cells_fp": 9.0,
+      "median_cells_fn": 4.0,
+      "fp_cells_quartiles": [
+        2.5,
+        17.0
+      ]
+    }
+  },
+  "objects_area_sweep": {
+    "vehicle": [
+      {
+        "min_area_m2": 0.0,
+        "precision": 0.36348408710217756,
+        "recall": 0.7654320987654321,
+        "f1": 0.49290176036342986
+      },
+      {
+        "min_area_m2": 0.2,
+        "precision": 0.5448634590377113,
+        "recall": 0.7389770723104057,
+        "f1": 0.6272455089820359
+      },
+      {
+        "min_area_m2": 0.5,
+        "precision": 0.5673076923076923,
+        "recall": 0.7283950617283951,
+        "f1": 0.6378378378378379
+      },
+      {
+        "min_area_m2": 1.0,
+        "precision": 0.6628099173553719,
+        "recall": 0.7072310405643739,
+        "f1": 0.6843003412969283
+      },
+      {
+        "min_area_m2": 1.5,
+        "precision": 0.7602591792656588,
+        "recall": 0.6208112874779541,
+        "f1": 0.683495145631068
+      },
+      {
+        "min_area_m2": 2.0,
+        "precision": 0.7908163265306123,
+        "recall": 0.54673721340388,
+        "f1": 0.6465067778936392
+      },
+      {
+        "min_area_m2": 3.0,
+        "precision": 0.8719723183391004,
+        "recall": 0.4444444444444444,
+        "f1": 0.5887850467289719
+      }
+    ],
+    "person": [
+      {
+        "min_area_m2": 0.0,
+        "precision": 0.09644670050761421,
+        "recall": 0.296875,
+        "f1": 0.14559386973180077
+      },
+      {
+        "min_area_m2": 0.01,
+        "precision": 0.11176470588235295,
+        "recall": 0.296875,
+        "f1": 0.1623931623931624
+      },
+      {
+        "min_area_m2": 0.02,
+        "precision": 0.12418300653594772,
+        "recall": 0.296875,
+        "f1": 0.17511520737327188
+      },
+      {
+        "min_area_m2": 0.05,
+        "precision": 0.12686567164179105,
+        "recall": 0.265625,
+        "f1": 0.1717171717171717
+      },
+      {
+        "min_area_m2": 0.1,
+        "precision": 0.14049586776859505,
+        "recall": 0.265625,
+        "f1": 0.1837837837837838
+      },
+      {
+        "min_area_m2": 0.2,
+        "precision": 0.13559322033898305,
+        "recall": 0.25,
+        "f1": 0.17582417582417584
+      },
+      {
+        "min_area_m2": 0.3,
+        "precision": 0.13559322033898305,
+        "recall": 0.25,
+        "f1": 0.17582417582417584
+      }
+    ],
+    "pole": [
+      {
+        "min_area_m2": 0.0,
+        "precision": 0.14247551202137132,
+        "recall": 0.5925925925925926,
+        "f1": 0.22972002871500358
+      },
+      {
+        "min_area_m2": 0.01,
+        "precision": 0.182548794489093,
+        "recall": 0.5888888888888889,
+        "f1": 0.2787028921998247
+      },
+      {
+        "min_area_m2": 0.02,
+        "precision": 0.23672230652503792,
+        "recall": 0.5777777777777777,
+        "f1": 0.33584499461786865
+      },
+      {
+        "min_area_m2": 0.05,
+        "precision": 0.2762557077625571,
+        "recall": 0.44814814814814813,
+        "f1": 0.3418079096045198
+      },
+      {
+        "min_area_m2": 0.1,
+        "precision": 0.2676056338028169,
+        "recall": 0.35185185185185186,
+        "f1": 0.304
+      },
+      {
+        "min_area_m2": 0.2,
+        "precision": 0.25878594249201275,
+        "recall": 0.3,
+        "f1": 0.27787307032590053
+      },
+      {
+        "min_area_m2": 0.3,
+        "precision": 0.2668918918918919,
+        "recall": 0.29259259259259257,
+        "f1": 0.2791519434628975
+      }
+    ]
+  },
+  "objects_moving_flag_agreement": 0.9616724738675958,
+  "objects_per_frame": 37.87
+}

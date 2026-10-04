@@ -10,16 +10,16 @@
 
 ## At a glance
 
-Real Lidar, SemanticKITTI sequence 08 (held out from training), on a Colab Tesla T4, against the targets and hard limits in the [PRD](docs/FoveaMap_PRD.pdf). The PRD's reference GPU is an RTX 3060–4070; a T4 is slower.
+Real Lidar, SemanticKITTI sequence 08 (held out from training; model fine-tuned on every 5th scan of the other sequences), on a Colab Tesla T4, against the targets and hard limits in the [PRD](docs/FoveaMap_PRD.pdf). The PRD's reference GPU is an RTX 3060–4070; a T4 is slower.
 
 | Requirement (PRD) | Target / hard limit | Result | Status |
 | --- | --- | --- | --- |
-| NFR-1 · p95 latency, sweep in to map and objects out | ≤ 50 ms / ≤ 100 ms | 43.7–73.4 ms over three Colab sessions; median 33–35 ms | target in 2 of 3 sessions; hard limit always |
+| NFR-1 · p95 latency, sweep in to map and objects out | ≤ 50 ms / ≤ 100 ms | 43.7–73.4 ms over four Colab sessions; median 30.6–35.2 ms | target in 2 of 4 sessions; hard limit always |
 | NFR-2 · throughput | ≥ 20 / ≥ 10 FPS | 24.8–28.4 FPS | ✅ |
 | NFR-3 · map memory, ±100 m, all layers | ≤ 8 MB / ≤ 16 MB | 5.12 MB, measured bytes | ✅ |
 | NFR-4 · saving vs a uniform 5 cm 2.5D grid | ≥ 30× / ≥ 20× | 50× | ✅ |
-| NFR-6 · point mIoU, 0–10 m | ≥ 70% / ≥ 60% | 64.2% | hard limit met, target not yet |
-| NFR-7 · drivable IoU on the grid, 0–10 m | ≥ 90% / ≥ 85% | 91.9% | ✅ |
+| NFR-6 · point mIoU, 0–10 m | ≥ 70% / ≥ 60% | 64.8% | hard limit met, target not yet |
+| NFR-7 · drivable IoU on the grid, 0–10 m | ≥ 90% / ≥ 85% | 93.3% | ✅ |
 | NFR-8 · curb (≥ 8 cm) recall within 10 m | ≥ 90% / ≥ 80% | 98.9% on the simulator (the real datasets have no curb ground truth) | ✅ simulator |
 | Points lost where tiers meet | 0 | 0, checked every frame | ✅ |
 | NFR-5 · peak GPU memory | ≤ 4 GB / ≤ 6 GB | not measured yet | — |
@@ -142,7 +142,7 @@ The limits are known, and they explain the weakest results:
 - **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use. See [Why a range-image network](#why-a-range-image-network).
 - **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. With `--grid torch`, the range-image features are also built on the GPU (`foveamap/features_torch.py`, also parity-tested; override with `--features numpy`). Dashboard PNG export is encoded after the timed loop by default and reported as `export_ms`, not counted in latency (`--export async` encodes on a background thread during the run instead, and `none` skips it). On CUDA the derive step (flags and traversability cost) runs through `torch.compile`; set `FOVEAMAP_COMPILE=0` to run it eagerly.
 - **Not built yet:** 3D view, object tracking across frames (so no object IDs or velocity arrows), free-space ray clearing, ROS 2 node, and TensorRT export.
-- **Near-range accuracy** (64.2% against the 70% target) is limited by training data: doubling it (every 5th SemanticKITTI scan instead of every 10th) is ready to run in the SemanticKITTI notebook (`STRIDE = 5`).
+- **Near-range accuracy** (64.8% against the 70% target). Doubling the training data (every 5th SemanticKITTI scan instead of every 10th) added only 0.6 points, so data is not the main limit; the network is small (327k parameters, a tenth or less of published range-image networks) and uses 4–5 ms of a 30 ms frame. A wider network (`train.py --width 2`) is the next step.
 - **Latency tail.** The median is steady at 33–35 ms, but p95 on Colab's shared machines ranged from 44 to 73 ms; the benchmark notebook now logs CPU steal time and the GPU's clock next to every frame to find out why.
 
 ## Design documents

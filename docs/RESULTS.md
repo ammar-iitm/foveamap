@@ -70,6 +70,21 @@ Moving flags agree with ground truth on 95% of matched objects. Without a size f
 - **The simulator alone doesn't carry over to real Lidar.** It scores 10.7% on SemanticKITTI, about the same as on nuScenes (9.8%), even though KITTI's 64-beam HDL-64E is the sensor it simulates. The gap comes from simulated versus real scenes, not the beam count.
 - **Fine-tuning brings it to 59.7% mIoU**, with road at 88.6% and vehicles at 78.0%, against 46.3% after fine-tuning on nuScenes-mini's 8 scenes.
 - **Longer training helps a little.** Going from 20 to 40 epochs raised mIoU by 1.6 points and every class's IoU, while moving-object IoU fell by 2 points and the 50–100 m band by 0.4. Training loss was still falling slowly at the end, but near-range mIoU (64.2%) is still short of 70%: more data (a smaller stride) is the likelier fix than more epochs.
+
+### Twice the training data (stride 5)
+
+Fine-tuning on every 5th scan instead of every 10th (3,834 frames, 40 epochs, 32 minutes on a T4) and scoring every 5th scan of sequence 08 (so not the identical frames as the stride-10 column, but the same held-out drive):
+
+| Sequence 08 | Stride 10, 40 epochs | Stride 5, 40 epochs |
+| --- | --- | --- |
+| **mIoU** | 59.7% | **60.3%** |
+| mIoU 0–10 m / 10–25 / 25–50 / 50–100 m | 64.2% / 55.8% / 41.6% / 17.9% | 64.8% / 56.4% / 42.1% / 19.4% |
+| Road / sidewalk / parking | 88.6% / 71.2% / 27.9% | 88.7% / 72.3% / 29.1% |
+| Terrain / vegetation / building | 70.0% / 77.4% / 67.5% | 66.0% / 79.5% / 67.2% |
+| Pole / vehicle / person | 24.0% / 78.0% / 33.2% | 25.6% / 80.6% / 34.0% |
+| Moving-object IoU | 29.7% | **35.9%** |
+
+Twice the data bought 0.6 points of mIoU, near range included, and 6 points of moving-object IoU; terrain lost 4. So data is not what holds near-range accuracy at 64–65%. The likelier limit is the network: 327k parameters, against about 6.7M for SalsaNext and 50M for RangeNet++, and it uses only 4–5 ms of a 30 ms frame, so it can grow. The benchmark of this model (first 100 frames of every 5th scan of sequence 08, so 0.5 s apart) gave p50 / p95 30.6 / 61.3 ms, 27.8 FPS, drivable IoU 93.3%, pothole flag rate 0.056%, objects within 25 m vehicle 66.3% / 70.7%, person 12.7% / 26.6%, pole 23.7% / 57.8% precision / recall, and moving flags agreeing on 96.2% of matched objects. Files: `*stride5*`.
 - **Weak classes.** Most poles and people are found (recall 70% and 63%), but too many other points are labelled as them, so their IoU stays low (24.0% and 33.2%). Parking (27.9%) is flat ground that looks like road or sidewalk.
 - **Reproducible.** Two 20-epoch training runs with seed 0 gave identical scores, down to the per-class IoUs. (Scoring the same model in different Colab sessions can differ by a few dozen of about 52 million points, from GPU rounding.)
 
