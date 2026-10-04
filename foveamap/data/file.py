@@ -62,12 +62,16 @@ def normalize_intensity(intensity: np.ndarray, mode: str = "auto") -> tuple[np.n
         return np.clip(inten, 0.0, 1.0).astype(np.float32), "clip"
 
     if mode_lower == "auto":
-        max_val = float(np.nanmax(inten)) if np.any(np.isfinite(inten)) else 0.0
-        if max_val > 255.0:
+        valid = np.isfinite(inten)
+        if not np.any(valid):
+            return np.zeros_like(inten), "auto_all_nan"
+        valid_vals = inten[valid]
+        thresh_val = float(np.percentile(valid_vals, 99.5)) if len(valid_vals) >= 100 else float(np.max(valid_vals))
+        if thresh_val > 255.0:
             return np.clip(inten / 65535.0, 0.0, 1.0).astype(np.float32), "auto_scaled_16bit"
-        elif max_val > 1.5:
+        elif thresh_val > 1.5:
             return np.clip(inten / 255.0, 0.0, 1.0).astype(np.float32), "auto_scaled_8bit"
-        elif max_val > 1.0:
+        elif thresh_val > 1.0:
             return np.clip(inten, 0.0, 1.0).astype(np.float32), "auto_clipped_retroreflector"
         else:
             return np.clip(inten, 0.0, 1.0).astype(np.float32), "auto_unit_range"

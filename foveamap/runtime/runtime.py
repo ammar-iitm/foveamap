@@ -424,6 +424,7 @@ class FoveaMapRuntime:
             "uptime_s": uptime,
             "frames_processed": self.frame_count,
             "frames_dropped": self._dropped_frames,
+            "dropped_frames": self._dropped_frames,
             "fps": fps,
             "last_points": last_points,
             "backend": backend_name,

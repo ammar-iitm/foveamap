@@ -266,11 +266,11 @@ def cast(scene: Scene, origin: np.ndarray, t_now: float, rng: np.random.Generato
     # ground plane z = 0 (road) + potholes
     with np.errstate(divide="ignore", invalid="ignore"):
         tg = np.where(D[:, 2] < -1e-6, -O[2] / D[:, 2], np.inf).astype(np.float32)
-    hx, hy = O[0] + tg * D[:, 0], O[1] + tg * D[:, 1]
-    for px, py, pr, pd in scene.potholes:
-        inside = (hx - px) ** 2 + (hy - py) ** 2 < pr * pr
-        if inside.any():
-            tg[inside] = (-pd - O[2]) / D[inside, 2]
+        hx, hy = O[0] + tg * D[:, 0], O[1] + tg * D[:, 1]
+        for px, py, pr, pd in scene.potholes:
+            inside = (hx - px) ** 2 + (hy - py) ** 2 < pr * pr
+            if inside.any():
+                tg[inside] = (-pd - O[2]) / D[inside, 2]
     best[:] = tg
     cls[np.isfinite(tg)] = ROAD
 

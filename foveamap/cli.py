@@ -212,7 +212,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
             print(f"Warning: Dashboard directory {dashboard_dir} not found; serving API only.")
             dashboard_dir = None
 
-    server = FoveaMapHttpServer(sdk, host=args.host, port=args.port, dashboard_dir=dashboard_dir)
+    server = FoveaMapHttpServer(
+        sdk,
+        host=args.host,
+        port=args.port,
+        dashboard_dir=dashboard_dir,
+        allow_insecure_remote=args.allow_insecure_remote,
+    )
     url = server.start_background()
     print("=" * 65)
     print(f"FoveaMap HTTP Service Active")
@@ -339,6 +345,12 @@ def create_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
     p_serve.add_argument("--dashboard", action="store_true", default=True, help="Serve interactive web dashboard")
     p_serve.add_argument("--api-only", dest="dashboard", action="store_false", help="Serve API endpoints only")
+    p_serve.add_argument(
+        "--allow-insecure-remote",
+        action="store_true",
+        default=False,
+        help="Allow binding to non-loopback network interfaces (e.g. for container/remote deployments)",
+    )
     p_serve.set_defaults(func=cmd_serve)
 
     # bench

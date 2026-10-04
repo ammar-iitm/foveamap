@@ -10,12 +10,15 @@ import io
 import json
 import os
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
 from PIL import Image
 
+from .core.exceptions import ConfigurationError, PerceptionError
+from .runtime.perception import CheckpointNotFoundError
 from .sim import NUM_CLASSES, ROAD, PARKING, VEHICLE, PERSON
 from .model import load_model, predict, pick_device
 from .frames import DatasetInfo, make_features, prev_in_ego, transform
@@ -76,7 +79,7 @@ class FoveaMapPipeline:
     """sweep -> features -> network -> foveated grid, with per-stage timing."""
 
     def __init__(self, ckpt=None, info: DatasetInfo | None = None, profile="spec", fuse=True, device=None, grid="numpy",
-                 features=None, config=None):
+                 features=None, config=None, allow_untrained: bool = False):
         """grid / features: "numpy" (CPU) or "torch" (on the model's device); features follows grid by default."""
         if config is not None:
             ckpt = ckpt or config.perception.checkpoint_path
@@ -102,8 +105,22 @@ class FoveaMapPipeline:
             torch.set_num_threads(max(1, os.cpu_count() or 1))
         self.device = pick_device(device)
         if ckpt is not None:
+            if not os.path.isfile(ckpt):
+                raise CheckpointNotFoundError(f"Perception checkpoint file not found at: {ckpt}")
             self.model = load_model(ckpt, self.device)
         else:
+            if not allow_untrained:
+                raise ConfigurationError(
+                    "FoveaMapPipeline requires a valid checkpoint path in production. "
+                    "Randomly initialized weights are forbidden to prevent silent perception corruption. "
+                    "Specify a valid checkpoint path or set allow_untrained=True only for deliberate testing."
+                )
+            warnings.warn(
+                "FoveaMapPipeline is running with UNTRAINED / RANDOM WEIGHTS (allow_untrained=True). "
+                "This mode is strictly for development and testing and must NEVER be used in production.",
+                UserWarning,
+                stacklevel=2,
+            )
             from .model import RangeUNet
             self.model = RangeUNet().to(self.device).eval()
         self.info = info
@@ -160,7 +177,9 @@ class FoveaMapPipeline:
         if dev_math:
             pts = torch.as_tensor(frame["pts"]).to(self.device, torch.float32)
             prev = _prev_in_ego_dev(frame, hist, self.device)
-            feats, idx, row, col = features_torch.make_features(dict(frame, pts=pts), self.info, prev, self.device)
+            f_dict = frame.to_legacy_dict() if hasattr(frame, "to_legacy_dict") else dict(frame)
+            f_dict["pts"] = pts
+            feats, idx, row, col = features_torch.make_features(f_dict, self.info, prev, self.device)
         elif self.features == "torch":
             prev = prev_in_ego(frame, hist)
             feats, idx, row, col = features_torch.make_features(frame, self.info, prev, self.device)
@@ -260,7 +279,7 @@ def _export_frame(snap, dyn, gstats, tiers, path):
     tiles = [encode_tier(s, d, tr.n) for s, d, tr in zip(snap, dyn, tiers)]
     pub_buf = io.BytesIO()
     Image.fromarray(np.concatenate(tiles, 1)).save(pub_buf, format="PNG", compress_level=1)
-    gt_tiles = [encode_gt(gs, s.conf, tr.n) for gs, s, tr in zip(gstats, snap, tiers)]
+    gt_tiles = [encode_gt(gs, ((s.conf >> 4) * 17).astype(np.uint8), tr.n) for gs, s, tr in zip(gstats, snap, tiers)]
     buf = io.BytesIO()
     Image.fromarray(np.concatenate(tiles + gt_tiles, 1)).save(buf, format="PNG", optimize=False, compress_level=6)
     if path is not None:
@@ -270,7 +289,8 @@ def _export_frame(snap, dyn, gstats, tiers, path):
 
 
 def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile="spec",
-                  export="after", n_uniform=3, device=None, grid="numpy", features=None):
+                  export="after", n_uniform=3, device=None, grid="numpy", features=None,
+                  allow_untrained: bool = False):
     """Run frames through the pipeline; write metrics.json, frames/*.png and
     points.b64.txt for the dashboard. truth: simulator-only curb/pothole geometry.
     export: 'after' (default: keep each frame's map snapshot, ~5 MB, and encode the PNGs
@@ -285,8 +305,16 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         export_mode = export.lower()
     else:
         raise ValueError(f"unknown export mode {export!r}; choose 'async', 'after', or 'none'")
+    if ckpt is None and not allow_untrained:
+        raise ConfigurationError(
+            "run_benchmark requires a valid checkpoint path in production. "
+            "Benchmarking random weights is forbidden to ensure valid metrics."
+        )
+    if ckpt is not None and not os.path.isfile(ckpt):
+        raise CheckpointNotFoundError(f"Benchmark checkpoint not found at: {ckpt}")
     T = len(frames)
-    pipe = FoveaMapPipeline(ckpt, info, profile, device=device, grid=grid, features=features)
+    pipe = FoveaMapPipeline(ckpt, info, profile, device=device, grid=grid, features=features,
+                            allow_untrained=allow_untrained)
     gt_grid = FoveatedGrid(profile, fuse=False)
     frames_dir = os.path.join(out_dir, "frames")
     os.makedirs(frames_dir, exist_ok=True)
@@ -319,10 +347,18 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
             r[k] = to_host(r[k])
 
         # ground truth grid for the same frame (benchmark only, not timed)
-        lab = fr["label"].astype(np.int64)
-        has = lab >= 0
-        gm = fr["moving"]
-        gstats = gt_grid.bin_points(r["pw"][has, :2], r["pw"][has, 2], np.eye(C)[lab[has]], gm[has], pipe.grid.origins)
+        lab_raw = fr["label"] if ("label" in fr or hasattr(fr, "label")) else None
+        if lab_raw is not None:
+            lab = np.asarray(lab_raw, dtype=np.int64)
+            has = lab >= 0
+            gm_raw = fr["moving"] if ("moving" in fr or hasattr(fr, "moving")) else None
+            gm = np.asarray(gm_raw, dtype=bool) if gm_raw is not None else np.zeros(len(lab), dtype=bool)
+            gstats = gt_grid.bin_points(r["pw"][has, :2], r["pw"][has, 2], np.eye(C)[lab[has]], gm[has], pipe.grid.origins)
+        else:
+            lab = np.full(len(r["pts"]), -1, dtype=np.int64)
+            has = np.zeros(len(r["pts"]), dtype=bool)
+            gm = np.zeros(len(r["pts"]), dtype=bool)
+            gstats = gt_grid.bin_points(r["pw"][:0, :2], r["pw"][:0, 2], np.zeros((0, C), np.float32), gm[:0], pipe.grid.origins)
         path = os.path.join(frames_dir, f"f{t:03d}.png") if export_mode != "none" else None
         if export_mode == "async":
             exports.append(exporter.submit(_export_frame, snap, dyn, gstats, pipe.grid.tiers, path))
@@ -408,8 +444,12 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
 
     # ------------------------------------------------------------------ summary
     warm = per_frame[2:] if T > 3 else per_frame
-    totals = np.array([f["total_ms"] for f in warm])
-    stages = {k: float(np.mean([f["timing_ms"][k] for f in warm])) for k in per_frame[0]["timing_ms"]}
+    totals = np.array([f["total_ms"] for f in warm]) if warm else np.zeros(0, dtype=np.float32)
+    stages = (
+        {k: float(np.mean([f["timing_ms"][k] for f in warm])) for k in per_frame[0]["timing_ms"]}
+        if per_frame
+        else {}
+    )
     pts_iou = [ious_from(cm) for cm in cm_pts]
     grid_iou = [ious_from(cm) for cm in cm_grid]
     all_pts = ious_from(cm_pts.sum(0))

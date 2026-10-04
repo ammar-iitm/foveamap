@@ -21,4 +21,10 @@ site/index.html
 scratch/
 *.pdf
 *.ipynb
+.env
+*.env
+*.pem
+*.key
+*.token
+*.secret
 

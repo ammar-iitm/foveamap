@@ -25,6 +25,37 @@ class DeviceContext:
     description: str
 
 
+def canonicalize_device(device: torch.device | str) -> torch.device:
+    """Return a canonical, index-resolved torch.device representation.
+
+    Resolves unindexed 'cuda' to 'cuda:<current_device>' (defaulting to cuda:0 if
+    CUDA is uninitialized or mocked), while preserving distinct indices 'cuda:0' vs 'cuda:1',
+    and standardizing 'cpu' and 'mps'.
+    """
+    dev = torch.device(device) if isinstance(device, str) else device
+    if dev.type == "cuda" and dev.index is None:
+        idx = 0
+        if torch.cuda.is_available():
+            try:
+                idx = torch.cuda.current_device()
+            except (Exception, AssertionError):
+                idx = 0
+        return torch.device(f"cuda:{idx}")
+    return dev
+
+
+def devices_match(d1: torch.device | str, d2: torch.device | str) -> bool:
+    """Check logical equivalence between two torch devices.
+
+    Correctly identifies that torch.device('cuda') and torch.device('cuda:0')
+    refer to the same physical device when current device is 0, while distinguishing
+    'cuda:0' from 'cuda:1' or 'cpu'.
+    """
+    dev1 = canonicalize_device(d1)
+    dev2 = canonicalize_device(d2)
+    return dev1 == dev2
+
+
 def resolve_device(
     runtime_config: RuntimeConfig,
     perception_config: PerceptionConfig | None = None,
@@ -43,15 +74,9 @@ def resolve_device(
     """
     requested = (runtime_config.device or "auto").strip().lower()
 
-    def _current_cuda_index() -> int:
-        try:
-            return torch.cuda.current_device()
-        except (Exception, AssertionError):
-            return 0
-
     if requested == "auto":
         if torch.cuda.is_available():
-            device = torch.device(f"cuda:{_current_cuda_index()}")
+            device = canonicalize_device("cuda")
             use_cuda = True
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             device = torch.device("mps")
@@ -69,17 +94,13 @@ def resolve_device(
                 "torch.cuda.is_available() is False in the current environment."
             )
         try:
-            device = torch.device(runtime_config.device)
-            if device.type == "cuda" and device.index is None:
-                device = torch.device(f"cuda:{_current_cuda_index()}")
+            device = canonicalize_device(runtime_config.device)
         except Exception as exc:
             raise ConfigurationError(f"Invalid CUDA device specification {runtime_config.device!r}: {exc}") from exc
         use_cuda = True
     else:
         try:
-            device = torch.device(runtime_config.device)
-            if device.type == "cuda" and device.index is None:
-                device = torch.device(f"cuda:{_current_cuda_index()}")
+            device = canonicalize_device(runtime_config.device)
         except Exception as exc:
             raise ConfigurationError(f"Unsupported device specification {runtime_config.device!r}: {exc}") from exc
         use_cuda = (device.type == "cuda")

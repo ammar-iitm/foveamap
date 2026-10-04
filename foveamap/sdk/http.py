@@ -23,6 +23,7 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
@@ -57,8 +58,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _send_file(self, file_path: Path, content_type: str) -> None:
         try:
@@ -160,7 +170,8 @@ class _Handler(BaseHTTPRequestHandler):
                     body = self._read_json()
                     frame, defaults = _frame_from_json(body)
                 except SDKError as exc:
-                    return self._fail(400, "SDKError", str(exc))
+                    code = 413 if "Body too large" in str(exc) else 400
+                    return self._fail(code, "SDKError", str(exc))
                 except FoveaMapError as exc:
                     return self._fail(400, type(exc).__name__, str(exc))
                 try:
@@ -275,11 +286,17 @@ class FoveaMapHttpServer:
         host: str = "127.0.0.1",
         port: int = 0,
         dashboard_dir: str | Path | None = None,
+        allow_insecure_remote: bool = False,
     ) -> None:
         if not isinstance(sdk, FoveaMap):
             raise SDKError(f"HTTP server requires a FoveaMap session, got {type(sdk).__name__}")
+        remote_allowed = allow_insecure_remote or os.environ.get("FOVEAMAP_ALLOW_INSECURE_REMOTE", "").strip().lower() in ("1", "true", "yes")
         if host not in ("127.0.0.1", "localhost", "::1"):
-            raise SDKError(f"Refusing non-loopback bind {host!r} (explicit local-only policy)")
+            if not remote_allowed:
+                raise SDKError(
+                    f"Refusing non-loopback bind {host!r} (explicit local-only policy). "
+                    f"To enable external/container exposure, pass allow_insecure_remote=True or set FOVEAMAP_ALLOW_INSECURE_REMOTE=1."
+                )
         self.sdk = sdk
         self.dashboard_dir = Path(dashboard_dir).resolve() if dashboard_dir is not None else None
         self._server = HTTPServer((host, int(port)), _Handler)

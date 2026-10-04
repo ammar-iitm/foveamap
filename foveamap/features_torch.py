@@ -90,6 +90,10 @@ def rows_from_elevation(pts, sensor, elev_of_row):
         return torch.empty((0,), dtype=torch.long, device=pts.device)
     elev = _elev(pts - sensor)
     asc = elev_of_row.flip(0)
+    # Enforce non-decreasing monotonicity with small regularizing spacing to guarantee mathematical invariants of searchsorted / interp
+    asc = torch.cummax(asc, 0).values
+    delta = torch.arange(asc.numel(), device=asc.device, dtype=asc.dtype) * 1e-4
+    asc = asc + delta
     n = elev_of_row.numel()
     rows_desc = torch.arange(n - 1, -1, -1, device=pts.device, dtype=elev.dtype)
     r = torch.round(interp(elev, asc, rows_desc)).long()

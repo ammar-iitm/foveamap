@@ -111,6 +111,7 @@ class DynamicWorldModel:
         self.config = config if config is not None else DynamicConfig()
         self._tracks: dict[int, DynamicTrack] = {}
         self._buckets: dict[tuple[int, int], set[int]] = {}
+        self._cell_index: dict[tuple[int, int, int], list[int]] = {}
         self._next_tid = 0
         self.frame_index = -1
         self.last_timestamp: float | None = None
@@ -160,10 +161,21 @@ class DynamicWorldModel:
         if frame_idx is None:
             frame_idx = self.frame_index + 1
         self.frame_index = int(frame_idx)
-        ts = float(timestamp) if timestamp is not None else float(frame_idx) * 0.1
+        
+        # Timestamp sanitization and monotonicity guard (F-06)
+        if timestamp is not None and math.isfinite(float(timestamp)):
+            ts = float(timestamp)
+        else:
+            ts = float(frame_idx) * 0.1
+
         dt_frame = 0.1
         if self.last_timestamp is not None:
-            dt_frame = ts - self.last_timestamp
+            raw_dt = ts - self.last_timestamp
+            # If timestamp goes backward or has a large gap (>5.0s), treat as discontinuity
+            if raw_dt <= 1e-6 or raw_dt > 5.0:
+                dt_frame = 0.0  # signals discontinuity; no velocity update
+            else:
+                dt_frame = raw_dt
         self.last_timestamp = ts
 
         seen: set[int] = set()
@@ -212,6 +224,10 @@ class DynamicWorldModel:
                     track.vx = (float(ob.x) - track.x) / dt_frame
                     track.vy = (float(ob.y) - track.y) / dt_frame
                     track.has_velocity = True
+                else:
+                    track.has_velocity = False
+                    track.vx = 0.0
+                    track.vy = 0.0
                 track.x = float(ob.x)
                 track.y = float(ob.y)
                 track.cls = int(ob.cls)
@@ -314,8 +330,23 @@ class DynamicWorldModel:
     def _add_bucket(self, track: DynamicTrack) -> None:
         key = _bucket(track.x, track.y)
         self._buckets.setdefault(key, set()).add(track.tid)
+        cell_key = (int(track.tier), int(track.i), int(track.j))
+        self._cell_index.setdefault(cell_key, []).append(track.tid)
 
     def _move_bucket(self, track: DynamicTrack, x: float, y: float, tier: int, i: int, j: int) -> None:
+        old_cell = (int(track.tier), int(track.i), int(track.j))
+        new_cell = (int(tier), int(i), int(j))
+        if old_cell != new_cell:
+            cell_list = self._cell_index.get(old_cell)
+            if cell_list is not None:
+                try:
+                    cell_list.remove(track.tid)
+                except ValueError:
+                    pass
+                if not cell_list:
+                    self._cell_index.pop(old_cell, None)
+            self._cell_index.setdefault(new_cell, []).append(track.tid)
+
         old_key = _bucket(track.x, track.y)
         new_key = _bucket(x, y)
         track.tier, track.i, track.j = int(tier), int(i), int(j)
@@ -338,6 +369,15 @@ class DynamicWorldModel:
             bucket.discard(tid)
             if not bucket:
                 del self._buckets[key]
+        cell_key = (int(track.tier), int(track.i), int(track.j))
+        cell_list = self._cell_index.get(cell_key)
+        if cell_list is not None:
+            try:
+                cell_list.remove(tid)
+            except ValueError:
+                pass
+            if not cell_list:
+                self._cell_index.pop(cell_key, None)
 
     # ------------------------------------------------------------------ scroll
     def on_scroll(self, deltas: Sequence[tuple[int, int]], tier_n: Sequence[int]) -> None:
@@ -358,6 +398,18 @@ class DynamicWorldModel:
             ni, nj = int(track.i) - d0, int(track.j) - d1
             n = int(tier_n[k])
             if 0 <= ni < n and 0 <= nj < n:
+                old_cell = (int(track.tier), int(track.i), int(track.j))
+                new_cell = (int(track.tier), ni, nj)
+                if old_cell != new_cell:
+                    cell_list = self._cell_index.get(old_cell)
+                    if cell_list is not None:
+                        try:
+                            cell_list.remove(track.tid)
+                        except ValueError:
+                            pass
+                        if not cell_list:
+                            self._cell_index.pop(old_cell, None)
+                    self._cell_index.setdefault(new_cell, []).append(track.tid)
                 track.i, track.j = ni, nj
             else:
                 self._remove(track.tid)
@@ -370,9 +422,13 @@ class DynamicWorldModel:
         semantics), an occupied track is preferred; ties follow insertion
         order, so results stay deterministic.
         """
+        tids = self._cell_index.get((int(tier), int(i), int(j)))
+        if not tids:
+            return None
         fallback: DynamicTrack | None = None
-        for track in self._tracks.values():
-            if int(track.tier) == int(tier) and int(track.i) == int(i) and int(track.j) == int(j):
+        for tid in tids:
+            track = self._tracks.get(tid)
+            if track is not None:
                 if self.state_of(track) in OCCUPIED_STATES:
                     return track
                 if fallback is None:
@@ -445,6 +501,7 @@ class DynamicWorldModel:
         """Remove all temporal state (no ghost state may survive reset)."""
         self._tracks.clear()
         self._buckets.clear()
+        self._cell_index.clear()
         self._next_tid = 0
         self.frame_index = -1
         self.last_timestamp = None

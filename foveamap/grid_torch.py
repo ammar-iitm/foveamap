@@ -44,6 +44,11 @@ from .grid import (
 )
 from .core.ontology import PERSON, VEHICLE, NUM_CLASSES, GROUND_CLASSES
 from .core.config import GridConfig, TerrainConfig, DynamicConfig
+from .core.confidence import (
+    pack_confidence_torch,
+    unpack_primary_confidence_torch,
+    unpack_secondary_confidence_torch,
+)
 from .temporal import (
     ACTIVE_DYNAMIC as DYN_ACTIVE,
     TEMPORARILY_MISSING as DYN_MISSING,
@@ -139,12 +144,12 @@ class TorchTierLayers:
     @property
     def secondary_confidence(self) -> torch.Tensor:
         """Secondary class confidence in [0.0, 1.0] stored in conf lower nibble."""
-        return (self.conf & 0x0F).float() / 15.0
+        return unpack_secondary_confidence_torch(self.conf)
 
     @property
     def primary_confidence(self) -> torch.Tensor:
         """Primary class confidence in [0.0, 1.0] stored in conf upper nibble."""
-        return (self.conf >> 4).float() / 15.0
+        return unpack_primary_confidence_torch(self.conf)
 
     @property
     def count16(self) -> torch.Tensor:
@@ -554,13 +559,21 @@ class TorchFoveatedGrid(FoveatedGrid):
         p = st["p_static"][obs]
         p = p / p.sum(1, keepdim=True).clamp(min=1e-9)
         old_c = s.cls[i, j].long()
-        old_conf = s.conf[i, j].to(fdt) / 255.0
+        old_conf = unpack_primary_confidence_torch(s.conf[i, j]).to(fdt)
+        old_sec_c = (s.flags[i, j] >> 4).to(torch.uint8)
+        old_sec_conf = unpack_secondary_confidence_torch(s.conf[i, j]).to(fdt)
         a = t.alpha if self.fuse else 1.0
         q = a * p
         valid_old = old_c != UNKNOWN
         safe_c = torch.where(valid_old, old_c, 0)
         delta = torch.where(valid_old, (1 - a) * old_conf, 0.0)
         q.scatter_add_(1, safe_c[:, None], delta[:, None])
+
+        valid_sec = (old_sec_c != 0xF) & (old_sec_c < NUM_CLASSES)
+        safe_sec = torch.where(valid_sec, old_sec_c.long(), 0)
+        delta_sec = torch.where(valid_sec, (1 - a) * old_sec_conf, 0.0)
+        q.scatter_add_(1, safe_sec[:, None], delta_sec[:, None])
+
         new_c = q.argmax(1).to(torch.uint8)
         s.cls[i, j] = new_c
         q_sum = q.sum(1).clamp(min=1e-9)
@@ -578,25 +591,49 @@ class TorchFoveatedGrid(FoveatedGrid):
         gcls = torch.where(pg_sum > 0.05 * q_sum, pg.argmax(1), 0xF)
         gconf = torch.where(pg_sum > 0, pg.max(dim=1).values / q_sum, 0.0)
         use_ground = (gcls != 0xF) & (gcls != new_c.long()) & (gconf > 0.02)
+
+        # Prior ground evidence persistence under occlusion:
+        # If the cell has an established physical ground elevation, but the dominant class
+        # is non-ground (e.g. overhead bridge, tree canopy, vehicle) and current frame contains
+        # no ground points (g_new is NaN), retain the known ground class in secondary evidence.
+        g_new = st["ground"][obs]
+        old_c_is_ground = self._ground_mask[safe_c] & valid_old
+        old_sec_is_ground = (old_sec_c < NUM_CLASSES) & self._ground_mask[safe_sec] & (old_sec_c != 0xF)
+
+        prior_ground_c = torch.where(
+            old_c_is_ground, safe_c.to(torch.uint8),
+            torch.where(old_sec_is_ground, old_sec_c, torch.tensor(0xF, dtype=torch.uint8, device=q.device)),
+        )
+        prior_ground_conf = torch.where(
+            old_c_is_ground, old_conf,
+            torch.where(old_sec_is_ground, old_sec_conf, torch.tensor(0.0, dtype=fdt, device=q.device)),
+        )
+
+        new_c_is_ground = self._ground_mask[new_c.long()]
+        has_prior_ground = (prior_ground_c != 0xF) & (~new_c_is_ground) & s.ground[i, j].isfinite() & (~g_new.isfinite())
+
         final_sec = torch.where(
             use_ground, gcls,
-            torch.where(has_runner, sec_c, torch.tensor(0xF, dtype=torch.long, device=q.device)),
+            torch.where(
+                has_prior_ground, prior_ground_c.long(),
+                torch.where(has_runner, sec_c, torch.tensor(0xF, dtype=torch.long, device=q.device)),
+            ),
         )
         final_sec_conf = torch.where(
             use_ground, gconf,
-            torch.where(has_runner, sec_conf_runner, torch.tensor(0.0, dtype=q.dtype, device=q.device)),
+            torch.where(
+                has_prior_ground, prior_ground_conf,
+                torch.where(has_runner, sec_conf_runner, torch.tensor(0.0, dtype=q.dtype, device=q.device)),
+            ),
         )
-        has_sec = use_ground | has_runner
+        has_sec = use_ground | has_prior_ground | has_runner
         sec_c_id = torch.where(has_sec, final_sec.to(torch.uint8), torch.tensor(0xF, dtype=torch.uint8, device=q.device))
-        sec_conf_4bit = (final_sec_conf * 15.0).round().clamp(0, 15).to(torch.uint8)
-        prim_conf_4bit = ((q.max(1).values / q_sum) * 15.0).round().clamp(0, 15).to(torch.uint8)
-        s.conf[i, j] = (prim_conf_4bit << 4) | (sec_conf_4bit & 0x0F)
+        s.conf[i, j] = pack_confidence_torch(q.max(1).values / q_sum, final_sec_conf)
 
         # Secondary-evidence nibble stores the class selected above.
         keep_sec = sec_c_id.long()
 
         # ---- heights
-        g_new = st["ground"][obs]
         g_old = s.ground[i, j].to(fdt)
         both = g_new.isfinite() & g_old.isfinite()
         g = torch.where(both, (1 - a) * g_old + a * g_new, torch.where(g_new.isfinite(), g_new, g_old))
@@ -750,7 +787,7 @@ class TorchFoveatedGrid(FoveatedGrid):
         cost = torch.where(slope_flag, cost + torch.round(slope_excess * 40).int(), cost)
         cost = torch.where(has_slope & (slope_rad >= slope_crit), cost.clamp(min=220), cost)
 
-        cost = torch.where(s.conf < 150, cost + 25, cost)
+        cost = torch.where(s.primary_confidence < (150.0 / 255.0), cost + 25, cost)
         stale = (s.age != UNKNOWN) & (s.age >= stale_thresh)
         cost = torch.where(stale, cost + 20, cost).clamp(0, 254)
         unknown = cls == UNKNOWN
@@ -910,7 +947,7 @@ class TorchFoveatedGrid(FoveatedGrid):
         if self.origins is None:
             return {"tier": -1, "state": "OUT_OF_BOUNDS", "is_unknown": True, "is_traversable": False}
 
-        f = self.fine_index_t(torch.tensor([[x, y]], device=self.device))
+        f = self.fine_index_t(torch.tensor([[x, y]], dtype=torch.float64, device=self.device if self.device.type != "mps" else "cpu"))
         for k, (t, org) in enumerate(zip(self.tiers, self.origins)):
             org_t = torch.as_tensor(org, device=self.device)
             ij = torch.div(f, t.ratio, rounding_mode="floor") - org_t
@@ -973,6 +1010,8 @@ class TorchFoveatedGrid(FoveatedGrid):
                     "primary_class": cls,
                     "cls": cls,
                     "conf": int(s.conf[i, j].item()),
+                    "confidence": float(s.primary_confidence[i, j].item()),
+                    "primary_confidence": float(s.primary_confidence[i, j].item()),
                     "secondary_class": int(s.secondary_class[i, j].item()),
                     "secondary_confidence": float(s.secondary_confidence[i, j].item()),
                     "cost": cost,
@@ -1005,18 +1044,26 @@ class TorchFoveatedGrid(FoveatedGrid):
         except (TypeError, ValueError):
             return 180
 
-    def is_traversable(self, x: float, y: float, max_cost: int | None = None) -> bool:
+    def is_traversable(self, x: float, y: float, max_cost: int | None = None, clearance_req: float = 0.0) -> bool:
         """Check if world coordinate (x, y) is safely traversable on device.
 
         With ``max_cost=None`` (default) the authoritative configured
         threshold applies, agreeing with ``query_point()["is_traversable"]``.
         An explicit ``max_cost`` is a planner policy override.
+        ``clearance_req`` specifies required overhead clearance in metres;
+        open road (clearance is None) satisfies any clearance requirement.
         """
         q = self.query_point(x, y)
         if q.get("dynamic", False) or q["is_unknown"] or q.get("cost", UNKNOWN) == UNKNOWN:
             return False
         limit = self._trav_max() if max_cost is None else int(max_cost)
-        return q.get("cost", 255) < limit
+        if q.get("cost", 255) >= limit:
+            return False
+        if clearance_req > 0.0:
+            clearance = q.get("clear", None)
+            if clearance is not None and float(clearance) < clearance_req:
+                return False
+        return True
 
     def get_height(self, x: float, y: float) -> float | None:
         """Get best elevation estimate at world coordinate (x, y) on device."""

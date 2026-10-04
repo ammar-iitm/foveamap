@@ -60,6 +60,11 @@ from .core.ontology import (
     PERSON,
 )
 from .core.config import GridConfig, TerrainConfig, DynamicConfig, DEFAULT_COST_PRIOR
+from .core.confidence import (
+    pack_confidence_np,
+    unpack_primary_confidence_np,
+    unpack_secondary_confidence_np,
+)
 from .temporal import (
     DynamicWorldModel,
     DynamicObservation,
@@ -169,12 +174,12 @@ class TierLayers:
         stored nibble prefers a distinct ground class, the confidence is the
         ground-class confidence, otherwise it is the runner-up confidence.
         """
-        return ((self.conf & 0x0F).astype(np.float32) / 15.0)
+        return unpack_secondary_confidence_np(self.conf)
 
     @property
     def primary_confidence(self) -> np.ndarray:
         """Primary confidence (0.0 to 1.0) stored in conf upper nibble."""
-        return ((self.conf >> 4).astype(np.float32) / 15.0)
+        return unpack_primary_confidence_np(self.conf)
 
     @property
     def dynamic(self) -> np.ndarray:
@@ -689,11 +694,15 @@ class FoveatedGrid:
         p = st["p_static"][obs]
         p = p / np.maximum(p.sum(1, keepdims=True), 1e-9)
         old_c = s.cls[i, j].astype(np.int64)
-        old_conf = s.conf[i, j] / 255.0
+        old_conf = unpack_primary_confidence_np(s.conf[i, j])
+        old_sec_c = (s.flags[i, j] >> 4).astype(np.uint8)
+        old_sec_conf = unpack_secondary_confidence_np(s.conf[i, j])
         a = t.alpha if self.fuse else 1.0
         q = a * p
         has_old = old_c != UNKNOWN
         q[np.nonzero(has_old)[0], old_c[has_old]] += (1 - a) * old_conf[has_old]
+        has_old_sec = (old_sec_c != 0xF) & (old_sec_c < NUM_CLASSES)
+        q[np.nonzero(has_old_sec)[0], old_sec_c[has_old_sec]] += (1 - a) * old_sec_conf[has_old_sec]
         new_c = q.argmax(1)
         s.cls[i, j] = new_c
         q_sum = np.maximum(q.sum(1), 1e-9)
@@ -714,19 +723,36 @@ class FoveatedGrid:
         gcls = np.where(pg_sum > 0.05 * q_sum, pg.argmax(1), 0xF)
         gconf = np.where(pg_sum > 0.0, pg.max(1) / q_sum, 0.0)
         use_ground = (gcls != 0xF) & (gcls != new_c) & (gconf > 0.02)
-        final_sec = np.where(use_ground, gcls, np.where(has_runner, sec_c, 0xF)).astype(np.uint8)
-        final_sec_conf = np.where(use_ground, gconf, np.where(has_runner, sec_conf_runner, 0.0))
-        has_sec = use_ground | has_runner
+
+        # Prior ground evidence persistence under occlusion:
+        # If the cell has an established physical ground elevation, but the dominant class
+        # is non-ground (e.g. overhead bridge, tree canopy, vehicle) and current frame contains
+        # no ground points (g_new is NaN), retain the known ground class in secondary evidence.
+        g_new = st["ground"][obs]
+        old_c_is_ground = np.isin(old_c, list(GROUND_CLASSES))
+        old_sec_is_ground = np.isin(old_sec_c, list(GROUND_CLASSES)) & (old_sec_c != 0xF)
+
+        prior_ground_c = np.where(old_c_is_ground, old_c, np.where(old_sec_is_ground, old_sec_c, 0xF)).astype(np.uint8)
+        prior_ground_conf = np.where(old_c_is_ground, old_conf, np.where(old_sec_is_ground, old_sec_conf, 0.0))
+
+        has_prior_ground = (prior_ground_c != 0xF) & (~np.isin(new_c, list(GROUND_CLASSES))) & np.isfinite(s.ground[i, j]) & (~np.isfinite(g_new))
+
+        final_sec = np.where(
+            use_ground, gcls,
+            np.where(has_prior_ground, prior_ground_c, np.where(has_runner, sec_c, 0xF))
+        ).astype(np.uint8)
+        final_sec_conf = np.where(
+            use_ground, gconf,
+            np.where(has_prior_ground, prior_ground_conf, np.where(has_runner, sec_conf_runner, 0.0))
+        )
+        has_sec = use_ground | has_prior_ground | has_runner
         sec_c_id = np.where(has_sec, final_sec, 0xF).astype(np.uint8)
-        sec_conf_4bit = np.clip(np.round(final_sec_conf * 15.0), 0, 15).astype(np.uint8)
-        prim_conf_4bit = np.clip(np.round((q.max(1) / q_sum) * 15.0), 0, 15).astype(np.uint8)
-        s.conf[i, j] = (prim_conf_4bit << 4) | (sec_conf_4bit & 0x0F)
+        s.conf[i, j] = pack_confidence_np(q.max(1) / q_sum, final_sec_conf)
 
         # Ground/secondary nibble stores the secondary evidence class above.
         keep_sec = sec_c_id
 
         # ---- heights
-        g_new = st["ground"][obs]
         g_old = s.ground[i, j].astype(np.float64)
         both = np.isfinite(g_new) & np.isfinite(g_old)
         g = np.where(both, (1 - a) * g_old + a * g_new, np.where(np.isfinite(g_new), g_new, g_old))
@@ -890,7 +916,7 @@ class FoveatedGrid:
         cost = np.where(slope_flag, cost + np.round(slope_excess * 40).astype(np.int32), cost)
         cost = np.where(has_slope & (slope_rad >= slope_crit), np.maximum(cost, 220), cost)
 
-        cost = np.where(s.conf < 150, cost + 25, cost)
+        cost = np.where(s.primary_confidence < (150.0 / 255.0), cost + 25, cost)
         stale = (s.age != UNKNOWN) & (s.age >= stale_thresh)
         cost = np.where(stale, cost + 20, cost)
         cost = np.clip(cost, 0, 254)
@@ -1052,6 +1078,8 @@ class FoveatedGrid:
                     "primary_class": cls,
                     "cls": cls,
                     "conf": int(s.conf[i, j]),
+                    "confidence": float(s.primary_confidence[i, j]),
+                    "primary_confidence": float(s.primary_confidence[i, j]),
                     "secondary_class": int(s.secondary_class[i, j]),
                     "secondary_confidence": float(s.secondary_confidence[i, j]),
                     "cost": cost,
@@ -1059,6 +1087,7 @@ class FoveatedGrid:
                     "dynamic": dyn,
                     "state": state,
                     "ground": float(s.ground[i, j]) if np.isfinite(s.ground[i, j]) else None,
+                    "ground_elev": float(s.ground[i, j]) if np.isfinite(s.ground[i, j]) else None,
                     "z_min": float(s.z_min[i, j]) if np.isfinite(s.z_min[i, j]) else None,
                     "z_max": float(s.z_max[i, j]) if np.isfinite(s.z_max[i, j]) else None,
                     "rough": float(s.rough[i, j]) if np.isfinite(s.rough[i, j]) else None,
@@ -1084,18 +1113,26 @@ class FoveatedGrid:
         except (TypeError, ValueError):
             return 180
 
-    def is_traversable(self, x: float, y: float, max_cost: int | None = None) -> bool:
+    def is_traversable(self, x: float, y: float, max_cost: int | None = None, clearance_req: float = 0.0) -> bool:
         """Check if world coordinate (x, y) is safely traversable.
 
         With ``max_cost=None`` (default) the authoritative configured
         threshold applies, agreeing with ``query_point()["is_traversable"]``.
         An explicit ``max_cost`` is a planner policy override.
+        ``clearance_req`` specifies required overhead clearance in metres;
+        open road (clearance is None) satisfies any clearance requirement.
         """
         q = self.query_point(x, y)
         if q.get("dynamic", False) or q["is_unknown"] or q.get("cost", UNKNOWN) == UNKNOWN:
             return False
         limit = self._trav_max() if max_cost is None else int(max_cost)
-        return q.get("cost", 255) < limit
+        if q.get("cost", 255) >= limit:
+            return False
+        if clearance_req > 0.0:
+            clearance = q.get("clear", None)
+            if clearance is not None and float(clearance) < clearance_req:
+                return False
+        return True
 
     def get_height(self, x: float, y: float) -> float | None:
         """Get best elevation estimate at world coordinate (x, y)."""

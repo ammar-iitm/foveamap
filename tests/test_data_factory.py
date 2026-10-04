@@ -79,7 +79,7 @@ def test_runtime_process_source_stream():
 
 def test_legacy_pipeline_step_source_stream():
     source = create_source("simulator", n_steps=3, seed=42)
-    pipeline = FoveaMapPipeline(grid="numpy", device="cpu")
+    pipeline = FoveaMapPipeline(grid="numpy", device="cpu", allow_untrained=True)
 
     outputs = list(pipeline.step_source(source, max_frames=2))
     assert len(outputs) == 2

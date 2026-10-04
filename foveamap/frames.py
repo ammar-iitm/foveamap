@@ -93,6 +93,9 @@ def rows_from_elevation(pts, sensor, elev_of_row):
     d = pts - sensor
     elev = np.degrees(np.arctan2(d[:, 2], np.hypot(d[:, 0], d[:, 1])))
     asc = elev_of_row[::-1]                     # rows are top-first; np.interp needs ascending x
+    # Enforce non-decreasing monotonicity with small regularizing spacing to guarantee mathematical invariants of np.interp
+    asc = np.maximum.accumulate(asc)
+    asc = asc + np.arange(len(asc), dtype=asc.dtype) * 1e-4
     n = len(elev_of_row)
     r = np.rint(np.interp(elev, asc, np.arange(n)[::-1].astype(np.float64))).astype(np.int64)
     spacing = abs(asc[-1] - asc[0]) / max(n - 1, 1)

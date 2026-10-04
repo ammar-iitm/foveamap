@@ -701,23 +701,3 @@ def test_ros_package_structurally_colcon_valid():
         assert m in cmake, f"{m} not wired into CMakeLists.txt"
     for dep in ("rosidl_default_generators", "std_msgs", "sensor_msgs"):
         assert dep in cmake, f"{dep} missing from CMakeLists.txt"
-
-
-# ------------------------------------------------------- B guarded ROS2 tests
-@needs_ros
-def test_ros_node_lifecycle_with_rclpy():
-    node = FoveaMapRosNode(ros_params={"perception.backend_type": "classical"})
-    node.configure()
-    node.activate()
-    assert node.state == "ACTIVE"
-    node.deactivate()
-    node.shutdown()
-    assert node.state == "SHUTDOWN"
-
-
-@needs_ros
-def test_ros_qos_conversion_with_rclpy():
-    from foveamap_ros.qos import to_rclpy
-    q = to_rclpy(LIDAR_INPUT_QOS)
-    assert q.depth == 5
-

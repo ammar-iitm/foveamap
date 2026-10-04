@@ -53,3 +53,24 @@ def test_row_elevations_fill_matches_numpy(rows):
     sensor = np.zeros(3, np.float32)
     got = FT.row_elevations(*(torch.from_numpy(v) for v in (pts, row, sensor)), 32).numpy()
     np.testing.assert_allclose(got, row_elevations(pts, row, sensor, 32), atol=1e-5)
+
+
+def test_rows_from_elevation_non_monotonic_robustness():
+    from foveamap.frames import rows_from_elevation as rows_np
+    # Inverted / noisy row elevations
+    noisy_elev = np.array([2.0, -1.0, -4.0, -3.0, -5.0, -10.0], dtype=np.float32)
+    # Target points: elevations covering intermediate ranges
+    sensor = np.zeros(3, dtype=np.float32)
+    pts = np.array([
+        [10.0, 0.0, -0.5],   # ~ -2.8 deg
+        [10.0, 0.0, -0.65],  # ~ -3.7 deg
+        [10.0, 0.0, 0.3],    # ~ +1.7 deg
+    ], dtype=np.float32)
+
+    r_np = rows_np(pts, sensor, noisy_elev)
+    r_th = FT.rows_from_elevation(torch.from_numpy(pts), torch.from_numpy(sensor), torch.from_numpy(noisy_elev))
+
+    assert r_th.dtype == torch.long
+    np.testing.assert_array_equal(r_th.cpu().numpy(), r_np)
+    # Ensure neither crashed or produced out-of-bounds indices
+    assert np.all((r_np >= -1) & (r_np < len(noisy_elev)))

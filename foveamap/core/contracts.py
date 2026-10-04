@@ -122,6 +122,34 @@ class LiDARFrame:
             metadata=dict(self.metadata),
         )
 
+    def __getitem__(self, key: str) -> Any:
+        if key == "inten":
+            return self.intensity
+        if key == "sensor":
+            return self.sensor_origin
+        if key == "prev":
+            return self.prev_sweeps
+        if key == "meta":
+            return self.metadata
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            if key in self.metadata:
+                return self.metadata[key]
+            raise KeyError(key) from None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            val = self[key]
+            return default if val is None else val
+        except KeyError:
+            return default
+
+    def __contains__(self, key: str) -> bool:
+        if key in ("inten", "sensor", "prev", "meta"):
+            return True
+        return hasattr(self, key) or key in self.metadata
+
     def validate(self) -> None:
         """Validate invariant shapes, dtypes, and numerical integrity."""
         # 1. Point coordinates
@@ -545,6 +573,7 @@ class MapSnapshot:
                     "min_z": float(tier.min_z[cx, cy]),
                     "max_z": float(tier.max_z[cx, cy]),
                     "ground": float(tier.ground[cx, cy]),
+                    "ground_elev": float(tier.ground[cx, cy]) if np.isfinite(tier.ground[cx, cy]) else None,
                     "roughness": float(tier.roughness[cx, cy]),
                     "slope_rad": slope_at_cell(
                         np.asarray(tier.ground, dtype=np.float64),
@@ -554,7 +583,18 @@ class MapSnapshot:
                         float(r),
                     ),
                     "dominant_class": cls_v,
-                    "confidence": float(tier.conf[cx, cy]),
+                    "primary_class": cls_v,
+                    "conf": int(tier.conf[cx, cy]),
+                    "confidence": (
+                        float(tier.primary_confidence[cx, cy])
+                        if hasattr(tier, "primary_confidence")
+                        else float((int(tier.conf[cx, cy]) >> 4) / 15.0)
+                    ),
+                    "primary_confidence": (
+                        float(tier.primary_confidence[cx, cy])
+                        if hasattr(tier, "primary_confidence")
+                        else float((int(tier.conf[cx, cy]) >> 4) / 15.0)
+                    ),
                     "secondary_class": sec_c,
                     "secondary_confidence": sec_conf,
                     "dynamic": dyn,
@@ -573,7 +613,8 @@ class MapSnapshot:
         Uses the unified traversability policy (known, non-dynamic,
         cost below the configured threshold from snapshot metadata, default
         180): lethal known costs are never traversable. ``clearance_req`` is
-        an additional physical constraint in metres.
+        an additional physical constraint in metres. An open road with no
+        observed overhead obstacle (clearance is None) satisfies any clearance requirement.
         """
         info = self.query_point(x, y)
         if info.get("state") in ("OUT_OF_BOUNDS", "UNKNOWN"):
@@ -586,7 +627,7 @@ class MapSnapshot:
             return False
         if clearance_req > 0.0:
             clearance = info.get("clearance", None)
-            if clearance is None or float(clearance) < clearance_req:
+            if clearance is not None and float(clearance) < clearance_req:
                 return False
         return True
 
