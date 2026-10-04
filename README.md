@@ -168,11 +168,11 @@ Demo drive: 60 frames of a world the model never saw in training. Validation mIo
 | Pothole recall within 10 m | 100.0% | — | — |
 | Objects within 25 m, precision / recall: vehicle, person, pole | 99.7% / 75.8%, 87.2% / 78.9%, 96.3% / 89.7% | reported | — |
 | Moving flag agrees with ground truth, matched objects | 87.0% | reported | — |
-| End-to-end latency p50 / p95 (2 vCPU, no GPU) | 318 / 371 ms | ≤ 50 ms on GPU | CPU only |
-| Throughput | 3.1 FPS | ≥ 20 FPS on GPU | CPU only |
-| Grid engine only vs same engine on uniform 5 cm grid | 119 ms vs 4,041 ms | — | 34× faster |
+| End-to-end latency p50 / p95, laptop CPU (Apple M5 Pro, NumPy grid engine) | 68 / 71 ms | ≤ 50 ms on GPU | CPU only |
+| Throughput, same runs | 14.6 FPS | ≥ 20 FPS on GPU | CPU only |
+| Grid engine only vs same engine on uniform 5 cm grid | 33 ms vs 649 ms | — | 20× faster |
 
-Stage means (ms): preprocess 38, inference 127, projection 51, fusion 68, publish 39. The object rows were measured later, on a laptop CPU, where object extraction takes about 4 ms per frame.
+Stage means (ms): preprocess 13, network 22, projection 19, fusion 14, publish under 1, objects 1. Measured at `2d501d6` with `python scripts/run_benchmark.py --grid numpy --device cpu --export none`, two runs that agree within 1 ms. The PyTorch grid engine on the same CPU gives 66 / 68–70 ms; on the laptop's GPU (Apple MPS) the network drops to 7–8 ms but the grid stages slow down, for 66–67 / 76–86 ms, since this drive is too small to keep that GPU busy. An earlier run on a 2-vCPU cloud machine, before most of the speed work, measured 318 / 371 ms. Real-data latency on a T4 is in the SemanticKITTI and nuScenes results below.
 
 **Objects.** `foveamap/objects.py` groups the map's vehicle, person and pole cells (seen this frame) and this frame's moving cells into objects, each with a class, a moving flag, an oriented box and a top height. Cells are grouped per class into 8-connected components on the 0.5 m raster, using the 5 cm cells where the fine tier has them; that bridges the gaps between scan rings without merging a person into the car beside them. The benchmark scores them against objects extracted the same way from a grid built from the ground-truth labels (a detection matches when its centre is within 1.5 m for vehicles, 0.75 m for people and poles), so the score measures how perception errors carry through to objects, not the grouping itself. Reported objects must have a minimum footprint (1 m² for vehicles, 0.05 m² for people, 0.02 m² for poles), chosen on real data (see the SemanticKITTI results); on this clean simulated drive the filter costs recall (vehicles 95.5% → 75.8%, people 81.4% → 78.9%, poles 90.8% → 89.7%). The dashboard draws the boxes (`O`).
 
