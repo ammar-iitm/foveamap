@@ -8,7 +8,7 @@ tiers meet.
 
 **Live dashboard: [foveamap-teal.vercel.app](https://foveamap-teal.vercel.app)**, replays of real
 Lidar run through the GPU pipeline on a T4, with object boxes. Switch between them in the header:
-SemanticKITTI sequence 08 (64-beam, 100 frames 1 s apart, p95 44–50 ms at 26–28 FPS, depending on the Colab machine) and
+SemanticKITTI sequence 08 (64-beam, 100 frames 1 s apart, p50 33–35 ms; p95 44–73 ms depending on the Colab machine) and
 [nuScenes scene-0103](https://foveamap-teal.vercel.app/?data=nuscenes) (32-beam, 40 keyframes at 2 Hz, 30 / 43 ms at 31 FPS).
 The hosted site replays recorded benchmark runs; to watch the pipeline process frames in real time, use the [live view](#live-view).
 
@@ -197,8 +197,8 @@ Measured with the SemanticKITTI notebook on a T4 GPU (stride 10, 40 epochs, seed
 | Points lost at tier edges | 0 | 0 | pass |
 | Drivable IoU on grid, 0–10 m | 91.9% | ≥ 90% | pass |
 | Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 61.4% / 52.9% / 41.8% / 12.9% | ≥ 70% near | fail |
-| p50 / p95 latency, full pipeline with object extraction, on the GPU (two sessions, two runs each) | 33.7 / 43.7 and 33.2 / 43.8 ms; 35.0 / 49.5 and 35.2 / 49.0 ms | ≤ 50 ms p95 | pass, narrowly in the second session |
-| Throughput, same runs | 28.4 / 28.3 FPS; 25.9 / 26.3 FPS | ≥ 20 FPS | pass |
+| p50 / p95 latency, full pipeline with object extraction, on the GPU (three sessions, two runs each) | 33.7 / 43.7 and 33.2 / 43.8 ms; 35.0 / 49.5 and 35.2 / 49.0 ms; 33.2 / 73.4 and 35.2 / 54.1 ms | ≤ 50 ms p95 | pass in two sessions, **fail** in the third |
+| Throughput, same runs | 28.4 / 28.3; 25.9 / 26.3; 24.8 / 25.7 FPS | ≥ 20 FPS | pass |
 
 KITTI scans average about 123,000 points, nearly 5 times as many as nuScenes keyframes (about 26,000), so every stage has more to do. The first run kept the point transforms on the CPU in float64 and missed the target. Moving them to the GPU fixed it (both columns use the 20-epoch model):
 
@@ -232,6 +232,8 @@ Adding object extraction and the pothole plane fit first pushed p95 to 57 ms (tw
 - **Object extraction without full-tier temporaries,** and the pothole plane's constants built once per device.
 
 Blocks of 10–15 consecutive slower frames still appear at different places in each run (the shared vCPUs; unmounting Google Drive did not remove them). In the first session they peaked at 41–48 ms; a second session with the same code (`seq08_session2_run*`) had more of them and one 161 ms frame, its typical frame was 1 ms slower (33.9 ms), and p95 came to 49.0–49.5 ms. The margin under 50 ms therefore depends on the Colab machine. The first session's runs are `seq08_compiled_run*` with `profile_seq08_compiled.txt`.
+
+A third session (`seq08_session3_run*`, `profile_seq08_session3.txt`) followed two more fixes: fusion finds its observed cells once instead of indexing with boolean masks, which cuts the host's waits for the GPU (stream synchronisations from 52 to 25 per frame, host-to-device copies from 60 to 35), and the previous sweeps are uploaded as float32. The typical frame got faster, 31.9–32.6 ms, the best so far, but that machine had the most stalls yet (frames of 77–118 ms scattered through the first run), and p95 came to 73.4 and 54.1 ms. The median is steady at 33–35 ms across all three sessions; the 95th percentile is set by Colab's shared machine, and on a busy one it misses 50 ms. The benchmark notebook now logs CPU steal time and the GPU's clock and power every 0.5 s next to each frame, to tell which it is.
 
 | Objects within 25 m (40-epoch model, first 100 frames of sequence 08) | Precision | Recall |
 | --- | --- | --- |
