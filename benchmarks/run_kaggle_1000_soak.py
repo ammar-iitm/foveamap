@@ -62,6 +62,22 @@ def get_driver_version() -> str:
 
 
 def get_git_provenance() -> Dict[str, Any]:
+    # Query git directly first to guarantee exact checked-out commit is recorded
+    try:
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, text=True).strip()
+        status = subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()
+        branch = subprocess.check_output(["git", "branch", "--show-current"], cwd=ROOT, text=True).strip()
+        return {
+            "git_commit": sha,
+            "tree_sha": tree,
+            "branch": branch or "detached",
+            "modified_files": [line.split()[-1] for line in status.splitlines() if line.strip()],
+            "checkpoint_sha256": EXPECTED_CHECKPOINT_SHA256,
+        }
+    except Exception:
+        pass
+
     prov_file = os.path.join(ROOT, "provenance.json")
     if os.path.exists(prov_file):
         try:
@@ -70,22 +86,11 @@ def get_git_provenance() -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Fallback to git command if .git exists
-    try:
-        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-        status = subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()
-        return {
-            "git_commit": sha,
-            "branch": "detected",
-            "modified_files": [line.split()[-1] for line in status.splitlines() if line.strip()],
-            "checkpoint_sha256": EXPECTED_CHECKPOINT_SHA256,
-        }
-    except Exception:
-        return {
-            "git_commit": "unknown",
-            "branch": "unknown",
-            "checkpoint_sha256": EXPECTED_CHECKPOINT_SHA256,
-        }
+    return {
+        "git_commit": "unknown",
+        "branch": "unknown",
+        "checkpoint_sha256": EXPECTED_CHECKPOINT_SHA256,
+    }
 
 
 def generate_soak_frames(total_frames: int, seed: int = 42) -> List[LiDARFrame]:

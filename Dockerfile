@@ -1,4 +1,5 @@
-# Production Container for FoveaMap (Phase 11 Productization)
+# Production CPU Container for FoveaMap (Phase 11 Productization - CPU inference)
+# For CUDA GPU deployments, use Dockerfile.gpu
 FROM python:3.11-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \

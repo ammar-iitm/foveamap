@@ -323,3 +323,35 @@ def test_http_server_endpoints_and_security(tmp_path):
     finally:
         server.stop()
         sdk.close()
+
+
+def test_packaging_and_docker_integrity():
+    """Verify Dockerfiles, dependencies separation, and CLI/ROS entry points."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+
+    # 1. CPU Dockerfile
+    dockerfile_cpu = (root / "Dockerfile").read_text(encoding="utf-8")
+    assert "USER appuser" in dockerfile_cpu
+    assert "HEALTHCHECK" in dockerfile_cpu
+    assert 'ENTRYPOINT ["foveamap"]' in dockerfile_cpu
+
+    # 2. GPU Dockerfile
+    dockerfile_gpu = (root / "Dockerfile.gpu").read_text(encoding="utf-8")
+    assert "nvidia/cuda" in dockerfile_gpu
+    assert "cu121" in dockerfile_gpu
+    assert "USER appuser" in dockerfile_gpu
+    assert "HEALTHCHECK" in dockerfile_gpu
+
+    # 3. Dependency hygiene
+    req_prod = (root / "requirements.txt").read_text(encoding="utf-8")
+    assert "pytest" not in req_prod.lower()
+    req_dev = (root / "requirements-dev.txt").read_text(encoding="utf-8")
+    assert "pytest" in req_dev.lower()
+
+    # 4. ROS entrypoint and launch file
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'foveamap-ros = "foveamap_ros.node:main"' in pyproject
+    launch_file = root / "foveamap_ros" / "launch" / "foveamap.launch.py"
+    assert launch_file.is_file()
+
