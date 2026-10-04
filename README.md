@@ -146,7 +146,7 @@ Demo drive: 60 frames of a world the model never saw in training. Validation mIo
 | Moving-object IoU (points) | 89.7% | reported | — |
 | Curb (15 cm) recall within 10 m | 98.9% | ≥ 90% | pass |
 | Pothole recall within 10 m | 100.0% | — | — |
-| Objects within 25 m, precision / recall: vehicle, person, pole | 98.5% / 95.5%, 82.8% / 81.4%, 87.8% / 90.8% | reported | — |
+| Objects within 25 m, precision / recall: vehicle, person, pole | 99.7% / 75.8%, 87.2% / 78.9%, 96.3% / 89.7% | reported | — |
 | Moving flag agrees with ground truth, matched objects | 87.0% | reported | — |
 | End-to-end latency p50 / p95 (2 vCPU, no GPU) | 318 / 371 ms | ≤ 50 ms on GPU | CPU only |
 | Throughput | 3.1 FPS | ≥ 20 FPS on GPU | CPU only |
@@ -154,7 +154,7 @@ Demo drive: 60 frames of a world the model never saw in training. Validation mIo
 
 Stage means (ms): preprocess 38, inference 127, projection 51, fusion 68, publish 39. The object rows were measured later, on a laptop CPU, where object extraction takes about 4 ms per frame.
 
-**Objects.** `foveamap/objects.py` groups the map's vehicle, person and pole cells (seen this frame) and this frame's moving cells into objects, each with a class, a moving flag, an oriented box and a top height. Cells are grouped per class into 8-connected components on the 0.5 m raster, using the 5 cm cells where the fine tier has them; that bridges the gaps between scan rings without merging a person into the car beside them. The benchmark scores them against objects extracted the same way from a grid built from the ground-truth labels (a detection matches when its centre is within 1.5 m for vehicles, 0.75 m for people and poles), so the score measures how perception errors carry through to objects, not the grouping itself. The dashboard draws the boxes (`O`).
+**Objects.** `foveamap/objects.py` groups the map's vehicle, person and pole cells (seen this frame) and this frame's moving cells into objects, each with a class, a moving flag, an oriented box and a top height. Cells are grouped per class into 8-connected components on the 0.5 m raster, using the 5 cm cells where the fine tier has them; that bridges the gaps between scan rings without merging a person into the car beside them. The benchmark scores them against objects extracted the same way from a grid built from the ground-truth labels (a detection matches when its centre is within 1.5 m for vehicles, 0.75 m for people and poles), so the score measures how perception errors carry through to objects, not the grouping itself. Reported objects must have a minimum footprint (1 m² for vehicles, 0.05 m² for people, 0.02 m² for poles), chosen on real data (see the SemanticKITTI results); on this clean simulated drive the filter costs recall (vehicles 95.5% → 75.8%, people 81.4% → 78.9%, poles 90.8% → 89.7%). The dashboard draws the boxes (`O`).
 
 Simulated data is easier than real Lidar, so treat these numbers as a check that the pipeline works, not as benchmark claims. The real-data numbers come from the SemanticKITTI and nuScenes notebooks below.
 
@@ -177,8 +177,9 @@ Measured with the SemanticKITTI notebook on a T4 GPU (stride 10, 40 epochs, seed
 | Points lost at tier edges | 0 | 0 | pass |
 | Drivable IoU on grid, 0–10 m | 91.9% | ≥ 90% | pass |
 | Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 61.4% / 52.9% / 41.8% / 12.9% | ≥ 70% near | fail |
-| p50 / p95 latency, features + grid engine on the GPU | 34.7 / 46.5 ms | ≤ 50 ms p95 | pass |
-| Throughput, same run | 27.4 FPS | ≥ 20 FPS | pass |
+| p50 / p95 latency, features + grid engine on the GPU, before objects and the pothole plane fit | 34.7 / 46.5 ms | ≤ 50 ms p95 | pass |
+| p50 / p95 latency with object extraction and the pothole plane fit (two runs) | 41.6 / 57.0 and 42.0 / 57.0 ms | ≤ 50 ms p95 | **fail** |
+| Throughput, latest runs | 22.2 FPS | ≥ 20 FPS | pass |
 
 KITTI scans average about 123,000 points, nearly 5 times as many as nuScenes keyframes (about 26,000), so every stage has more to do. The first run kept the point transforms on the CPU in float64 and missed the target. Moving them to the GPU fixed it (both columns use the 20-epoch model):
 
@@ -192,7 +193,17 @@ KITTI scans average about 123,000 points, nearly 5 times as many as nuScenes key
 | **p50 / p95 end to end** | **47 / 149** | **36 / 46** |
 | Throughput (FPS) | 16.9 | 26.2 |
 
-The p95 margin is thin: 46 ms in both runs with GPU transforms, against 50 ms. Colab's shared vCPUs have busy spells that slow every stage at once for a few seconds: in two runs with the CPU transforms, the slow stretches fell in different places (frames 26–36 and 90–98, then 50–58) and those frames had normal point counts, so they come from the machine, not the data. The 40-epoch run is `seq08_metrics.json` / `benchmark_seq08.log`, the 20-epoch run with GPU transforms `*_epochs20*`, and the earlier one `*_cpu_transforms*`.
+The p95 margin was thin before objects were added: 46 ms in both runs with GPU transforms, against 50 ms. Colab's shared vCPUs have busy spells that slow every stage at once for a few seconds: in two runs with the CPU transforms, the slow stretches fell in different places (frames 26–36 and 90–98, then 50–58) and those frames had normal point counts, so they come from the machine, not the data. The 40-epoch run is `seq08_metrics.json` / `benchmark_seq08.log`, the 20-epoch run with GPU transforms `*_epochs20*`, and the earlier one `*_cpu_transforms*`.
+
+Adding object extraction and the pothole plane fit (benchmark-only notebook, two runs at `569268b`: `seq08_objects_run1_metrics.json`, `seq08_objects_run2_metrics.json` and their logs) pushed p95 over the target. In the 50 fastest frames the map pipeline takes 36.1 ms (preprocess 11.6, network 4.2, projection 6.8, fusion 11.9, publish 1.6) and object extraction 4.4 ms on the host CPU, 40.5 ms in all. In the slowest 10 frames every stage slows by 25–70% at once, and those frames differ between the two runs, so the tail is again the shared vCPUs; it adds about 15 ms. Reaching 50 ms at p95 needs the typical frame nearer 35 ms with objects included.
+
+| Objects within 25 m (40-epoch model, first 100 frames of sequence 08) | Precision | Recall |
+| --- | --- | --- |
+| Vehicle (at least 1 m²) | 64.7% | 69.8% |
+| Person (at least 0.05 m²) | 12.8% | 28.1% |
+| Pole / sign (at least 0.02 m²) | 23.9% | 61.5% |
+
+Moving flags agree with ground truth on 95% of matched objects. Without a size filter, precision was 34%, 9% and 16%: most false objects on real scans are a handful of misclassified cells, not near any real object (only about 12% are fragments of a real one). The minimum footprints come from the benchmark's sweep on this same sequence (per class, the smallest area whose F1 is within 1 point of the best), so they are tuned on the data they are scored on; it is one number per class. People stay poor at any size, matching the network's 33% person IoU: object quality is limited by perception, not by grouping.
 
 - **The simulator alone doesn't carry over to real Lidar.** It scores 10.7% on SemanticKITTI, about the same as on nuScenes (9.8%), even though KITTI's 64-beam HDL-64E is the sensor it simulates. The gap comes from simulated versus real scenes, not the beam count.
 - **Fine-tuning brings it to 59.7% mIoU**, with road at 88.6% and vehicles at 78.0%, against 46.3% after fine-tuning on nuScenes-mini's 8 scenes.
