@@ -27,9 +27,13 @@ IS_OBJECT[list(OBJECT_CLASSES)] = True
 MIN_CELLS = {VEHICLE: 3, PERSON: 2, POLE: 2}     # fewer member cells than this is treated as noise
 MATCH_DIST = {VEHICLE: 1.5, PERSON: 0.75, POLE: 0.75}   # m, centre distance for a detection to match
 FIELDS = ("cls", "moving", "x", "y", "length", "width", "yaw", "z_top", "n_cells", "area")
-# minimum footprint (m^2) of a detected object, tried by the benchmark to tune the size filter
-AREA_SWEEP = {VEHICLE: (0.0, 0.05, 0.1, 0.2, 0.5, 1.0), PERSON: (0.0, 0.01, 0.02, 0.05, 0.1, 0.2),
-              POLE: (0.0, 0.01, 0.02, 0.05, 0.1, 0.2)}
+# Minimum footprint (m^2) of a reported object. Most false objects on real scans are a few
+# misclassified cells far from any real object. Chosen from the benchmark's sweep on SemanticKITTI
+# sequence 08: per class, the smallest area whose F1 is within 1 point of the best (vehicles were
+# still improving at 1 m^2, the largest tried then, so the sweep now goes further).
+MIN_AREA = {VEHICLE: 1.0, PERSON: 0.05, POLE: 0.02}
+AREA_SWEEP = {VEHICLE: (0.0, 0.2, 0.5, 1.0, 1.5, 2.0, 3.0), PERSON: (0.0, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3),
+              POLE: (0.0, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3)}
 
 
 def _members(grid, snap, dyn, max_age):
@@ -62,6 +66,11 @@ def _members(grid, snap, dyn, max_age):
     if not out:
         return None
     return {key: np.concatenate([m[key] for m in out]) for key in out[0]}
+
+
+def report(objs):
+    """The objects worth reporting: those at least MIN_AREA in footprint."""
+    return [o for o in objs if o["area"] >= MIN_AREA[o["cls"]]]
 
 
 def extract_objects(grid, snap, dyn=None, max_age=0):

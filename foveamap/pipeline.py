@@ -22,7 +22,7 @@ from .frames import DatasetInfo, make_features, prev_in_ego, transform
 from .grid import (FoveatedGrid, UNKNOWN, DRIVABLE, F_DYNAMIC, F_OVERHANG, F_STEP, F_DEPRESSION)
 from .grid_torch import TorchFoveatedGrid
 from . import features_torch
-from .objects import AREA_SWEEP, OBJECT_CLASSES, extract_objects, match_objects, pack
+from .objects import AREA_SWEEP, OBJECT_CLASSES, extract_objects, match_objects, pack, report
 
 BANDS = [(0, 10), (10, 25), (25, 50), (50, 100)]
 BAND_NAMES = ["0–10 m", "10–25 m", "25–50 m", "50–100 m"]
@@ -271,7 +271,8 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
 
         # ---- objects: obstacle cells grouped into classified, boxed objects (host, timed)
         t0 = time.perf_counter()
-        objs = extract_objects(pipe.grid, snap, dyn)
+        candidates = extract_objects(pipe.grid, snap, dyn)
+        objs = report(candidates)
         r["timing"]["objects"] = time.perf_counter() - t0
         for k in ("cls_pts", "moving_pts", "stats", "pw"):    # benchmark bookkeeping, not timed
             r[k] = to_host(r[k])
@@ -286,7 +287,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         gobjs = extract_objects(gt_grid, gt_grid.state, gdyn)
         cnt, agree, pairs, dg = match_objects(objs, gobjs, ego)
         for q in range(len(AREA_SWEEP[OBJECT_CLASSES[0]])):     # the same, keeping only detections this large
-            big = [o for o in objs if o["area"] >= AREA_SWEEP[o["cls"]][q]]
+            big = [o for o in candidates if o["area"] >= AREA_SWEEP[o["cls"]][q]]
             for c, v in match_objects(big, gobjs, ego)[0].items():
                 obj_sweep[c][q] += np.asarray(v)
         for c in OBJECT_CLASSES:
