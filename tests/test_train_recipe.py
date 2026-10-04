@@ -51,3 +51,19 @@ def test_top_confusions():
     assert tc["a"] == dict(recall=0.9, predicted_as=[("b", 0.1)])
     assert tc["b"]["recall"] == 0.6 and tc["b"]["predicted_as"][0] == ("a", 0.3)
     assert "c" not in tc
+
+
+def test_training_arrays_on_disk_match_ram(drive, tmp_path):
+    from foveamap.frames import SIM_INFO, frames_to_training_arrays
+    frames, _ = drive
+    ram = frames_to_training_arrays(frames, SIM_INFO)
+    disk = frames_to_training_arrays(frames, SIM_INFO, out_dir=str(tmp_path))
+    for a, b in zip(ram, disk):
+        assert isinstance(b, np.memmap)
+        np.testing.assert_array_equal(a, b)
+    from train import label_stats
+    from foveamap.sim import NUM_CLASSES
+    freq, n_mov, n_static = label_stats(disk[1], disk[2], NUM_CLASSES, chunk=1)
+    Y, M = ram[1], ram[2]
+    assert (freq == np.bincount(Y[Y >= 0].astype(np.int64), minlength=NUM_CLASSES)).all()
+    assert n_mov == M.sum() and n_static == (~M & (Y >= 0)).sum()

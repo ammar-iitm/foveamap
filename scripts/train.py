@@ -77,6 +77,19 @@ def evaluate(model, frames, info):
                 confusion=total.tolist())          # rows = label, cols = prediction, all bands
 
 
+def label_stats(Y, M, n_classes, chunk=128):
+    """(labelled pixels per class, moving pixels, static labelled pixels), read a chunk of frames at a
+    time so memory-mapped arrays never need a full-size temporary."""
+    freq, n_mov, n_static = np.zeros(n_classes), 0, 0
+    for i in range(0, len(Y), chunk):
+        y, m = np.asarray(Y[i:i + chunk]), np.asarray(M[i:i + chunk])
+        v = y >= 0
+        freq += np.bincount(y[v].astype(np.int64), minlength=n_classes)
+        n_mov += int(m.sum())
+        n_static += int((~m & v).sum())
+    return freq, n_mov, n_static
+
+
 def balanced_frame_probs(Y, class_w):
     """Sampling probability per frame, proportional to its class-weighted labelled-pixel mass."""
     mass = np.array([class_w[y[y >= 0].astype(np.int64)].sum() for y in Y], np.float64)
@@ -125,6 +138,9 @@ def main():
                     help="sample frames in proportion to their class-weighted pixel mass (more rare-class frames)")
     ap.add_argument("--aug", action="store_true", help="random scale (+/-5%%) and intensity jitter")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--arrays", default=None,
+                    help="keep the training arrays in memory-mapped .npy files in this directory instead of RAM "
+                         "(needed for stride-5 SemanticKITTI on a 12.7 GB runtime)")
     args = ap.parse_args()
     args.cache = args.cache or os.path.join(ROOT, "cache", args.dataset)
     kitti = args.dataset == "semantickitti"
@@ -140,19 +156,18 @@ def main():
     rng = np.random.default_rng(args.seed)
     frames, info, n_frames = load_frames(args, "train")
     print(f"preparing {n_frames} training frames", flush=True)
-    X, Y, M, R = frames_to_training_arrays(frames, info, n_frames, log=lambda m: print(m, flush=True))
+    X, Y, M, R = frames_to_training_arrays(frames, info, n_frames, log=lambda m: print(m, flush=True),
+                                           out_dir=args.arrays)
     del frames
     print(f"{args.dataset}: {len(X)} training frames, range image {info.n_rows} x {info.n_cols}, device {dev}", flush=True)
 
-    valid = Y >= 0
-    freq = np.bincount(Y[valid].astype(np.int64), minlength=NUM_CLASSES).astype(np.float64)
+    freq, n_mov, n_static = label_stats(Y, M, NUM_CLASSES)
     print("training pixels by class:", ", ".join(f"{n} {100 * c / freq.sum():.2f}%"
                                                   for n, c, a in zip(info.class_names, freq, info.active) if a))
     cw = (freq.sum() / np.maximum(freq, 1)) ** 0.5
     cw[~np.asarray(info.active, bool) | (freq == 0)] = 0.0
     cw = torch.tensor(cw / cw[cw > 0].mean(), dtype=torch.float32, device=dev)
-    pos_w = torch.tensor(min(50.0, (~M & valid).sum() / max(M.sum(), 1)) ** 0.5, device=dev)
-    del valid
+    pos_w = torch.tensor(min(50.0, n_static / max(n_mov, 1)) ** 0.5, device=dev)
 
     model = RangeUNet()
     if args.init:
@@ -219,7 +234,7 @@ def main():
     torch.save(model.cpu().state_dict(), out)
     model.to(dev).eval()
     print("saved", out, f"({step} steps, {time.time() - t0:.0f}s)")
-    del X, Y, M, R                                    # free the training arrays (~2.5 GB on SemanticKITTI) before validation
+    del X, Y, M, R                                    # free the training arrays (~2.5 GB at stride 10) before validation
 
     vframes, _, _ = load_frames(args, "val")
     res = evaluate(model, vframes, info)

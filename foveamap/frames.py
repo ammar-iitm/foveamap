@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import os
+
 import numpy as np
 
 from .sim import CLASSES as SIM_CLASSES, NUM_CLASSES, SENSOR_H, load_sequence
@@ -190,15 +192,22 @@ def sim_frames(path_or_seq):
     return frames, truth
 
 
-def frames_to_training_arrays(frames, info: DatasetInfo, n=None, log=None, every=250):
+def frames_to_training_arrays(frames, info: DatasetInfo, n=None, log=None, every=250, out_dir=None):
     """Features + per-pixel targets for a list of frames (used by training).
     frames may be any iterable when n (the number of frames) is given.
-    log: called with a progress line every `every` frames."""
+    log: called with a progress line every `every` frames.
+    out_dir: write the arrays to memory-mapped .npy files there instead of holding them in RAM
+    (about 1.4 MB a frame for 64 x 1024 images; stride-5 SemanticKITTI is ~5 GB)."""
     F = len(frames) if n is None else n
-    X = np.zeros((F, IN_CH, info.n_rows, info.n_cols), np.float16)
-    Y = np.full((F, info.n_rows, info.n_cols), -1, np.int8)
-    M = np.zeros((F, info.n_rows, info.n_cols), bool)
-    R = np.zeros((F, info.n_rows, info.n_cols), np.float16)
+    shapes = dict(X=((F, IN_CH, info.n_rows, info.n_cols), np.float16), Y=((F, info.n_rows, info.n_cols), np.int8),
+                  M=((F, info.n_rows, info.n_cols), bool), R=((F, info.n_rows, info.n_cols), np.float16))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+        X, Y, M, R = (np.lib.format.open_memmap(os.path.join(out_dir, f"{k}.npy"), mode="w+", dtype=dt, shape=sh)
+                      for k, (sh, dt) in shapes.items())
+    else:
+        X, Y, M, R = (np.zeros(sh, dt) for sh, dt in shapes.values())
+    Y[:] = -1
     for i, f in enumerate(frames):
         feats, idx, _, _ = make_features(f, info, prev_in_ego(f))
         X[i] = feats
