@@ -73,7 +73,7 @@ def _prev_in_ego_dev(frame, history, device):
             out.append(None)
             continue
         pw, ring = item
-        pw = torch.as_tensor(pw).to(device, torch.float64)
+        pw = torch.as_tensor(pw).to(device).double()     # upload as stored (float32), widen on the device
         out.append((_transform_t(inv, pw).float(), ring))
     out += [None] * (2 - len(out))
     return out
