@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 import torch
 
+pytestmark = pytest.mark.adversarial
+
 from foveamap.core.contracts import LiDARFrame
 from foveamap.core.exceptions import ContractError, NumericalConsistencyError
 from foveamap.core.ontology import NUM_CLASSES, ROAD, VEHICLE

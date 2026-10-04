@@ -646,6 +646,7 @@ def test_point_correspondence_gather_and_consistency():
 # ---------------------------------------------------------------------------
 # 10. Conditional CUDA Tests (Physically Verified when Available)
 # ---------------------------------------------------------------------------
+@pytest.mark.cuda
 def test_cuda_perception_execution(test_frame):
     if not torch.cuda.is_available():
         pytest.skip("CUDA device unavailable on current host (CPU environment); physical CUDA execution required")
@@ -669,6 +670,7 @@ def test_cuda_perception_execution(test_frame):
     assert np.all(np.isfinite(host_res.class_probabilities))
 
 
+@pytest.mark.cuda
 def test_cuda_cpu_parity_when_available(test_frame):
     """Test CPU vs CUDA numerical parity when CUDA hardware is physically available."""
     if not torch.cuda.is_available():

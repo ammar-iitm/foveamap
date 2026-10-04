@@ -26,6 +26,8 @@ Run core product commands:
 
 See [`docs/QUICKSTART.md`](docs/QUICKSTART.md) for full instructions and Python SDK examples.
 
+Developers (modify/test/extend): start with [`DEVELOPMENT.md`](DEVELOPMENT.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md); common loops run through `python scripts/dev.py {test,test-fast,demo,bench,lint}`.
+
 It runs on three data sources through the same code:
 - **Simulated Lidar**: built in, no download needed, exact labels.
 - **Real Lidar from SemanticKITTI**: 64-beam, the main real-data training set, through its Colab notebook.

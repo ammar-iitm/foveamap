@@ -36,6 +36,7 @@ foveamap = "foveamap.cli:main"
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "ruff>=0.4",
 ]
 test = [
     "pytest>=7.0",
@@ -52,3 +53,20 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "default::RuntimeWarning",
 ]
+markers = [
+    "unit: fast, hermetic unit tests (no hardware, no ROS2).",
+    "integration: multi-component tests on deterministic fixtures.",
+    "adversarial: malformed-input and invariant-stress tests.",
+    "cuda: requires physical CUDA hardware (skipped on CPU hosts).",
+    "ros2: requires a ROS2 environment with rclpy (skipped otherwise).",
+    "slow: tests taking minutes; excluded from the fast loop.",
+    "benchmark: performance-oriented tests; not correctness gates.",
+    "hardware: requires physical hardware (CUDA or sensor); never runs in CPU CI.",
+]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]

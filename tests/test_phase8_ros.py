@@ -37,6 +37,7 @@ needs_ros = pytest.mark.skipif(
     not ROS2_AVAILABLE,
     reason=f"ROS 2 integration requires rclpy ({ROS2_MISSING_REASON})",
 )
+ros2_hardware = pytest.mark.ros2
 
 
 def _cloud_xyz(n=10, frame="lidar", sec=123, nanosec=456_000_000):
@@ -475,6 +476,7 @@ def test_single_point_with_ring_processes_through_node():
 
 
 # ------------------------------------------------------- B guarded ROS2 tests
+@ros2_hardware
 @needs_ros
 def test_ros_node_lifecycle_with_rclpy():
     node = FoveaMapRosNode(ros_params={"perception.backend_type": "classical"})
@@ -486,6 +488,7 @@ def test_ros_node_lifecycle_with_rclpy():
     assert node.state == "SHUTDOWN"
 
 
+@ros2_hardware
 @needs_ros
 def test_ros_qos_conversion_with_rclpy():
     from foveamap_ros.qos import to_rclpy

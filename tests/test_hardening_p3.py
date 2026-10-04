@@ -109,6 +109,7 @@ class TestBug1CUDADeviceCanonicalization:
                 device=torch.device("cuda:0"),
             )
 
+    @pytest.mark.cuda
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="Hardware CUDA not available")
     def test_real_cuda_canonicalization(self):
         dev_cuda = torch.device("cuda")
