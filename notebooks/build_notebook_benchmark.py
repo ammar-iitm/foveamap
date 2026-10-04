@@ -118,14 +118,23 @@ display(pd.DataFrame(rows, columns=['Class', 'Min area (m²)', 'Precision', 'Rec
 """)
 
 md("""
-## 4. Download the results
+## 4. Profile: where the time goes
 
-The zip holds every run's metrics and log, plus run 1's dashboard frames. A copy is also saved to `MyDrive/foveamap_data/benchmark_results/`.
+Runs `torch.profiler` over 20 frames: the CPU and GPU time of each stage, the operations with the most GPU and CPU time, and how often the host waits for the GPU. The profiler adds overhead, so read it relative to the benchmark above. The output is also saved to `profile.txt`.
+""")
+code("""
+!python scripts/profile_pipeline.py --dataset semantickitti --cache $CACHE --scene $SCENE 2>&1 | grep -v "^USDT\\|^STAGE:" | tee profile.txt
+""")
+
+md("""
+## 5. Download the results
+
+The zip holds the profile, every run's metrics and log, and run 1's dashboard frames. A copy is also saved to `MyDrive/foveamap_data/benchmark_results/`.
 """)
 code("""
 import time
 name = f'foveamap_semantickitti_benchmark_{time.strftime("%Y%m%d_%H%M")}.zip'
-files_ = [f'benchmark_run{n}.log' for n in range(1, RUNS + 1)] + \\
+files_ = ['profile.txt'] + [f'benchmark_run{n}.log' for n in range(1, RUNS + 1)] + \\
          [f'results/semantickitti_run{n}/metrics.json' for n in range(1, RUNS + 1)] + ['results/semantickitti_run1']
 !zip -qr /content/$name {' '.join(files_)}
 os.makedirs(f'{DATA}/benchmark_results', exist_ok=True)
