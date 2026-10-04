@@ -142,7 +142,8 @@ class TorchFoveatedGrid(FoveatedGrid):
         static = ~moving
         out = []
         for t, org in zip(self.tiers, origins):
-            ij = torch.div(f, t.ratio, rounding_mode="floor") - torch.as_tensor(org, device=dev)
+            ij = torch.div(f, t.ratio, rounding_mode="floor")
+            ij = torch.stack([ij[:, 0] - int(org[0]), ij[:, 1] - int(org[1])], 1)    # no host-to-device copy
             inw = ((ij >= 0) & (ij < t.n)).all(1)
             idx = inw.nonzero().squeeze(1)
             key = ij[idx, 0] * t.n + ij[idx, 1]
@@ -151,7 +152,7 @@ class TorchFoveatedGrid(FoveatedGrid):
             zz, st = z[idx], static[idx]
             ng_pt = is_ground[idx]
             gg = ng_pt & st
-            inf = torch.tensor(float("inf"), dtype=fdt, device=dev)
+            inf = float("inf")
 
             def ssum(v):
                 return torch.zeros((M,) + v.shape[1:], dtype=v.dtype, device=dev).index_add_(0, inv, v)
@@ -166,7 +167,7 @@ class TorchFoveatedGrid(FoveatedGrid):
             n_ground = ssum(gg.to(fdt))
             gmean = ssum(torch.where(gg, zz, 0)) / n_ground.clamp(min=1)
             gvar = ssum(torch.where(gg, zz - gmean[inv], 0) ** 2) / n_ground.clamp(min=1)
-            nan = torch.tensor(float("nan"), dtype=fdt, device=dev)
+            nan = float("nan")
             Pi = P[idx]
             mv = moving[idx]
             out.append(dict(
@@ -223,11 +224,14 @@ class TorchFoveatedGrid(FoveatedGrid):
     def _fuse_tier(self, t, s: TorchTierLayers, st):
         n, fdt = t.n, self.dtype
         key = st["key"]
-        obs = st["n_static"] > 0
-        k = key[obs]
+        # the observed cells, found once: each boolean-mask index is a nonzero, which on CUDA makes
+        # the host wait for the GPU, so the masks below index with these positions instead
+        oi = (st["n_static"] > 0).nonzero().squeeze(1)
+        obs = lambda v: v.index_select(0, oi)
+        k = obs(key)
         i, j = k // n, k % n
         # ---- class: blend new probabilities with the stored (cls, conf)
-        p = st["p_static"][obs]
+        p = obs(st["p_static"])
         p = p / p.sum(1, keepdim=True).clamp(min=1e-9)
         old_c = s.cls[i, j].long()
         old_conf = s.conf[i, j].to(fdt) / 255.0
@@ -243,29 +247,28 @@ class TorchFoveatedGrid(FoveatedGrid):
         pg = torch.where(self._ground_mask[None, :], p, 0)
         gcls = torch.where(pg.sum(1) > 0.05, pg.argmax(1), 0xF)
         # ---- heights
-        g_new = st["ground"][obs]
+        g_new = obs(st["ground"])
         g_old = s.ground[i, j].to(fdt)
         both = g_new.isfinite() & g_old.isfinite()
         g = torch.where(both, (1 - a) * g_old + a * g_new, torch.where(g_new.isfinite(), g_new, g_old))
         s.ground[i, j] = g.half()
-        r_new, r_old = st["rough"][obs], s.rough[i, j].to(fdt)
+        r_new, r_old = obs(st["rough"]), s.rough[i, j].to(fdt)
         s.rough[i, j] = torch.where(r_new.isfinite(), torch.where(r_old.isfinite(), (1 - a) * r_old + a * r_new, r_new),
                                     r_old).half()
-        s.z_min[i, j] = st["z_min"][obs].half()
-        s.z_max[i, j] = st["z_max"][obs].half()
-        s.count16[i, j] = st["n_static"][obs].clamp(max=65535).to(torch.int32).to(torch.int16)
-        clear = st["zmin_ng"][obs] - g                  # nan / inf where either side is missing
+        s.z_min[i, j] = obs(st["z_min"]).half()
+        s.z_max[i, j] = obs(st["z_max"]).half()
+        s.count16[i, j] = obs(st["n_static"]).clamp(max=65535).to(torch.int32).to(torch.int16)
+        clear = obs(st["zmin_ng"]) - g                  # nan / inf where either side is missing
         s.clear[i, j] = torch.where(clear.isfinite(), (clear / 0.02).clamp(0, 254), UNKNOWN).to(torch.uint8)
         keep_g = torch.where(gcls == 0xF, (s.flags[i, j] >> 4).long(), gcls)
         s.flags[i, j] = (keep_g << 4).to(torch.uint8)
         # ---- age
-        seen = s.age != UNKNOWN
-        s.age[seen] = (s.age[seen].int() + 1).clamp(max=UNKNOWN).to(torch.uint8)
+        s.age[:] = torch.where(s.age != UNKNOWN, (s.age.int() + 1).clamp(max=UNKNOWN), UNKNOWN).to(torch.uint8)
         s.age[i, j] = 0
         # ---- dynamic layer: this frame only, never fused
-        dyn_cells = st["n_dyn"] > 0
-        dk = key[dyn_cells]
-        dcls = torch.where(st["n_dyn_person"][dyn_cells] * 2 > st["n_dyn"][dyn_cells], PERSON, VEHICLE)
+        di = (st["n_dyn"] > 0).nonzero().squeeze(1)       # one nonzero: its size goes to the host anyway
+        dk = key.index_select(0, di)
+        dcls = torch.where(st["n_dyn_person"].index_select(0, di) * 2 > st["n_dyn"].index_select(0, di), PERSON, VEHICLE)
         return dict(i=dk // n, j=dk % n, cls=dcls)
 
     def _derive(self, t, s: TorchTierLayers):
