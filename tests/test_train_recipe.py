@@ -67,3 +67,25 @@ def test_training_arrays_on_disk_match_ram(drive, tmp_path):
     Y, M = ram[1], ram[2]
     assert (freq == np.bincount(Y[Y >= 0].astype(np.int64), minlength=NUM_CLASSES)).all()
     assert n_mov == M.sum() and n_static == (~M & (Y >= 0)).sum()
+
+
+def test_wider_network_saves_and_loads_at_its_width(tmp_path):
+    from foveamap.model import RangeUNet, load_model, widths_for, widths_of
+    m = RangeUNet(widths_for(2)).eval()
+    assert widths_for(2) == (32, 64, 128, 192) and widths_for(1) == (16, 32, 64, 96)
+    path = tmp_path / "wide.pt"
+    torch.save(m.state_dict(), path)
+    back = load_model(str(path), torch.device("cpu"))
+    assert widths_of(back.state_dict()) == widths_for(2)
+    x = torch.randn(1, 8, 16, 64)
+    with torch.no_grad():
+        sem, mot = m(x)
+        sem2, mot2 = back(x)
+    assert sem.shape == (1, 9, 16, 64) and mot.shape == (1, 16, 64)
+    assert torch.equal(sem, sem2) and torch.equal(mot, mot2)
+
+
+def test_standard_checkpoint_keeps_its_shape():
+    from foveamap.model import load_model, widths_of, BASE_WIDTHS
+    ckpt = os.path.join(os.path.dirname(__file__), "..", "checkpoints", "range_unet.pt")
+    assert widths_of(load_model(ckpt, torch.device("cpu")).state_dict()) == BASE_WIDTHS

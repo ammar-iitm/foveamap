@@ -24,7 +24,7 @@ import torch.nn.functional as F
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from foveamap.sim import NUM_CLASSES  # noqa: E402
-from foveamap.model import RangeUNet, predict, pick_device  # noqa: E402
+from foveamap.model import RangeUNet, predict, pick_device, widths_for, widths_of  # noqa: E402
 from foveamap.frames import SIM_INFO, sim_frames, frames_to_training_arrays, make_features, prev_in_ego  # noqa: E402
 from foveamap.pipeline import BANDS, BAND_NAMES, confusion, ious_from  # noqa: E402
 
@@ -138,6 +138,8 @@ def main():
                     help="sample frames in proportion to their class-weighted pixel mass (more rare-class frames)")
     ap.add_argument("--aug", action="store_true", help="random scale (+/-5%%) and intensity jitter")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--width", type=float, default=1.0,
+                    help="network width relative to the standard one (2 = twice the channels, ~4x the parameters)")
     ap.add_argument("--arrays", default=None,
                     help="keep the training arrays in memory-mapped .npy files in this directory instead of RAM "
                          "(needed for stride-5 SemanticKITTI on a 12.7 GB runtime)")
@@ -169,10 +171,16 @@ def main():
     cw = torch.tensor(cw / cw[cw > 0].mean(), dtype=torch.float32, device=dev)
     pos_w = torch.tensor(min(50.0, n_static / max(n_mov, 1)) ** 0.5, device=dev)
 
-    model = RangeUNet()
+    model = RangeUNet(widths_for(args.width))
+    print(f"network widths {widths_for(args.width)}, {sum(p.numel() for p in model.parameters()):,} parameters")
     if args.init:
-        model.load_state_dict(torch.load(args.init, map_location="cpu"))
-        print("initialised from", args.init)
+        state = torch.load(args.init, map_location="cpu")
+        if widths_of(state) == widths_for(args.width):
+            model.load_state_dict(state)
+            print("initialised from", args.init)
+        else:                                       # a wider network can't take the standard checkpoint's weights
+            print(f"{args.init} has widths {widths_of(state)}, not {widths_for(args.width)}: training from scratch")
+            args.init = None
         if args.reset_head:
             model.sem.reset_parameters()
             print("class layer re-initialised")

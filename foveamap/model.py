@@ -25,8 +25,21 @@ def cbr(i, o):
     return nn.Sequential(nn.Conv2d(i, o, 3, padding=1, bias=False), nn.BatchNorm2d(o), nn.ReLU(inplace=True))
 
 
+BASE_WIDTHS = (16, 32, 64, 96)       # channels per encoder level of the standard network (327k parameters)
+
+
+def widths_for(width=1.0):
+    """Channel widths for a network `width` times as wide as the standard one."""
+    return tuple(int(round(c * width)) for c in BASE_WIDTHS)
+
+
+def widths_of(state):
+    """The channel widths of a saved RangeUNet, read from its weights."""
+    return tuple(int(state[k].shape[0]) for k in ("e1.0.weight", "e2.0.weight", "e3.0.0.weight", "e4.0.0.weight"))
+
+
 class RangeUNet(nn.Module):
-    def __init__(self, c=(16, 32, 64, 96)):
+    def __init__(self, c=BASE_WIDTHS):
         super().__init__()
         self.e1 = cbr(IN_CH, c[0])
         self.e2 = cbr(c[0], c[1])
@@ -34,9 +47,9 @@ class RangeUNet(nn.Module):
         self.e4 = nn.Sequential(cbr(c[2], c[3]), cbr(c[3], c[3]))
         self.d3 = cbr(c[3] + c[2], c[2])
         self.d2 = cbr(c[2] + c[1], c[1])
-        self.d1 = cbr(c[1] + c[0] + 2, 16)       # + the 2 residual channels again (sharp motion edges)
-        self.sem = nn.Conv2d(16, NUM_CLASSES, 1)
-        self.mot = nn.Conv2d(16, 1, 1)
+        self.d1 = cbr(c[1] + c[0] + 2, c[0])     # + the 2 residual channels again (sharp motion edges)
+        self.sem = nn.Conv2d(c[0], NUM_CLASSES, 1)
+        self.mot = nn.Conv2d(c[0], 1, 1)
 
     def forward(self, x):
         e1 = self.e1(x)                                   # H x W
@@ -57,8 +70,9 @@ def pick_device(pref: str | None = None):
 
 def load_model(ckpt, device=None):
     device = pick_device(device) if not isinstance(device, torch.device) else device
-    m = RangeUNet()
-    m.load_state_dict(torch.load(ckpt, map_location="cpu"))
+    state = torch.load(ckpt, map_location="cpu")
+    m = RangeUNet(widths_of(state))                  # any width: it is read from the weights
+    m.load_state_dict(state)
     return m.to(device).eval()
 
 

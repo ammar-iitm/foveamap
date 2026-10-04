@@ -131,7 +131,7 @@ for n, v in zero_shot['iou_by_class'].items():
 md("""
 ## 4. Fine-tune on the training sequences (about 15 minutes on a T4 for 40 epochs, plus a few to prepare the frames)
 
-Starts from the simulator checkpoint. It first prepares the training frames (progress every 250 frames, a few minutes), then prints progress every 250 steps. The model and log are copied to Drive afterwards. `FLAGS` takes the recipe options from `scripts/train.py` (`--reset-head`, `--balance`, `--aug`).
+Starts from the simulator checkpoint. It first prepares the training frames (progress every 250 frames, a few minutes), then prints progress every 250 steps. The model and log are copied to Drive afterwards. `FLAGS` takes the recipe options from `scripts/train.py` (`--reset-head`, `--balance`, `--aug`, and `--width 2` for a network twice as wide, which trains from scratch since the simulator checkpoint has the standard width).
 
 **If a model with these settings is already in Drive** (same `STRIDE`, `EPOCHS` and `FLAGS`), it is copied back instead of training again, which takes seconds. Set `RETRAIN = True` to train anyway.
 """)
