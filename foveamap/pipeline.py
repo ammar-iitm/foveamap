@@ -54,6 +54,13 @@ def to_host(x):
     return x
 
 
+def _transform_t(T, pts):
+    """Rigid transform of (N, 3) points by the 4x4 T, per coordinate rather than as a matmul.
+    In float64 a (N, 3) @ (3, 3) matmul runs as a GEMM, which on a T4 took ~1.6 ms per sweep;
+    written out it is a few memory-bound element-wise ops with the same float64 result."""
+    return pts[:, :1] * T[:3, 0] + pts[:, 1:2] * T[:3, 1] + pts[:, 2:3] * T[:3, 2] + T[:3, 3]
+
+
 def _prev_in_ego_dev(frame, history, device):
     """`frames.prev_in_ego` on the device: (pts float32 tensor, ring) entries."""
     inv = torch.as_tensor(np.linalg.inv(frame["pose"]), device=device)
@@ -67,7 +74,7 @@ def _prev_in_ego_dev(frame, history, device):
             continue
         pw, ring = item
         pw = torch.as_tensor(pw).to(device, torch.float64)
-        out.append(((pw @ inv[:3, :3].T + inv[:3, 3]).float(), ring))
+        out.append((_transform_t(inv, pw).float(), ring))
     out += [None] * (2 - len(out))
     return out
 
@@ -133,7 +140,7 @@ class FoveaMapPipeline:
         moving = (pmove[row, col] > 0.5) & ((cls == VEHICLE) | (cls == PERSON))
         if dev_math:
             pose = torch.as_tensor(frame["pose"], device=self.device)
-            pw = pts.double() @ pose[:3, :3].T + pose[:3, 3]
+            pw = _transform_t(pose, pts.double())
         else:
             pw = transform(frame["pose"], frame["pts"].astype(np.float64))
         ego_xy = frame["pose"][:2, 3]
