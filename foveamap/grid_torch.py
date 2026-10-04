@@ -19,6 +19,9 @@ parity against it.
 """
 from __future__ import annotations
 
+import os
+import warnings
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -94,7 +97,9 @@ def default_device():
 
 
 class TorchFoveatedGrid(FoveatedGrid):
-    def __init__(self, profile="spec", fuse=True, device=None, dtype=torch.float32):
+    def __init__(self, profile="spec", fuse=True, device=None, dtype=torch.float32, compile=None):
+        """compile: run the derive step through torch.compile (default: on CUDA, unless the
+        environment sets FOVEAMAP_COMPILE=0)."""
         super().__init__(profile, fuse=fuse)
         self.device = torch.device(device) if device is not None else default_device()
         self.dtype = dtype
@@ -104,6 +109,13 @@ class TorchFoveatedGrid(FoveatedGrid):
         self._drivable = torch.as_tensor(DRIVABLE, device=dev)
         self._overhang = torch.as_tensor(OVERHANG_LUT, device=dev)
         self._pass_under = torch.as_tensor(PASS_UNDER_LUT, device=dev)
+        self._luts = (self._overhang, self._pass_under, self._drivable, self._cost_prior)
+        if compile is None:
+            compile = dev.type == "cuda" and os.environ.get("FOVEAMAP_COMPILE", "1") != "0"
+        self._derive_fn = _derive_core
+        if compile:
+            self._compiled = torch.compile(_derive_core, dynamic=False)
+            self._derive_fn = self._derive_compiled
         self.state = [self._new_layers(t.n) for t in self.tiers]
 
     # ------------------------------------------------------------------ utils
@@ -258,71 +270,101 @@ class TorchFoveatedGrid(FoveatedGrid):
 
     def _derive(self, t, s: TorchTierLayers):
         """Flags + traversability cost from the fused layers (vectorised over the tier)."""
-        cls = s.cls.long()
-        gcls = (s.flags >> 4).long()
-        ground = s.ground.float()
-        valid_g = ground.isfinite()
-        clear = s.clear.long()
-        # overhang: obstacle points start well above the ground
-        overhang = self._overhang[clear] & valid_g
-        passable_under = self._pass_under[clear] & valid_g & (gcls != 0xF)
-        eff_cls = torch.where(passable_under, gcls, cls)
-        # step edges: height jump to a neighbour 1 or 2 cells away
-        gz = ground
-        step = torch.zeros_like(gz)
-        for d in (1, 2):
-            for ax in (0, 1):
-                diff = (gz - gz.roll(d, ax)).abs()
-                if ax == 0:
-                    diff[:d, :] = float("nan")
-                else:
-                    diff[:, :d] = float("nan")
-                step = torch.fmax(step, diff.nan_to_num(nan=0.0))
-                step = torch.fmax(step, diff.roll(-d, ax).nan_to_num(nan=0.0))
-        stepf = step > STEP_THRESH
-        # depressions (potholes): clearly below the local plane of drivable ground, finest tier only
-        drv_cls = self._drivable[eff_cls]
-        drv = drv_cls & valid_g
-        dep = depressions_t(gz, drv, t.cell) if t.ratio == 1 else torch.zeros_like(drv)
-        flags = (torch.where(overhang, F_OVERHANG, 0) | torch.where(stepf & valid_g, F_STEP, 0)
-                 | torch.where(dep, F_DEPRESSION, 0))
-        # cost
-        cost = self._cost_prior[eff_cls]
-        cost = torch.where(passable_under, cost + 20, cost)
-        cost = torch.where(stepf & drv_cls, cost.clamp(min=180), cost)
-        cost = torch.where(stepf & (cost < 180), cost.clamp(min=140), cost)
-        cost = torch.where(dep, cost.clamp(min=170), cost)
-        rough = s.rough.float()
-        cost = torch.where(rough.isfinite() & (rough > 0.04), cost + 30, cost)
-        cost = torch.where(s.conf < 150, cost + 25, cost)
-        stale = (s.age != UNKNOWN) & (s.age > 20)
-        cost = torch.where(stale, cost + 20, cost).clamp(0, 254)
-        unknown = cls == UNKNOWN
-        s.cost[:] = torch.where(unknown, UNKNOWN, cost).to(torch.uint8)
-        s.flags[:] = (s.flags & 0xF0) | flags.to(torch.uint8)
-        s.eff_cls = torch.where(unknown, UNKNOWN, eff_cls).to(torch.uint8)
+        fine = t.ratio == 1                       # potholes on the finest tier only
+        K = None
+        if fine:
+            B, win = plane_blocks(t.n, t.cell)
+            K = _plane_constants(self.device, _plane_dtype(self.device), t.n, t.n, B, win)
+        cost, flags, eff = self._derive_fn(s.cls, s.flags, s.ground, s.clear, s.rough, s.conf, s.age,
+                                           self._luts, t.cell, fine, K)
+        s.cost[:] = cost
+        s.flags[:] = flags
+        s.eff_cls = eff
+
+    def _derive_compiled(self, *args):
+        """`_derive_core` through torch.compile; falls back to eager for good if compiling fails."""
+        try:
+            return self._compiled(*args)
+        except Exception as e:                    # noqa: BLE001 - any compiler failure: keep running
+            warnings.warn(f"torch.compile of the derive step failed ({type(e).__name__}: {e}); running it eagerly")
+            self._derive_fn = _derive_core
+            return _derive_core(*args)
 
 
-def depressions_t(gz, drv, cell):
+def _derive_core(cls_u8, flags_u8, ground_h, clear_u8, rough_h, conf_u8, age_u8, luts, cell, fine, K):
+    """Pure tensor function: (cost, flags, eff_cls) of one tier. Fixed shapes and no host syncs, so
+    torch.compile can fuse its ~160 element-wise ops into a few kernels."""
+    overhang_lut, pass_under_lut, drivable_lut, cost_prior = luts
+    cls = cls_u8.long()
+    gcls = (flags_u8 >> 4).long()
+    ground = ground_h.float()
+    valid_g = ground.isfinite()
+    clear = clear_u8.long()
+    # overhang: obstacle points start well above the ground
+    overhang = overhang_lut[clear] & valid_g
+    passable_under = pass_under_lut[clear] & valid_g & (gcls != 0xF)
+    eff_cls = torch.where(passable_under, gcls, cls)
+    # step edges: height jump to a neighbour 1 or 2 cells away
+    gz = ground
+    step = torch.zeros_like(gz)
+    for d in (1, 2):
+        for ax in (0, 1):
+            diff = (gz - gz.roll(d, ax)).abs()
+            if ax == 0:
+                diff[:d, :] = float("nan")
+            else:
+                diff[:, :d] = float("nan")
+            step = torch.fmax(step, diff.nan_to_num(nan=0.0))
+            step = torch.fmax(step, diff.roll(-d, ax).nan_to_num(nan=0.0))
+    stepf = step > STEP_THRESH
+    # depressions (potholes): clearly below the local plane of drivable ground
+    drv_cls = drivable_lut[eff_cls]
+    drv = drv_cls & valid_g
+    dep = depressions_t(gz, drv, cell, K) if fine else torch.zeros_like(drv)
+    flags = (torch.where(overhang, F_OVERHANG, 0) | torch.where(stepf & valid_g, F_STEP, 0)
+             | torch.where(dep, F_DEPRESSION, 0))
+    # cost
+    cost = cost_prior[eff_cls]
+    cost = torch.where(passable_under, cost + 20, cost)
+    cost = torch.where(stepf & drv_cls, cost.clamp(min=180), cost)
+    cost = torch.where(stepf & (cost < 180), cost.clamp(min=140), cost)
+    cost = torch.where(dep, cost.clamp(min=170), cost)
+    rough = rough_h.float()
+    cost = torch.where(rough.isfinite() & (rough > 0.04), cost + 30, cost)
+    cost = torch.where(conf_u8 < 150, cost + 25, cost)
+    stale = (age_u8 != UNKNOWN) & (age_u8 > 20)
+    cost = torch.where(stale, cost + 20, cost).clamp(0, 254)
+    unknown = cls == UNKNOWN
+    return (torch.where(unknown, UNKNOWN, cost).to(torch.uint8),
+            (flags_u8 & 0xF0) | flags.to(torch.uint8),
+            torch.where(unknown, UNKNOWN, eff_cls).to(torch.uint8))
+
+
+def depressions_t(gz, drv, cell, K=None):
     """Device version of `grid.depressions`."""
-    ref, sigma = ground_plane_t(gz, drv, cell)
+    ref, sigma = ground_plane_t(gz, drv, cell, K)
     return drv & (gz < ref - (DEPRESSION_SIGMA_K * sigma).clamp(min=DEPRESSION_THRESH))
 
 
-def ground_plane_t(gz, drv, cell):
+def _plane_dtype(dev):
+    return torch.float64 if torch.device(dev).type == "cpu" else torch.float32   # block-local moments are float32-safe
+
+
+def ground_plane_t(gz, drv, cell, K=None):
     """Device version of `grid.ground_plane`: the same block moments, as two grouped
     convolutions, with no host sync. Float32 on GPUs (the moments are small, block-local
     offsets) and float64 on the CPU, where it matches the NumPy engine exactly."""
     n0, n1 = gz.shape
     B, win = plane_blocks(n0, cell)
-    dt = torch.float64 if gz.device.type == "cpu" else torch.float32     # block-local moments are float32-safe
+    dt = _plane_dtype(gz.device)
     dev = gz.device
     w = drv.to(dt)
     z0 = torch.where(drv, gz.to(dt), 0.0).sum() / w.sum().clamp(min=1)    # tier road level
     z = torch.where(drv, gz.to(dt) - z0, 0.0)
     blk = lambda a: a.reshape(n0 // B, B, n1 // B, B).sum((1, 3))
     src = torch.stack([blk(w), blk(w * z), blk(w * z * z)])
-    K = _plane_constants(dev, dt, n0, n1, B, win)
+    if K is None:
+        K = _plane_constants(dev, dt, n0, n1, B, win)
     r = win // 2
     x1 = F.conv2d(src[K["src"]][None], K["kx"], padding=(r, 0), groups=K["kx"].shape[0])[0]
     M = F.conv2d(x1[K["x1"]][None], K["ky"], padding=(0, r), groups=K["ky"].shape[0])[0]

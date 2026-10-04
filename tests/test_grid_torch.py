@@ -197,3 +197,17 @@ def test_depressions_parity(device):
         assert ref.any()
         # the CPU runs the moments in float64 and agrees exactly; GPUs use float32 and may tip a cell at the threshold
         assert (ref != got).sum() <= (0 if torch.device(device).type == "cpu" else 3)
+
+
+def test_compiled_derive_matches_eager():
+    eager = TorchFoveatedGrid("spec", device="cpu", compile=False)
+    try:
+        comp = TorchFoveatedGrid("spec", device="cpu", compile=True)
+    except Exception as e:                      # noqa: BLE001 - no compiler backend here
+        pytest.skip(f"torch.compile unavailable: {e}")
+    for xy, z, p, m, ego in _drive(frames=3):
+        eager.update(xy, z, p, m, ego)
+        comp.update(xy, z, p, m, ego)
+    for a, b in zip(eager.state, comp.state):
+        for f in ("cost", "flags", "eff_cls"):
+            assert torch.equal(getattr(a, f), getattr(b, f)), f
