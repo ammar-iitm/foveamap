@@ -82,17 +82,20 @@ Prior to Phase 11, FoveaMap stood as a technically implemented research/prototyp
 | File | Type | Rationale |
 | :--- | :--- | :--- |
 | `foveamap/runtime/device.py` | Modified | Fixed CUDA device index resolution when CUDA is mocked on CPU builds. |
-| `foveamap/core/config.py` | Modified | Added deployment profiles (`cpu_dev`, `gpu_dev`, `benchmark`, `demo`, `ros2`) and `from_env()`. |
+| `foveamap/core/config.py` | Modified | Added deployment profiles (`cpu_dev`, `gpu_dev`, `benchmark`, `demo`, `ros2`), `from_env()`, and `TerrainConfig.default()`. |
 | `foveamap/core/contracts.py` | Modified | Added `has_semantics`, `has_motion`, and `data_origin_category` to `LiDARFrame`. |
 | `foveamap/runtime/runtime.py` | Modified | Added lifecycle management, empty frame safety, frame rate tracking, and `get_metrics()`. |
 | `foveamap/sdk/http.py` | Modified | Added `/map/snapshot` endpoint and safe dashboard static file serving with path traversal prevention. |
 | `foveamap/benchmarks/baseline.py` | New | Reproducible comparison utility (FoveaMap vs. uniform 5 cm grid). |
+| `foveamap/benchmarks/bench_mapping.py` | New | Integrated multi-frame sustained mapping benchmark runner. |
 | `foveamap/benchmarks/__init__.py` | New | Module initialization for benchmark utilities. |
 | `foveamap/cli.py` | New | Unified CLI for diagnostics, live demo, baseline comparison, file running, serving, and benchmarking. |
 | `foveamap/__main__.py` | New | Module execution entrypoint (`python -m foveamap`). |
 | `pyproject.toml` | Modified | Added `[project.scripts]` mapping `foveamap = "foveamap.cli:main"`. |
-| `tests/test_phase11_product.py` | New | Comprehensive product test suite (11 unit/integration tests). |
-| `docs/QUICKSTART.md` | New | Tested, copy-paste quickstart documentation. |
+| `Dockerfile` | New | Hardened production Docker container with non-root appuser and packaged checkpoints. |
+| `.dockerignore` | New | Build context filter ignoring caches, test data, and development scratch. |
+| `tests/test_phase11_product.py` | New | Comprehensive product test suite (12 unit/integration/CLI tests). |
+| `docs/QUICKSTART.md` | New | Tested, copy-paste quickstart documentation including Docker commands. |
 | `README.md` | Modified | Added Quickstart and CLI summary. |
 
 ---
@@ -104,12 +107,14 @@ Prior to Phase 11, FoveaMap stood as a technically implemented research/prototyp
 | `pytest tests/test_runtime_integration.py` | 22 | 22 | 0 | 0 | **PASS** |
 | `pytest tests/test_phase9_sdk.py` | 30 | 30 | 0 | 0 | **PASS** |
 | `pytest tests/test_public_api_contracts.py` | 24 | 24 | 0 | 0 | **PASS** |
-| `pytest tests/test_phase11_product.py` | 11 | 11 | 0 | 0 | **PASS** |
-| `pytest` (Complete Repository Test Suite) | 404 | 388 | 0 | 4 | **PASS** |
+| `pytest tests/test_phase11_product.py` | 12 | 12 | 0 | 0 | **PASS** |
+| `pytest` (Complete Repository Test Suite) | 404 | 400 | 0 | 4 | **PASS** |
 
-*Note on Skipped Tests (4 items):*
-- 2 tests in `tests/test_phase8_ros.py` skipped because `rclpy` is not installed on the Windows development host.
-- 2 tests in dataset loaders skipped because local unextracted SemanticKITTI archive paths were absent.
+*Authoritative Classification of Skipped Tests (4 items):*
+1. `tests/test_perception_backend.py::test_cuda_perception_execution`: Genuinely environment-limited (requires CUDA hardware).
+2. `tests/test_perception_backend.py::test_cuda_cpu_parity_when_available`: Genuinely environment-limited (requires CUDA hardware).
+3. `tests/test_phase8_ros.py::test_ros_node_lifecycle_with_rclpy`: Genuinely environment-limited (requires `rclpy` / ROS 2 distribution on Linux).
+4. `tests/test_phase8_ros.py::test_ros_qos_conversion_with_rclpy`: Genuinely environment-limited (requires `rclpy` / ROS 2 distribution on Linux).
 
 ---
 

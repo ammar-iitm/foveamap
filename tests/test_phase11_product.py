@@ -257,6 +257,16 @@ def test_cli_demo_short():
     assert code == 0
 
 
+def test_cli_bench(tmp_path):
+    out_file = tmp_path / "bench.json"
+    code = main(["bench", "--engine", "numpy", "--frames", "3", "--points", "2000", "--out", str(out_file)])
+    assert code == 0
+    assert out_file.exists()
+    data = json.loads(out_file.read_text(encoding="utf-8"))
+    assert data["fps"] > 0
+    assert data["memory"]["under_8mb_target"] is True
+
+
 # -----------------------------------------------------------------------------
 # 7. HTTP Server & Security
 # -----------------------------------------------------------------------------

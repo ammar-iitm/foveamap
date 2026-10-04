@@ -278,7 +278,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_bench(args: argparse.Namespace) -> int:
     """Run sustained mapping engine benchmark."""
-    from benchmarks.bench_mapping import run_mapping_benchmark
+    from .benchmarks import run_mapping_benchmark
 
     print(f"Starting {args.frames}-frame benchmark on engine={args.engine}...")
     summary = run_mapping_benchmark(

@@ -237,6 +237,12 @@ class TerrainConfig:
         if len(self.cost_priors) != 256:
             raise ConfigurationError("cost_priors must have length 256")
 
+    @classmethod
+    def default(cls) -> TerrainConfig:
+        """Create standard default terrain configuration."""
+        return cls()
+
+
 @dataclass(frozen=True)
 class DynamicConfig:
     """Temporal dynamic world-model thresholds (Phase 6).

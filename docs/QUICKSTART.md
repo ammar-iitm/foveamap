@@ -191,3 +191,26 @@ pytest
 # Run Phase 11 productization tests only
 pytest tests/test_phase11_product.py -v
 ```
+
+---
+
+## 10. Docker Container Deployment
+
+Build and run FoveaMap inside the production container:
+
+```bash
+# Build the production container
+docker build -t foveamap:latest .
+
+# Inspect runtime capabilities
+docker run --rm foveamap:latest info
+
+# Run canonical demonstration
+docker run --rm foveamap:latest demo --frames 15
+
+# Run baseline comparison
+docker run --rm foveamap:latest compare --no-empirical
+
+# Launch HTTP API & dashboard server
+docker run --rm -p 8000:8000 foveamap:latest serve --host 0.0.0.0 --port 8000
+```

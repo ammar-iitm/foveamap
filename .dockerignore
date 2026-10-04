@@ -1,0 +1,12 @@
+.git
+.agents
+.pytest_cache
+*.pdf
+*.ipynb
+results
+scratch
+site
+__pycache__
+*.pyc
+*.egg-info
+.coverage
