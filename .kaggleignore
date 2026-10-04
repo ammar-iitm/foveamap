@@ -1,0 +1,11 @@
+# Kaggle workspace packaging rules
+# Preserve all source code, tests, checkpoints, and benchmark scripts
+# Exclude large pre-rendered presentation images and cached frame dumps
+
+dashboard/data/frames/
+site/data/frames/
+site/data/points.b64.txt
+dashboard/data/points.b64.txt
+t4_1000_*.json
+*.pdf
+*.log

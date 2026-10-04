@@ -1,0 +1,6 @@
+{
+  "runWithKaggle.accelerator": "gpu-t4",
+  "runWithKaggle.enableInternet": true,
+  "runWithKaggle.installRequirements": false,
+  "runWithKaggle.pollIntervalSeconds": 10
+}

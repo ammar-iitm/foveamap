@@ -559,9 +559,10 @@ class TorchFoveatedGrid(FoveatedGrid):
         p = st["p_static"][obs]
         p = p / p.sum(1, keepdim=True).clamp(min=1e-9)
         old_c = s.cls[i, j].long()
-        old_conf = unpack_primary_confidence_torch(s.conf[i, j]).to(fdt)
+        old_conf_raw = s.conf[i, j]
+        old_conf = unpack_primary_confidence_torch(old_conf_raw).to(fdt)
         old_sec_c = (s.flags[i, j] >> 4).to(torch.uint8)
-        old_sec_conf = unpack_secondary_confidence_torch(s.conf[i, j]).to(fdt)
+        old_sec_conf = unpack_secondary_confidence_torch(old_conf_raw).to(fdt)
         a = t.alpha if self.fuse else 1.0
         q = a * p
         valid_old = old_c != UNKNOWN
@@ -602,11 +603,11 @@ class TorchFoveatedGrid(FoveatedGrid):
 
         prior_ground_c = torch.where(
             old_c_is_ground, safe_c.to(torch.uint8),
-            torch.where(old_sec_is_ground, old_sec_c, torch.tensor(0xF, dtype=torch.uint8, device=q.device)),
+            torch.where(old_sec_is_ground, old_sec_c, 15),
         )
         prior_ground_conf = torch.where(
             old_c_is_ground, old_conf,
-            torch.where(old_sec_is_ground, old_sec_conf, torch.tensor(0.0, dtype=fdt, device=q.device)),
+            torch.where(old_sec_is_ground, old_sec_conf, 0.0),
         )
 
         new_c_is_ground = self._ground_mask[new_c.long()]
@@ -616,18 +617,18 @@ class TorchFoveatedGrid(FoveatedGrid):
             use_ground, gcls,
             torch.where(
                 has_prior_ground, prior_ground_c.long(),
-                torch.where(has_runner, sec_c, torch.tensor(0xF, dtype=torch.long, device=q.device)),
+                torch.where(has_runner, sec_c, 15),
             ),
         )
         final_sec_conf = torch.where(
             use_ground, gconf,
             torch.where(
                 has_prior_ground, prior_ground_conf,
-                torch.where(has_runner, sec_conf_runner, torch.tensor(0.0, dtype=q.dtype, device=q.device)),
+                torch.where(has_runner, sec_conf_runner, 0.0),
             ),
         )
         has_sec = use_ground | has_prior_ground | has_runner
-        sec_c_id = torch.where(has_sec, final_sec.to(torch.uint8), torch.tensor(0xF, dtype=torch.uint8, device=q.device))
+        sec_c_id = torch.where(has_sec, final_sec.to(torch.uint8), 15)
         s.conf[i, j] = pack_confidence_torch(q.max(1).values / q_sum, final_sec_conf)
 
         # Secondary-evidence nibble stores the class selected above.

@@ -110,8 +110,12 @@ class DynamicWorldModel:
     def __init__(self, config: DynamicConfig | None = None) -> None:
         self.config = config if config is not None else DynamicConfig()
         self._tracks: dict[int, DynamicTrack] = {}
-        self._buckets: dict[tuple[int, int], set[int]] = {}
+        self._buckets: dict[tuple[int, int], dict[int, DynamicTrack]] = {}
         self._cell_index: dict[tuple[int, int, int], list[int]] = {}
+        self._dyn_classes = frozenset(int(c) for c in self.config.dynamic_classes)
+        self._max_d2 = float(self.config.correspondence_distance_m ** 2)
+        self._ring = _match_ring(self.config.correspondence_distance_m)
+        self._bucket_offsets = tuple((dx, dy) for dx in range(-self._ring, self._ring + 1) for dy in range(-self._ring, self._ring + 1))
         self._next_tid = 0
         self.frame_index = -1
         self.last_timestamp: float | None = None
@@ -184,7 +188,16 @@ class DynamicWorldModel:
         # finest reporting tier; coarser mip-up duplicates of the same object
         # match the same track (cross-tier, world proximity) but must not
         # double-count hits within one frame (last_seen guard below).
-        for ob in sorted(observations, key=lambda o: (o.tier, o.i, o.j)):
+        is_sorted = True
+        prev_k = (-1, -1, -1)
+        for ob in observations:
+            cur_k = (ob.tier, ob.i, ob.j)
+            if cur_k < prev_k:
+                is_sorted = False
+                break
+            prev_k = cur_k
+        ordered_obs = observations if is_sorted else sorted(observations, key=lambda o: (o.tier, o.i, o.j))
+        for ob in ordered_obs:
             match = self._match(ob)
             if match is None:
                 tid = self._next_tid
@@ -300,36 +313,43 @@ class DynamicWorldModel:
         tier may match; determinism comes from (distance, tier, tid) ordering:
         nearest first, then finest tier, then smallest track id.
         """
-        cfg = self.config
-        dyn_classes = set(int(c) for c in cfg.dynamic_classes)
         bx, by = _bucket(ob.x, ob.y)
         best: DynamicTrack | None = None
         best_key: tuple[float, int, int] | None = None
-        max_d2 = cfg.correspondence_distance_m * cfg.correspondence_distance_m
-        ring = _match_ring(cfg.correspondence_distance_m)
-        for dbx in range(-ring, ring + 1):
-            for dby in range(-ring, ring + 1):
-                for tid in self._buckets.get((bx + dbx, by + dby), ()):
-                    track = self._tracks.get(tid)
-                    if track is None:
-                        continue
-                    if not (int(ob.cls) == int(track.cls) or (int(ob.cls) in dyn_classes and int(track.cls) in dyn_classes)):
-                        continue
-                    dx = float(ob.x) - track.x
-                    dy = float(ob.y) - track.y
-                    d2 = dx * dx + dy * dy
-                    if d2 > max_d2:
-                        continue
-                    key = (d2, int(track.tier), int(track.tid))
-                    if best_key is None or key < best_key:
-                        best_key = key
-                        best = track
+        ob_cls = int(ob.cls)
+        ob_x = float(ob.x)
+        ob_y = float(ob.y)
+        dyn_classes = self._dyn_classes
+        max_d2 = self._max_d2
+        buckets = self._buckets
+
+        for dbx, dby in self._bucket_offsets:
+            bucket = buckets.get((bx + dbx, by + dby))
+            if bucket is None:
+                continue
+            for track in bucket.values():
+                t_cls = int(track.cls)
+                if not (ob_cls == t_cls or (ob_cls in dyn_classes and t_cls in dyn_classes)):
+                    continue
+                dx = ob_x - track.x
+                dy = ob_y - track.y
+                d2 = dx * dx + dy * dy
+                if d2 > max_d2:
+                    continue
+                key = (d2, int(track.tier), int(track.tid))
+                if best_key is None or key < best_key:
+                    best_key = key
+                    best = track
         return best
 
     # ---------------------------------------------------------------- buckets
     def _add_bucket(self, track: DynamicTrack) -> None:
         key = _bucket(track.x, track.y)
-        self._buckets.setdefault(key, set()).add(track.tid)
+        b = self._buckets.get(key)
+        if b is None:
+            self._buckets[key] = {track.tid: track}
+        else:
+            b[track.tid] = track
         cell_key = (int(track.tier), int(track.i), int(track.j))
         self._cell_index.setdefault(cell_key, []).append(track.tid)
 
@@ -352,12 +372,16 @@ class DynamicWorldModel:
         track.tier, track.i, track.j = int(tier), int(i), int(j)
         if old_key == new_key:
             return
-        old_set = self._buckets.get(old_key)
-        if old_set is not None:
-            old_set.discard(track.tid)
-            if not old_set:
+        old_b = self._buckets.get(old_key)
+        if old_b is not None:
+            old_b.pop(track.tid, None)
+            if not old_b:
                 del self._buckets[old_key]
-        self._buckets.setdefault(new_key, set()).add(track.tid)
+        b = self._buckets.get(new_key)
+        if b is None:
+            self._buckets[new_key] = {track.tid: track}
+        else:
+            b[track.tid] = track
 
     def _remove(self, tid: int) -> None:
         track = self._tracks.pop(tid, None)
@@ -366,7 +390,7 @@ class DynamicWorldModel:
         key = _bucket(track.x, track.y)
         bucket = self._buckets.get(key)
         if bucket is not None:
-            bucket.discard(tid)
+            bucket.pop(tid, None)
             if not bucket:
                 del self._buckets[key]
         cell_key = (int(track.tier), int(track.i), int(track.j))

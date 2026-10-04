@@ -600,7 +600,10 @@ class FoveatedGrid:
         """
         if self.origins is not None and self.fuse:
             deltas = [tuple(int(a) - int(b) for a, b in zip(o, oo)) for o, oo in zip(origins, self.origins)]
-            self.state = [s.shifted(o - oo) for s, o, oo in zip(self.state, origins, self.origins)]
+            self.state = [
+                s if (int(o[0]) == int(oo[0]) and int(o[1]) == int(oo[1])) else s.shifted(o - oo)
+                for s, o, oo in zip(self.state, origins, self.origins)
+            ]
             self.temporal.on_scroll(deltas, [t.n for t in self.tiers])
         elif not self.fuse:
             self.state = [self._new_layers(t) for t in self.tiers]
@@ -653,29 +656,42 @@ class FoveatedGrid:
             if ii is None or jj is None or len(ii) == 0:
                 continue
             if _torch.is_tensor(ii):
-                # Intentional sparse host boundary: dynamic cells only.
-                ii_h = ii.detach().cpu().numpy().ravel()
-                jj_h = jj.detach().cpu().numpy().ravel()
-                cls_h = d["cls"].detach().cpu().numpy().ravel()
-                conf_h = (d["conf"].detach().cpu().numpy().ravel().astype(np.float64) / 255.0)
-                cnt_h = d["count"].detach().cpu().numpy().ravel()
+                # Intentional sparse host boundary: single packed transfer for all 5 dynamic fields
+                packed = _torch.stack([
+                    ii.to(_torch.int32),
+                    jj.to(_torch.int32),
+                    d["cls"].to(_torch.int32),
+                    d["conf"].to(_torch.int32),
+                    d["count"].to(_torch.int32),
+                ], dim=1)
+                arr = packed.detach().cpu().numpy()
+                ci_h = arr[:, 0]
+                cj_h = arr[:, 1]
+                cls_h = arr[:, 2]
+                conf_h = arr[:, 3].astype(np.float64) / 255.0
+                cnt_h = arr[:, 4]
             else:
-                ii_h = np.asarray(ii).ravel()
-                jj_h = np.asarray(jj).ravel()
-                cls_h = np.asarray(d["cls"]).ravel()
+                ci_h = np.asarray(ii, dtype=np.int32).ravel()
+                cj_h = np.asarray(jj, dtype=np.int32).ravel()
+                cls_h = np.asarray(d["cls"], dtype=np.int32).ravel()
                 conf_h = np.asarray(d["conf"]).ravel().astype(np.float64) / 255.0
-                cnt_h = np.asarray(d["count"]).ravel()
+                cnt_h = np.asarray(d["count"], dtype=np.int32).ravel()
             org_h = np.asarray(org)
-            for ci, cj, cc, cf, cn in zip(ii_h, jj_h, cls_h, conf_h, cnt_h):
-                ci_i, cj_i = int(ci), int(cj)
+            org_x0 = (int(org_h[0]) + 0.5) * t.cell
+            org_y0 = (int(org_h[1]) + 0.5) * t.cell
+            cell_size = t.cell
+            x_arr = org_x0 + ci_h * cell_size
+            y_arr = org_y0 + cj_h * cell_size
+            conf_clipped = np.clip(conf_h, 0.0, 1.0)
+            for ci, cj, x, y, cc, cf, cn in zip(ci_h, cj_h, x_arr, y_arr, cls_h, conf_clipped, cnt_h):
                 obs.append(DynamicObservation(
                     tier=k,
-                    i=ci_i,
-                    j=cj_i,
-                    x=float((int(org_h[0]) + ci_i + 0.5) * t.cell),
-                    y=float((int(org_h[1]) + cj_i + 0.5) * t.cell),
+                    i=int(ci),
+                    j=int(cj),
+                    x=float(x),
+                    y=float(y),
                     cls=int(cc),
-                    conf=float(min(1.0, max(0.0, cf))),
+                    conf=float(cf),
                     count=int(cn),
                 ))
         return obs

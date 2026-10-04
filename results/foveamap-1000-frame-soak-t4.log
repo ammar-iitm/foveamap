@@ -1,0 +1,142 @@
+[{"stream_name":"stdout","time":0.564895867,"data":"================================================================================\n"}
+,{"stream_name":"stdout","time":0.564930721,"data":"FOVEAMAP REMOTE KAGGLE T4 SOAK EXECUTION RUNNER\n"}
+,{"stream_name":"stdout","time":0.564936318,"data":"================================================================================\n"}
+,{"stream_name":"stdout","time":6.491213241,"data":"CUDA Available:     True\n"}
+,{"stream_name":"stdout","time":6.5332187269999995,"data":"GPU Device Name:    Tesla T4\n"}
+,{"stream_name":"stdout","time":6.533258387,"data":"Device Count:       2\n"}
+,{"stream_name":"stdout","time":6.53326364,"data":"CUDA Version:       12.8\n"}
+,{"stream_name":"stdout","time":6.533267503,"data":"PyTorch Version:    2.11.0+cu128\n"}
+,{"stream_name":"stdout","time":6.939391458,"data":"\n"}
+,{"stream_name":"stdout","time":6.939420812,"data":"--- nvidia-smi ---\n"}
+,{"stream_name":"stdout","time":6.939425797,"data":"Sun Oct  4 14:51:36 2026       \n"}
+,{"stream_name":"stdout","time":6.939430093,"data":"+-----------------------------------------------------------------------------------------+\n"}
+,{"stream_name":"stdout","time":6.939434338,"data":"| NVIDIA-SMI 580.178.04             Driver Version: 580.178.04     CUDA Version: 13.0     |\n"}
+,{"stream_name":"stdout","time":6.939438183,"data":"+-----------------------------------------+------------------------+----------------------+\n"}
+,{"stream_name":"stdout","time":6.939441915,"data":"| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |\n"}
+,{"stream_name":"stdout","time":6.939445609,"data":"| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |\n"}
+,{"stream_name":"stdout","time":6.939449613,"data":"|                                         |                        |               MIG M. |\n"}
+,{"stream_name":"stdout","time":6.939453638,"data":"|=========================================+========================+======================|\n"}
+,{"stream_name":"stdout","time":6.939457539,"data":"|   0  Tesla T4                       Off |   00000000:00:04.0 Off |                    0 |\n"}
+,{"stream_name":"stdout","time":6.939461244,"data":"| N/A   43C    P8             12W /   70W |       3MiB /  15360MiB |      0%      Default |\n"}
+,{"stream_name":"stdout","time":6.939464941,"data":"|                                         |                        |                  N/A |\n"}
+,{"stream_name":"stdout","time":6.939468791,"data":"+-----------------------------------------+------------------------+----------------------+\n"}
+,{"stream_name":"stdout","time":6.939472942,"data":"|   1  Tesla T4                       Off |   00000000:00:05.0 Off |                    0 |\n"}
+,{"stream_name":"stdout","time":6.939476565,"data":"| N/A   58C    P8             11W /   70W |       3MiB /  15360MiB |      0%      Default |\n"}
+,{"stream_name":"stdout","time":6.939480819,"data":"|                                         |                        |                  N/A |\n"}
+,{"stream_name":"stdout","time":6.93948452,"data":"+-----------------------------------------+------------------------+----------------------+\n"}
+,{"stream_name":"stdout","time":6.939488285,"data":"\n"}
+,{"stream_name":"stdout","time":6.9394919470000005,"data":"+-----------------------------------------------------------------------------------------+\n"}
+,{"stream_name":"stdout","time":6.939495792,"data":"| Processes:                                                                              |\n"}
+,{"stream_name":"stdout","time":6.939499433,"data":"|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |\n"}
+,{"stream_name":"stdout","time":6.939521285,"data":"|        ID   ID                                                               Usage      |\n"}
+,{"stream_name":"stdout","time":6.939526623,"data":"|=========================================================================================|\n"}
+,{"stream_name":"stdout","time":6.93952891,"data":"|  No running processes found                                                             |\n"}
+,{"stream_name":"stdout","time":6.939532141,"data":"+-----------------------------------------------------------------------------------------+\n"}
+,{"stream_name":"stdout","time":6.939534457,"data":"\n"}
+,{"stream_name":"stdout","time":6.939536522,"data":"\n"}
+,{"stream_name":"stdout","time":6.939538572,"data":"--- Locating Workspace Files in /kaggle/input ---\n"}
+,{"stream_name":"stdout","time":6.950082848,"data":"Resolved Source Root: /kaggle/input/datasets/zesalamander/foveamap-source\n"}
+,{"stream_name":"stdout","time":6.950104424,"data":"Copying /kaggle/input/datasets/zesalamander/foveamap-source -\u003e /kaggle/working/foveamap_run...\n"}
+,{"stream_name":"stdout","time":7.587692298,"data":"\n"}
+,{"stream_name":"stdout","time":7.587715993,"data":"--- Verified Working Workspace ---\n"}
+,{"stream_name":"stdout","time":7.587720817,"data":"  ./: ['provenance.json', 'requirements.txt', 'pyproject.toml']\n"}
+,{"stream_name":"stdout","time":7.587867406,"data":"  foveamap/: ['grid.py', 'model.py', 'frames.py', 'grid_torch.py', '__main__.py', 'nuscenes.py', 'temporal.py', 'sim.py', 'semantickitti.py', 'cli.py', 'terrain.py', 'remote_zip.py', 'features_torch.py', '__init__.py', 'pipeline.py']\n"}
+,{"stream_name":"stdout","time":7.587996214,"data":"  foveamap/sdk/: ['errors.py', 'client.py', 'http.py', 'types.py', '__init__.py']\n"}
+,{"stream_name":"stdout","time":7.588006524,"data":"  foveamap/core/: ['exceptions.py', 'ontology.py', 'confidence.py', 'config.py', '__init__.py', 'contracts.py']\n"}
+,{"stream_name":"stdout","time":7.58807496,"data":"  foveamap/runtime/: ['runtime.py', 'perception.py', 'device.py', '__init__.py']\n"}
+,{"stream_name":"stdout","time":7.588183989,"data":"  foveamap/data/: ['kitti.py', 'file.py', 'nuscenes.py', 'source.py', 'sim.py', 'preprocess.py', 'factory.py', '__init__.py']\n"}
+,{"stream_name":"stdout","time":7.588191296,"data":"  foveamap/benchmarks/: ['bench_mapping.py', 'baseline.py', '__init__.py']\n"}
+,{"stream_name":"stdout","time":7.588250483,"data":"  checkpoints/: ['range_unet.pt']\n"}
+,{"stream_name":"stdout","time":7.590426284,"data":"  benchmarks/: ['run_kaggle_1000_soak.py']\n"}
+,{"stream_name":"stdout","time":7.590442077,"data":"\n"}
+,{"stream_name":"stdout","time":7.5904466809999995,"data":"Checkpoint path: /kaggle/working/foveamap_run/checkpoints/range_unet.pt, exists: True\n"}
+,{"stream_name":"stdout","time":7.592360562,"data":"Checkpoint SHA256: 28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f\n"}
+,{"stream_name":"stdout","time":7.592375301,"data":"Benchmark script: /kaggle/working/foveamap_run/benchmarks/run_kaggle_1000_soak.py, exists: True\n"}
+,{"stream_name":"stdout","time":7.592379159,"data":"\n"}
+,{"stream_name":"stdout","time":7.592382358,"data":"Executing: /usr/bin/python3 /kaggle/working/foveamap_run/benchmarks/run_kaggle_1000_soak.py --frames 1000 --warmup 50 --device cuda:0 --output-json /kaggle/working/kaggle_1000_soak_results.json\n"}
+,{"stream_name":"stdout","time":1479.039502276,"data":"================================================================================\n"}
+,{"stream_name":"stdout","time":1479.039559356,"data":"FOVEAMAP AUTHORITATIVE REMOTE KAGGLE GPU 1,000-FRAME SOAK BENCHMARK\n"}
+,{"stream_name":"stdout","time":1479.039570299,"data":"================================================================================\n"}
+,{"stream_name":"stdout","time":1479.039572868,"data":"\n"}
+,{"stream_name":"stdout","time":1479.039575103,"data":"--- REMOTE GPU HARDWARE ENVIRONMENT ---\n"}
+,{"stream_name":"stdout","time":1479.039577395,"data":"GPU Model:          Tesla T4\n"}
+,{"stream_name":"stdout","time":1479.039579531,"data":"Total VRAM:         14911.7 MiB (14.56 GiB)\n"}
+,{"stream_name":"stdout","time":1479.039581666,"data":"NVIDIA Driver:      580.178.04\n"}
+,{"stream_name":"stdout","time":1479.039583763,"data":"580.178.04\n"}
+,{"stream_name":"stdout","time":1479.039585898,"data":"CUDA Version:       12.8\n"}
+,{"stream_name":"stdout","time":1479.039588561,"data":"PyTorch Version:    2.11.0+cu128\n"}
+,{"stream_name":"stdout","time":1479.039604579,"data":"PyTorch CUDA Build: 12.8\n"}
+,{"stream_name":"stdout","time":1479.039608506,"data":"CUDA Available:     True\n"}
+,{"stream_name":"stdout","time":1479.039612369,"data":"\n"}
+,{"stream_name":"stdout","time":1479.03961586,"data":"--- CHECKPOINT PROVENANCE ---\n"}
+,{"stream_name":"stdout","time":1479.039620699,"data":"Checkpoint Path:    /kaggle/working/foveamap_run/checkpoints/range_unet.pt\n"}
+,{"stream_name":"stdout","time":1479.039624654,"data":"Expected SHA256:    28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f\n"}
+,{"stream_name":"stdout","time":1479.039628131,"data":"Actual SHA256:      28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f\n"}
+,{"stream_name":"stdout","time":1479.039631532,"data":"Checkpoint SHA256 verification: PASS (Bit-exact match)\n"}
+,{"stream_name":"stdout","time":1479.039634889,"data":"\n"}
+,{"stream_name":"stdout","time":1479.039638017,"data":"--- SOURCE CODE PROVENANCE ---\n"}
+,{"stream_name":"stdout","time":1479.039641248,"data":"Git Commit SHA:     20e65df551de1e4cbf6c42099707f8c6a7f2bede\n"}
+,{"stream_name":"stdout","time":1479.039644561,"data":"Branch:             dev\n"}
+,{"stream_name":"stdout","time":1479.039650024,"data":"Modified Files:     ['foveamap/grid.py', 'foveamap/grid_torch.py', 'foveamap/temporal.py']\n"}
+,{"stream_name":"stdout","time":1479.039658667,"data":"Generating 1050 deterministic simulation frames (seed=42)...\n"}
+,{"stream_name":"stdout","time":1479.039661473,"data":"Generated 1050 frames in 1397.92s (mean points: 62232.5)\n"}
+,{"stream_name":"stdout","time":1479.039663612,"data":"\n"}
+,{"stream_name":"stdout","time":1479.039665638,"data":"============================================================\n"}
+,{"stream_name":"stdout","time":1479.039667798,"data":"STARTING FP32 1,000-FRAME SOAK RUN\n"}
+,{"stream_name":"stdout","time":1479.039669982,"data":"============================================================\n"}
+,{"stream_name":"stdout","time":1479.039672138,"data":"Running 50 warmup frames...\n"}
+,{"stream_name":"stdout","time":1479.039674234,"data":"Warmup complete. Measured region begins.\n"}
+,{"stream_name":"stdout","time":1479.039676355,"data":"\n"}
+,{"stream_name":"stdout","time":1479.039678378,"data":"FP32 SUMMARY:\n"}
+,{"stream_name":"stdout","time":1479.039680471,"data":"  Mean E2E:    32.42 ms\n"}
+,{"stream_name":"stdout","time":1479.039682555,"data":"  P50 Latency: 32.35 ms\n"}
+,{"stream_name":"stdout","time":1479.039684637,"data":"  P95 Latency: 34.51 ms (Target: \u003c= 50.0 ms) -\u003e PASS\n"}
+,{"stream_name":"stdout","time":1479.039687573,"data":"  P99 Latency: 37.52 ms\n"}
+,{"stream_name":"stdout","time":1479.039690536,"data":"  Max Latency: 50.62 ms\n"}
+,{"stream_name":"stdout","time":1479.039705346,"data":"  Sustained:   30.70 FPS (Target: \u003e= 20.0 FPS) -\u003e PASS\n"}
+,{"stream_name":"stdout","time":1479.039713682,"data":"  Fusion Mean: 16.45 ms | P95: 17.74 ms\n"}
+,{"stream_name":"stdout","time":1479.039718052,"data":"  Peak VRAM:   77.94 MiB allocated, 136.00 MiB reserved\n"}
+,{"stream_name":"stdout","time":1479.039721505,"data":"  VRAM Drift:  +1.882 MiB over 1000 frames\n"}
+,{"stream_name":"stdout","time":1479.039724789,"data":"\n"}
+,{"stream_name":"stdout","time":1479.039727831,"data":"============================================================\n"}
+,{"stream_name":"stdout","time":1479.039731163,"data":"STARTING FP16 1,000-FRAME SOAK RUN\n"}
+,{"stream_name":"stdout","time":1479.039734386,"data":"============================================================\n"}
+,{"stream_name":"stdout","time":1479.039737688,"data":"Running 50 warmup frames...\n"}
+,{"stream_name":"stdout","time":1479.039740912,"data":"Warmup complete. Measured region begins.\n"}
+,{"stream_name":"stdout","time":1479.039744111,"data":"\n"}
+,{"stream_name":"stdout","time":1479.03974722,"data":"FP16 SUMMARY:\n"}
+,{"stream_name":"stdout","time":1479.039750343,"data":"  Mean E2E:    33.11 ms\n"}
+,{"stream_name":"stdout","time":1479.039753475,"data":"  P50 Latency: 32.96 ms\n"}
+,{"stream_name":"stdout","time":1479.039761449,"data":"  P95 Latency: 34.74 ms (Target: \u003c= 50.0 ms) -\u003e PASS\n"}
+,{"stream_name":"stdout","time":1479.039770195,"data":"  P99 Latency: 36.91 ms\n"}
+,{"stream_name":"stdout","time":1479.039772779,"data":"  Max Latency: 52.42 ms\n"}
+,{"stream_name":"stdout","time":1479.039790513,"data":"  Sustained:   30.07 FPS (Target: \u003e= 20.0 FPS) -\u003e PASS\n"}
+,{"stream_name":"stdout","time":1479.039794964,"data":"  Fusion Mean: 16.57 ms | P95: 17.72 ms\n"}
+,{"stream_name":"stdout","time":1479.039798459,"data":"  Peak VRAM:   79.84 MiB allocated, 120.00 MiB reserved\n"}
+,{"stream_name":"stdout","time":1479.039802254,"data":"  VRAM Drift:  +2.826 MiB over 1000 frames\n"}
+,{"stream_name":"stdout","time":1479.039805866,"data":"\n"}
+,{"stream_name":"stdout","time":1479.039809411,"data":"FP32 vs FP16 Semantic Agreement: 99.9940%\n"}
+,{"stream_name":"stdout","time":1479.03981293,"data":"\n"}
+,{"stream_name":"stdout","time":1479.03981665,"data":"Saved comprehensive benchmark results to: /kaggle/working/kaggle_1000_soak_results.json\n"}
+,{"stream_name":"stdout","time":1479.039820808,"data":"\n"}
+,{"stream_name":"stdout","time":1479.039824338,"data":"================================================================================\n"}
+,{"stream_name":"stdout","time":1479.039827747,"data":"FINAL 1,000-FRAME SOAK AUDIT REPORT TABLE\n"}
+,{"stream_name":"stdout","time":1479.039831005,"data":"================================================================================\n"}
+,{"stream_name":"stdout","time":1479.039834429,"data":"Precision | Mean (ms) | P50 (ms) | P95 (ms) | P99 (ms) | Max (ms) | FPS    | P95 Gate | FPS Gate\n"}
+,{"stream_name":"stdout","time":1479.039837959,"data":"--------------------------------------------------------------------------------\n"}
+,{"stream_name":"stdout","time":1479.039841265,"data":"FP32     | 32.42     | 32.35    | 34.51    | 37.52    | 50.62    | 30.70  | PASS     | PASS    \n"}
+,{"stream_name":"stdout","time":1479.03984469,"data":"FP16     | 33.11     | 32.96    | 34.74    | 36.91    | 52.42    | 30.07  | PASS     | PASS    \n"}
+,{"stream_name":"stdout","time":1479.039848077,"data":"================================================================================\n"}
+,{"stream_name":"stdout","time":1479.03985165,"data":"\n"}
+,{"stream_name":"stdout","time":1479.039854794,"data":"OVERALL DEPLOYMENT SOAK VERDICT: PASS\n"}
+,{"stream_name":"stdout","time":1481.590898662,"data":"\n"}
+,{"stream_name":"stdout","time":1481.59093937,"data":"Benchmark completed in 1474.0s with return code 0\n"}
+,{"stream_name":"stdout","time":1481.590944896,"data":"\n"}
+,{"stream_name":"stdout","time":1481.590948716,"data":"Results JSON generated: /kaggle/working/kaggle_1000_soak_results.json (55968 bytes)\n"}
+,{"stream_name":"stderr","time":1483.985187816,"data":"/usr/local/lib/python3.13/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\\|'\n"}
+,{"stream_name":"stderr","time":1483.985211758,"data":"  cells[i][c] = re.sub('\\\\\\\\\\|', '|', cell)\n"}
+,{"stream_name":"stderr","time":1484.235732932,"data":"/usr/local/lib/python3.13/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\\_'\n"}
+,{"stream_name":"stderr","time":1484.235757198,"data":"  text = re.sub(r'_', '\\_', text) # Escape underscores in display text\n"}
+,{"stream_name":"stderr","time":1484.981673152,"data":"[NbConvertApp] Converting notebook __script__.ipynb to html\n"}
+,{"stream_name":"stderr","time":1485.887348535,"data":"[NbConvertApp] Writing 290029 bytes to __results__.html\n"}
+]
