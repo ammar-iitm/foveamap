@@ -81,8 +81,11 @@ Not implemented. No export claims are made anywhere in code or docs.
 `RuntimeConfig.cpu_profile()` (all-NumPy/CPU) and `.gpu_profile()`
 (Torch engines, `device="auto"` → CUDA where present, CPU fallback).
 Defaults remain `device="auto"`, engines NumPy (development-safe);
-production GPU selects the gpu profile explicitly. GPU *performance*
-remains UNVERIFIED until the 12 GB Colab/Kaggle session.
+production GPU selects the gpu profile explicitly. Remote GPU *performance*
+has been authoritatively verified on NVIDIA Tesla T4 (Kaggle remote execution,
+Kernel `zesalamander/foveamap-1000-frame-soak-t4`), achieving P95 = 34.51 ms
+(FP32) / 34.74 ms (FP16) at 30.70 FPS / 30.07 FPS, comfortably surpassing the
+P95 $\le 50.0\text{ ms}$ and $\ge 20.0\text{ FPS}$ deployment gates.
 
 ## D6. ROS 2 posture — structural adapter, physical execution deferred
 
@@ -94,7 +97,9 @@ ROS-dependent tests guarded and skipped with reason.
 
 ## D7. Accuracy posture — historical numbers are provenance, not proof
 
-`results/` and README figures are Colab/T4 measurements from earlier trees
-(labeled with hardware/session). They are NOT re-claimed as final-tree
-results. NFR-6/7/8 acceptance requires the held-out rerun (Phase 11),
-explicitly UNVERIFIED here.
+`results/kaggle_1000_soak_results.json` contains authoritative 1,000-frame
+soak measurements on NVIDIA Tesla T4 (Kernel `zesalamander/foveamap-1000-frame-soak-t4`).
+Earlier baseline figures in `results/` are preserved for provenance.
+Held-out dataset semantic validation on nuScenes/SemanticKITTI full splits is documented
+in Phase 10/11 artifacts; synthetic & 5-frame regression sets are verified locally with
+100% test pass.

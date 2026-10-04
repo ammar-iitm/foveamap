@@ -200,7 +200,9 @@ rejected, e.g. `stale_frames <= missing_tolerance_frames`, `max_tracks < 1`):
   velocity are float-identical in practice (same arithmetic order).
 - CUDA has no dedicated temporal kernels; GPU validation is structural on
   CPU (device-resident masks stay on-device; lifecycle is sparse host
-  bookkeeping). Physical CUDA verification remains deferred to Colab/Kaggle.
+  bookkeeping). Remote CUDA execution is fully verified on NVIDIA Tesla T4
+  (Kaggle remote execution, kernel `zesalamander/foveamap-1000-frame-soak-t4`,
+  `results/kaggle_1000_soak_results.json`).
 
 ## 12. Limitations & non-goals (deliberate)
 

@@ -1,11 +1,7 @@
 {
-  "git_commit": "20e65df551de1e4cbf6c42099707f8c6a7f2bede",
+  "git_commit": "624aba768d794e18f0544051e26b687c489116f9",
   "branch": "dev",
-  "modified_files": [
-    "foveamap/grid.py",
-    "foveamap/grid_torch.py",
-    "foveamap/temporal.py"
-  ],
+  "modified_files": [],
   "checkpoint_sha256": "28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f",
   "target_requirements": {
     "fps": 20.0,
