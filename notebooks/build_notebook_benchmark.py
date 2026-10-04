@@ -1,4 +1,4 @@
-"""Builds foveamap_semantickitti_benchmark_colab.ipynb (kept as code so the notebook stays reviewable)."""
+"""Builds foveamap_benchmark_colab.ipynb (kept as code so the notebook stays reviewable)."""
 import json
 import os
 
@@ -15,15 +15,19 @@ def code(src):
 
 
 md("""
-<a href="https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_semantickitti_benchmark_colab.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
+<a href="https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_benchmark_colab.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
 """)
 
 md("""
-# FoveaMap: SemanticKITTI benchmark only
+# FoveaMap: benchmark only
 
-Re-runs the pipeline benchmark on SemanticKITTI sequence 08 with the latest code, without downloading data or training. It copies the frame cache for sequence 08 and the fine-tuned model from your Google Drive, where the [main SemanticKITTI notebook](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_semantickitti_colab.ipynb) saved them, runs the benchmark `RUNS` times, and prints latency by stage, pothole false alarms, object precision and recall, and the object-size sweep.
+Re-runs the pipeline benchmark with the latest code on **SemanticKITTI** sequence 08 or **nuScenes-mini** scene-0103 (set `DATASET` below), runs it `RUNS` times, profiles it, and zips the results with the dashboard frames. It prints latency by stage, pothole false alarms, object precision and recall, and the object-size sweep.
 
-**Before you start:** use *Runtime → Change runtime type → T4 GPU*, then *Runtime → Run all*. It takes about 10 minutes. Run the main notebook once first if you haven't: this one only reads what it saved in `MyDrive/foveamap_data/`.
+What it needs, from `MyDrive/foveamap_data/`:
+- **SemanticKITTI:** the frame cache and fine-tuned model that the [main SemanticKITTI notebook](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_semantickitti_colab.ipynb) saved there. Run that notebook once first. About 10 minutes.
+- **nuScenes:** nothing. The first run downloads nuScenes-mini (about 4 GB), builds the frame cache, fine-tunes for 120 epochs, and saves the cache and model to Drive, about 30–40 minutes. Later runs take about 10 minutes.
+
+**Before you start:** use *Runtime → Change runtime type → T4 GPU*, set `DATASET`, then *Runtime → Run all*. nuScenes is CC BY-NC-SA 4.0 (non-commercial); if the download asks you to log in, see the [nuScenes notebook](https://colab.research.google.com/github/ammar-iitm/foveamap/blob/main/notebooks/foveamap_nuscenes_colab.ipynb) for the manual steps.
 """)
 
 md("## 1. Setup")
@@ -31,14 +35,27 @@ code("""
 !nvidia-smi --query-gpu=name,memory.total --format=csv || echo "No GPU: Runtime > Change runtime type > T4 GPU"
 """)
 code("""
-import os, sys, shutil, importlib, json, subprocess
-STRIDE, EPOCHS, FLAGS = 10, 40, ''     # which saved model to use: the main notebook's settings when it trained
-SCENE, FRAMES, RUNS = '08', 100, 2     # benchmark the first FRAMES frames of SCENE, RUNS times
+DATASET = 'semantickitti'   # or 'nuscenes'
+RUNS = 2                    # benchmark runs, to tell the code from the machine's busy spells
 
+import os, sys, shutil, importlib, json, subprocess
 from google.colab import drive
 drive.mount('/content/drive')
 DATA = '/content/drive/MyDrive/foveamap_data'
-CACHE = '/content/cache/semantickitti'
+if DATASET == 'semantickitti':
+    STRIDE, EPOCHS, FLAGS = 10, 40, ''                  # which saved model: the main notebook's settings
+    SCENE, FRAMES = '08', 100                           # the first 100 frames of sequence 08
+    DRIVE_CACHE = f'{DATA}/semantickitti_cache_stride{STRIDE}'
+    DRIVE_CKPT = f'{DATA}/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" ", "")}'
+elif DATASET == 'nuscenes':
+    EPOCHS = 120
+    SCENE, FRAMES = 'scene-0103', None                  # all 40 keyframes
+    DRIVE_CACHE = f'{DATA}/nuscenes_mini_cache'
+    DRIVE_CKPT = f'{DATA}/checkpoints_nuscenes_epochs{EPOCHS}'
+else:
+    raise ValueError(f'DATASET must be semantickitti or nuscenes, not {DATASET!r}')
+CACHE = f'/content/cache/{DATASET}'
+CKPT = f'checkpoints/range_unet_{DATASET}.pt'
 
 %cd /content
 shutil.rmtree('/content/foveamap', ignore_errors=True)
@@ -52,31 +69,61 @@ importlib.invalidate_caches()
 """)
 
 md("""
-## 2. Copy the frame cache and the model from Drive
+## 2. Data and model
 
-Only sequence 08 and the cache index are copied (a few GB). Each copy is checked against the file in Drive, so a failed copy stops here with a clear message.
+Copied from Drive when they are there; each copy is checked against its source, so a failed copy stops here with a clear message. For nuScenes, whatever is missing is made and saved to Drive first.
 """)
 code("""
 def restore(src, dst):
     if not os.path.exists(src):
-        raise FileNotFoundError(f'{src} is not in your Drive. Run the main SemanticKITTI notebook once first: '
-                                'it saves the frame cache and the fine-tuned model there.')
+        raise FileNotFoundError(f'{src} is not in your Drive. For SemanticKITTI, run the main SemanticKITTI '
+                                'notebook once first: it saves the frame cache and the fine-tuned model there.')
     size = os.path.getsize(src)
     if os.path.exists(dst) and os.path.getsize(dst) == size:
         print(f'already here: {dst}')
         return
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    os.makedirs(os.path.dirname(dst) or '.', exist_ok=True)
     print(f'copying {src} ({size / 1e9:.2f} GB)', flush=True)
     shutil.copyfile(src, dst + '.part')
     os.replace(dst + '.part', dst)
     if os.path.getsize(dst) != size:
         raise OSError(f'the copy of {src} is incomplete; run this cell again')
 
-DRIVE_CACHE = f'{DATA}/semantickitti_cache_stride{STRIDE}'
-DRIVE_CKPT = f'{DATA}/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" ", "")}'
-restore(f'{DRIVE_CACHE}/index.json', f'{CACHE}/index.json')
-restore(f'{DRIVE_CACHE}/{SCENE}.pkl', f'{CACHE}/{SCENE}.pkl')
-restore(f'{DRIVE_CKPT}/range_unet_semantickitti.pt', 'checkpoints/range_unet_semantickitti.pt')
+def save(files, folder):
+    os.makedirs(folder, exist_ok=True)
+    for f in files:
+        restore(f, f'{folder}/{os.path.basename(f)}')
+
+have_cache = os.path.exists(f'{DRIVE_CACHE}/index.json')
+have_model = os.path.exists(f'{DRIVE_CKPT}/range_unet_{DATASET}.pt')
+if DATASET == 'semantickitti' or (have_cache and have_model):
+    restore(f'{DRIVE_CACHE}/index.json', f'{CACHE}/index.json')
+    restore(f'{DRIVE_CACHE}/{SCENE}.pkl', f'{CACHE}/{SCENE}.pkl')
+else:                                                    # nuScenes, first time
+    if have_cache:
+        for f in sorted(os.listdir(DRIVE_CACHE)):
+            restore(f'{DRIVE_CACHE}/{f}', f'{CACHE}/{f}')
+    else:
+        DATAROOT = '/content/nuscenes'
+        os.makedirs(DATAROOT, exist_ok=True)
+        if not os.path.exists('/content/v1.0-mini.tgz'):
+            !wget -q --show-progress -O /content/v1.0-mini.tgz https://www.nuscenes.org/data/v1.0-mini.tgz
+        if not os.path.exists('/content/nuScenes-lidarseg-mini-v1.0.tar.bz2'):
+            !wget -q --show-progress -O /content/nuScenes-lidarseg-mini-v1.0.tar.bz2 https://www.nuscenes.org/data/nuScenes-lidarseg-mini-v1.0.tar.bz2
+        !tar -xzf /content/v1.0-mini.tgz -C $DATAROOT
+        !tar -xjf /content/nuScenes-lidarseg-mini-v1.0.tar.bz2 -C $DATAROOT
+        !python scripts/prepare_nuscenes.py --dataroot $DATAROOT --out $CACHE
+        if not os.path.exists(f'{CACHE}/index.json'):
+            raise RuntimeError('Building the nuScenes cache failed (see above).')
+        save([f'{CACHE}/{f}' for f in sorted(os.listdir(CACHE))], DRIVE_CACHE)
+    if not have_model:
+        print(f'fine-tuning for {EPOCHS} epochs', flush=True)
+        !python scripts/train.py --dataset nuscenes --cache $CACHE --init checkpoints/range_unet.pt \\
+            --out $CKPT --epochs $EPOCHS 2>&1 | tee train_nuscenes.log | awk '!/^step/ || (++n % 10 == 0)'
+        if not os.path.exists(CKPT):
+            raise RuntimeError('Fine-tuning failed (see above).')
+        save([CKPT, CKPT.replace('.pt', '_val.json'), 'train_nuscenes.log'], DRIVE_CKPT)
+restore(f'{DRIVE_CKPT}/range_unet_{DATASET}.pt', CKPT)
 drive.flush_and_unmount()       # the Drive client's background work competes for the 2 vCPUs while timing
 print('ready (Drive unmounted until the results are saved)')
 """)
@@ -84,16 +131,18 @@ print('ready (Drive unmounted until the results are saved)')
 md("""
 ## 3. Benchmark
 
-Each run writes its metrics, per-frame log and dashboard frames to `results/semantickitti_run<N>/`. Colab's shared CPUs have busy spells, so compare the runs: a p95 that differs a lot between them is the machine, not the code. Google Drive stays unmounted while timing, and on CUDA the first frames include compiling the derive step (they are not counted).
+Each run writes its metrics, per-frame log and dashboard frames to `results/<DATASET>_run<N>/`. Colab's shared CPUs have busy spells, so compare the runs: a p95 that differs a lot between them is the machine, not the code. On CUDA the first frames include compiling the derive step (they are not counted).
 """)
 code("""
 import pandas as pd
 pct = lambda v: '—' if v is None else f'{100 * v:.1f}%'
 
 def run(n):
-    out, log = f'results/semantickitti_run{n}', f'benchmark_run{n}.log'
-    cmd = [sys.executable, 'scripts/run_benchmark.py', '--dataset', 'semantickitti', '--cache', CACHE,
-           '--scene', SCENE, '--max-frames', str(FRAMES), '--grid', 'torch', '--out', out]
+    out, log = f'results/{DATASET}_run{n}', f'benchmark_{DATASET}_run{n}.log'
+    cmd = [sys.executable, 'scripts/run_benchmark.py', '--dataset', DATASET, '--cache', CACHE,
+           '--scene', SCENE, '--ckpt', CKPT, '--grid', 'torch', '--out', out]
+    if FRAMES:
+        cmd += ['--max-frames', str(FRAMES)]
     with open(log, 'w') as fh:
         if subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT).returncode:
             print(open(log).read()[-3000:])
@@ -124,7 +173,7 @@ md("""
 Runs `torch.profiler` over 20 frames: the CPU and GPU time of each stage, the operations with the most GPU and CPU time, and how often the host waits for the GPU. The profiler adds overhead, so read it relative to the benchmark above. The output is also saved to `profile.txt`.
 """)
 code("""
-!python scripts/profile_pipeline.py --dataset semantickitti --cache $CACHE --scene $SCENE 2>&1 | grep -v "^USDT\\|^STAGE:" | tee profile.txt
+!python scripts/profile_pipeline.py --dataset $DATASET --cache $CACHE --scene $SCENE --ckpt $CKPT 2>&1 | grep -v "^USDT\\\\|^STAGE:" | tee profile.txt
 """)
 
 md("""
@@ -134,9 +183,9 @@ The zip holds the profile, every run's metrics and log, and run 1's dashboard fr
 """)
 code("""
 import time
-name = f'foveamap_semantickitti_benchmark_{time.strftime("%Y%m%d_%H%M")}.zip'
-files_ = ['profile.txt'] + [f'benchmark_run{n}.log' for n in range(1, RUNS + 1)] + \\
-         [f'results/semantickitti_run{n}/metrics.json' for n in range(1, RUNS + 1)] + ['results/semantickitti_run1']
+name = f'foveamap_{DATASET}_benchmark_{time.strftime("%Y%m%d_%H%M")}.zip'
+files_ = ['profile.txt'] + [f'benchmark_{DATASET}_run{n}.log' for n in range(1, RUNS + 1)] + \\
+         [f'results/{DATASET}_run{n}/metrics.json' for n in range(1, RUNS + 1)] + [f'results/{DATASET}_run1']
 !zip -qr /content/$name {' '.join(files_)}
 drive.mount('/content/drive')
 os.makedirs(f'{DATA}/benchmark_results', exist_ok=True)
@@ -149,7 +198,7 @@ nb = dict(cells=cells, metadata=dict(
     accelerator="GPU", colab=dict(provenance=[], gpuType="T4"),
     kernelspec=dict(display_name="Python 3", name="python3"),
     language_info=dict(name="python")), nbformat=4, nbformat_minor=0)
-out = os.path.join(os.path.dirname(__file__), "foveamap_semantickitti_benchmark_colab.ipynb")
+out = os.path.join(os.path.dirname(__file__), "foveamap_benchmark_colab.ipynb")
 with open(out, "w") as fh:
     json.dump(nb, fh, indent=1)
 print("wrote", out)
