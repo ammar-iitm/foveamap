@@ -130,17 +130,30 @@ md("""
 ## 4. Fine-tune on the training sequences (about 15 minutes on a T4 for 40 epochs, plus a few to prepare the frames)
 
 Starts from the simulator checkpoint. It first prepares the training frames (progress every 250 frames, a few minutes), then prints progress every 250 steps. The model and log are copied to Drive afterwards. `FLAGS` takes the recipe options from `scripts/train.py` (`--reset-head`, `--balance`, `--aug`).
+
+**If a model with these settings is already in Drive** (same `STRIDE`, `EPOCHS` and `FLAGS`), it is copied back instead of training again, which takes seconds. Set `RETRAIN = True` to train anyway.
 """)
 code("""
+import json
 EPOCHS = 40
 FLAGS = ''
-!python scripts/train.py --dataset semantickitti --cache $CACHE --init checkpoints/range_unet.pt \\
-    --out checkpoints/range_unet_semantickitti.pt --epochs $EPOCHS $FLAGS 2>&1 | tee train_semantickitti.log | awk '!/^step/ || (++n % 10 == 0)'
-if USE_DRIVE and os.path.exists('checkpoints/range_unet_semantickitti_val.json'):    # keep the model past this runtime
+RETRAIN = False
+DRIVE_CKPT = f'/content/drive/MyDrive/foveamap_data/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" ", "")}'
+if USE_DRIVE:
     drive.mount('/content/drive')
-    DRIVE_CKPT = f'/content/drive/MyDrive/foveamap_data/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" ", "")}'
-    !mkdir -p "$DRIVE_CKPT" && cp checkpoints/range_unet_semantickitti* train_semantickitti.log "$DRIVE_CKPT"/
-    print(f'Model saved to {DRIVE_CKPT}')
+saved = [f'{DRIVE_CKPT}/{f}' for f in ('range_unet_semantickitti.pt', 'range_unet_semantickitti_val.json', 'train_semantickitti.log')]
+if USE_DRIVE and not RETRAIN and all(os.path.exists(f) for f in saved):
+    for f in saved:
+        shutil.copy(f, 'checkpoints/' if f.endswith(('.pt', '.json')) else '.')
+    v = json.load(open('checkpoints/range_unet_semantickitti_val.json'))
+    print(f"Model with these settings found in Drive and copied back (val mIoU {100 * v['miou']:.1f}%). "
+          'Set RETRAIN = True to train again.')
+else:
+    !python scripts/train.py --dataset semantickitti --cache $CACHE --init checkpoints/range_unet.pt \\
+        --out checkpoints/range_unet_semantickitti.pt --epochs $EPOCHS $FLAGS 2>&1 | tee train_semantickitti.log | awk '!/^step/ || (++n % 10 == 0)'
+    if USE_DRIVE and os.path.exists('checkpoints/range_unet_semantickitti_val.json'):    # keep the model past this runtime
+        !mkdir -p "$DRIVE_CKPT" && cp checkpoints/range_unet_semantickitti* train_semantickitti.log "$DRIVE_CKPT"/
+        print(f'Model saved to {DRIVE_CKPT}')
 """)
 
 md("""
