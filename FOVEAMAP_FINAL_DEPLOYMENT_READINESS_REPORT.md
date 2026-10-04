@@ -1,21 +1,25 @@
 # FOVEAMAP — FINAL PRE-DEPLOYMENT RELEASE GATE REPORT
 
-**Release Gate Completed:** 2026-10-04T21:40:00+05:30  
+**Release Gate Completed:** 2026-10-04T21:49:00+05:30  
 **Evaluated Branch:** `dev`  
-**Evaluated Git Commit:** `624aba768d794e18f0544051e26b687c489116f9`  
+**FINAL VERIFIED COMMIT:** `22177217cd25ddc624a3231acf34907d2900270b`  
 **Workspace:** `C:\Users\Kmano\Dropbox\Project\Current_Project\foveamap`  
 **Target Performance Gates:** End-to-End P95 $\le 50.0\text{ ms}$, Throughput $\ge 20.0\text{ FPS}$ on NVIDIA Tesla T4 GPU  
 **Final Release Decision:** **READY FOR DEPLOYMENT: PASS**
 
 ---
 
-## 1. Exact Evaluated Commit
+## 1. Exact Evaluated Commit & Release Ancestry
 
-- **Commit SHA:** `624aba768d794e18f0544051e26b687c489116f9`
-- **Author:** Ammar IITM / Autonomous Engineering Lead
-- **Commit Message:** `feat(audit): complete full autonomous forensic audit, surgical T4 optimizations, and deployment validation`
-- **Tree Status:** Clean, reproducible, synchronized with `origin/dev`.
+- **FINAL VERIFIED COMMIT:** `22177217cd25ddc624a3231acf34907d2900270b`
+- **Evaluated Software Baseline SHA:** `624aba768d794e18f0544051e26b687c489116f9`
+- **Ancestry Equivalence Proof:**
+  - `git diff 624aba7..HEAD` contains strictly:
+    - `Dockerfile`: Added native `HEALTHCHECK` directive (validated live via Docker).
+    - Documentation & Provenance: `FOVEAMAP_FINAL_DEPLOYMENT_READINESS_REPORT.md`, `Final_Audit.md`, `docs/ARCHITECTURE_DECISIONS.md`, `docs/DYNAMIC_WORLD_MODEL.md`, `provenance.json`.
+  - Core production code in `foveamap/` and `foveamap_ros/` is **100% bit-identical**.
 - **Checkpoint SHA-256:** `28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f` (`checkpoints/range_unet.pt`, 1,269,725 bytes).
+- **Tree Status:** Clean, reproducible, synchronized with `origin/dev`.
 
 ---
 
