@@ -43,7 +43,7 @@ from google.colab import drive
 drive.mount('/content/drive')
 DATA = '/content/drive/MyDrive/foveamap_data'
 if DATASET == 'semantickitti':
-    STRIDE, EPOCHS, FLAGS = 10, 40, ''                  # which saved model: the main notebook's settings
+    STRIDE, EPOCHS, FLAGS = 10, 40, ''                  # which saved cache and model: the main notebook's settings
     SCENE, FRAMES = '08', 100                           # the first 100 frames of sequence 08
     DRIVE_CACHE = f'{DATA}/semantickitti_cache_stride{STRIDE}'
     DRIVE_CKPT = f'{DATA}/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" ", "")}'
@@ -104,7 +104,12 @@ have_cache = os.path.exists(f'{DRIVE_CACHE}/index.json')
 have_model = os.path.exists(f'{DRIVE_CKPT}/range_unet_{DATASET}.pt')
 if DATASET == 'semantickitti' or (have_cache and have_model):
     restore(f'{DRIVE_CACHE}/index.json', f'{CACHE}/index.json')
-    restore(f'{DRIVE_CACHE}/{SCENE}.pkl', f'{CACHE}/{SCENE}.pkl')
+    scene_files = sorted(f for f in os.listdir(DRIVE_CACHE)        # one file, or chunks of 100 frames
+                         if f == f'{SCENE}.pkl' or (f.startswith(f'{SCENE}_') and f.endswith('.pkl')))
+    if not scene_files:
+        raise FileNotFoundError(f'no cache files for {SCENE} in {DRIVE_CACHE}')
+    for f in scene_files:
+        restore(f'{DRIVE_CACHE}/{f}', f'{CACHE}/{f}')
 else:                                                    # nuScenes, first time
     if have_cache:
         for f in sorted(os.listdir(DRIVE_CACHE)):

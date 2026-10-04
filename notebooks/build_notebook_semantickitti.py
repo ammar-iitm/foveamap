@@ -86,9 +86,11 @@ md("""
 **If the cache for this `STRIDE` is already in Drive** (from an earlier session), it is copied into this runtime, about 5 minutes.
 
 **Otherwise** (first time, about 20–30 minutes): downloads the SemanticKITTI labels (179 MB, includes poses) and the KITTI calibration, fetches only the scans that are used from the KITTI velodyne zip (progress every 30 s), builds the frame cache, then saves it to Drive (about 14 GB) for next time.
+
+**`STRIDE = 5`** uses every 5th scan: twice the training data (about 3,800 frames), about 26 GB of scans and 28 GB of cache, and roughly twice as long to prepare and train. It fits a standard 12.7 GB runtime: the cache is written and read 100 frames at a time, and training keeps its arrays in files on the runtime's disk (`--arrays`) instead of RAM.
 """)
 code("""
-STRIDE = 10     # every 10th scan: ~1,900 training and ~400 validation frames
+STRIDE = 10     # every 10th scan: ~1,900 training and ~400 validation frames; 5 doubles both (see above)
 DRIVE_CACHE = f'/content/drive/MyDrive/foveamap_data/semantickitti_cache_stride{STRIDE}'
 if USE_DRIVE:
     drive.mount('/content/drive')
@@ -138,6 +140,7 @@ import json
 EPOCHS = 40
 FLAGS = ''
 RETRAIN = False
+ARRAYS = '--arrays /content/train_arrays' if STRIDE < 10 else ''     # below stride 10 the arrays don't fit in RAM
 DRIVE_CKPT = f'/content/drive/MyDrive/foveamap_data/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" ", "")}'
 if USE_DRIVE:
     drive.mount('/content/drive')
@@ -150,7 +153,7 @@ if USE_DRIVE and not RETRAIN and all(os.path.exists(f) for f in saved):
           'Set RETRAIN = True to train again.')
 else:
     !python scripts/train.py --dataset semantickitti --cache $CACHE --init checkpoints/range_unet.pt \\
-        --out checkpoints/range_unet_semantickitti.pt --epochs $EPOCHS $FLAGS 2>&1 | tee train_semantickitti.log | awk '!/^step/ || (++n % 10 == 0)'
+        --out checkpoints/range_unet_semantickitti.pt --epochs $EPOCHS $FLAGS $ARRAYS 2>&1 | tee train_semantickitti.log | awk '!/^step/ || (++n % 10 == 0)'
     if USE_DRIVE and os.path.exists('checkpoints/range_unet_semantickitti_val.json'):    # keep the model past this runtime
         !mkdir -p "$DRIVE_CKPT" && cp checkpoints/range_unet_semantickitti* train_semantickitti.log "$DRIVE_CKPT"/
         print(f'Model saved to {DRIVE_CKPT}')

@@ -56,6 +56,7 @@ python scripts/run_benchmark.py --dataset semantickitti --scene 08 --max-frames 
 How the loader maps SemanticKITTI onto FoveaMap:
 
 - **Only the scans it needs.** The KITTI velodyne zip is 85 GB. `prepare_semantickitti.py` fetches every n-th scan (default 10) and the two scans before it straight from the remote zip with HTTP range requests, about 14 GB at stride 10.
+- **Stride 5 fits a standard Colab runtime.** Every 5th scan doubles the training data (about 3,800 frames, 26 GB of scans, 28 GB of cache). The cache is written and read 100 frames at a time, and `train.py --arrays DIR` keeps the training arrays in memory-mapped files instead of RAM (the notebook does this below stride 10); training from them gives exactly the same weights.
 - **Laser rows.** The files carry no laser id, so rows come from elevation over the simulator's field of view (+2° to −24.9°, 64 rows).
 - **Frames and poses.** The ego frame is the Lidar frame moved down 1.73 m to the ground. Poses are cam0 poses converted to the Lidar with the calibration, so the world is the first scan's ego frame.
 - **Classes and moving flags.** SemanticKITTI's classes map onto all 9 FoveaMap classes, and its moving-car and moving-person labels give the moving flags.
