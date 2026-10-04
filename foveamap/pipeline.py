@@ -32,6 +32,9 @@ def hardware_label(device, grid="numpy"):
     if device.type == "cuda":
         where = "GPU" if grid == "torch" else "CPU"
         return f"{torch.cuda.get_device_name(device)} GPU (FP16 inference) + {where} grid engine"
+    if device.type == "mps":
+        where = "GPU" if grid == "torch" else "CPU"
+        return f"Apple GPU (MPS) inference + {where} grid engine"
     engine = "PyTorch" if grid == "torch" else "NumPy"
     return f"{os.cpu_count()} vCPU, no GPU (CPU PyTorch, {engine} grid engine)"
 
