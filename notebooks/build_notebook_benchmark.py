@@ -136,14 +136,23 @@ Each run writes its metrics, per-frame log and dashboard frames to `results/<DAT
 code("""
 import pandas as pd, threading, time
 pct = lambda v: '—' if v is None else f'{100 * v:.1f}%'
-!pip -q install nvidia-ml-py
-
 def monitor(path, stop):
     # every 0.5 s: CPU steal and busy share (/proc/stat), and the GPU's SM clock, power, temperature,
-    # performance state and utilisation (NVML), to line slow frames up with what the machine was doing
-    import pynvml
-    pynvml.nvmlInit()
-    h = pynvml.nvmlDeviceGetHandleByIndex(0)
+    # performance state and utilisation (one long-running nvidia-smi), to line slow frames up with
+    # what the machine was doing. Each line is stamped on arrival, so no clock or time zone to match.
+    gpu = {'sm_mhz': '', 'power_w': '', 'temp_c': '', 'pstate': '', 'gpu_util': ''}
+    def read_gpu(proc):
+        for line in proc.stdout:
+            v = [x.strip() for x in line.split(',')]
+            if len(v) == 5:
+                gpu.update(sm_mhz=v[0], power_w=v[1], temp_c=v[2], pstate=v[3].lstrip('P'), gpu_util=v[4])
+    smi = None
+    try:
+        smi = subprocess.Popen(['nvidia-smi', '--query-gpu=clocks.sm,power.draw,temperature.gpu,pstate,utilization.gpu',
+                                '--format=csv,noheader,nounits', '-lms', '500'], stdout=subprocess.PIPE, text=True)
+        threading.Thread(target=read_gpu, args=(smi,), daemon=True).start()
+    except OSError as e:
+        print('no GPU monitor:', e)
     cpu = lambda: [int(v) for v in open('/proc/stat').readline().split()[1:9]]
     prev = cpu()
     with open(path, 'w') as fh:
@@ -152,12 +161,17 @@ def monitor(path, stop):
             cur = cpu()
             d = [c - p for c, p in zip(cur, prev)]
             prev, tot = cur, max(sum(d), 1)       # user nice system idle iowait irq softirq steal
-            fh.write(f'{time.time():.3f},{100 * d[7] / tot:.1f},{100 * (tot - d[3] - d[4]) / tot:.1f},'
-                     f'{pynvml.nvmlDeviceGetClockInfo(h, pynvml.NVML_CLOCK_SM)},'
-                     f'{pynvml.nvmlDeviceGetPowerUsage(h) / 1000:.1f},'
-                     f'{pynvml.nvmlDeviceGetTemperature(h, pynvml.NVML_TEMPERATURE_GPU)},'
-                     f'{pynvml.nvmlDeviceGetPerformanceState(h)},{pynvml.nvmlDeviceGetUtilizationRates(h).gpu}\\n')
+            fh.write(f"{time.time():.3f},{100 * d[7] / tot:.1f},{100 * (tot - d[3] - d[4]) / tot:.1f},"
+                     f"{gpu['sm_mhz']},{gpu['power_w']},{gpu['temp_c']},{gpu['pstate']},{gpu['gpu_util']}\\n")
             fh.flush()
+    if smi:
+        smi.terminate()
+
+def safe_monitor(path, stop):
+    try:
+        monitor(path, stop)
+    except Exception as e:                        # a monitor problem must not stop the benchmark
+        print(f'machine monitor stopped: {type(e).__name__}: {e}')
 
 def run(n):
     out, log = f'results/{DATASET}_run{n}', f'benchmark_{DATASET}_run{n}.log'
@@ -166,7 +180,7 @@ def run(n):
     if FRAMES:
         cmd += ['--max-frames', str(FRAMES)]
     stop = threading.Event()
-    mon = threading.Thread(target=monitor, args=(f'monitor_{DATASET}_run{n}.csv', stop), daemon=True)
+    mon = threading.Thread(target=safe_monitor, args=(f'monitor_{DATASET}_run{n}.csv', stop), daemon=True)
     mon.start()
     try:
         with open(log, 'w') as fh:
@@ -176,9 +190,13 @@ def run(n):
     finally:
         stop.set()
         mon.join()
-    m = pd.read_csv(f'monitor_{DATASET}_run{n}.csv')
-    print(f'run {n} machine: CPU steal max {m.steal_pct.max():.0f}%, mean {m.steal_pct.mean():.1f}%; '
-          f'GPU SM clock {m.sm_mhz.min()}-{m.sm_mhz.max()} MHz, {m.temp_c.max()} C max, P-states {sorted(m.pstate.unique())}')
+    try:
+        m = pd.read_csv(f'monitor_{DATASET}_run{n}.csv')
+        print(f'run {n} machine: CPU steal max {m.steal_pct.max():.0f}%, mean {m.steal_pct.mean():.1f}%; '
+              f'GPU SM clock {m.sm_mhz.min()}-{m.sm_mhz.max()} MHz, {m.temp_c.max()} C max, '
+              f'P-states {sorted(m.pstate.dropna().unique())}')
+    except Exception as e:
+        print(f'run {n}: no machine monitor data ({e})')
     return json.load(open(f'{out}/metrics.json'))['summary']
 
 for n in range(1, RUNS + 1):
