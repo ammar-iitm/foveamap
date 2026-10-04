@@ -175,6 +175,7 @@ const CATEGORIES = [
 ];
 const STAGES = [["preprocess", "Preprocess"], ["inference", "Network"], ["projection", "Projection"], ["fusion", "Fusion + cost"], ["publish", "Serialise"], ["objects", "Objects"]];
 const STAGE_OP = [0.35, 1, 0.75, 0.55, 0.25, 0.9];
+const WARM = 2;            // warm-up frames, as in the benchmark summary
 const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 const CLASS_RGB = CLASS_HEX.map(hexRgb);
 const CIVIDIS = ["#00224E", "#2A3C6B", "#575D6D", "#7C7B78", "#A59C74", "#D3C065", "#FEE838"].map(hexRgb);
@@ -207,18 +208,18 @@ async function load() {
     S.pts = u;
   } catch (e) { S.pts = null; }
   let loaded = 0;
-  const N = M.frames.length;
+  const N = M.frames.length, start = Math.min(WARM, N - 1);    // open on the first counted frame
   const first = new Promise(res => {
     for (let t = 0; t < N; t++) {
       const im = new Image();
-      im.onload = () => { loaded++; $("loading").textContent = `Loading frames… ${loaded} / ${N}`; if (t === 0) res(); if (loaded === N) $("loading").hidden = true; };
+      im.onload = () => { loaded++; $("loading").textContent = `Loading frames… ${loaded} / ${N}`; if (t === start) res(); if (loaded === N) $("loading").hidden = true; };
       im.onerror = () => { loaded++; };
       im.src = `data/frames/f${String(t).padStart(3, "0")}.png`;
       S.imgs[t] = im;
     }
   });
   await first;
-  setFrame(0);
+  setFrame(start);
 }
 const fmtCm = m => m < 1 ? `${Math.round(m * 100)} cm` : `${m} m`;
 
@@ -409,9 +410,11 @@ function drawObjects(f, toD, rot) {
     const pts = [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([a, b]) =>
       toD(x + a * L / 2 * c - b * Wd / 2 * sn, y + a * L / 2 * sn + b * Wd / 2 * c));
     ctx.beginPath(); pts.forEach(([px, py], i) => i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.closePath();
-    ctx.lineWidth = mv ? 2.2 : 1.4;
-    ctx.strokeStyle = mv ? (isLight() ? "#0F1720" : "#FFFFFF") : CLASS_HEX[cls];
+    ctx.lineWidth = mv ? 2.4 : 1.4;
+    ctx.strokeStyle = CLASS_HEX[cls];
+    ctx.setLineDash(mv ? [5, 3] : []);     // moving: dashed
     ctx.stroke();
+    ctx.setLineDash([]);
     if (cls !== 6 && Math.hypot(x - f.ego[0], y - f.ego[1]) < 30) {
       const [lx, ly] = rot(toD(x, y));
       out.push([`${CLASS_NAMES[cls].split(" ")[0]}${mv ? " · moving" : ""}`, lx, ly]);
@@ -470,7 +473,7 @@ function legend() {
     h += `<h4>Traversability cost</h4><div class="ramp" style="background:linear-gradient(90deg,rgba(40,40,40,.2),rgb(${VERMILLION}))"></div><div class="ramplab"><span>free</span><span>curb / rough</span><span>blocked</span></div>`;
   }
   if (S.ov.edges && L !== "gt") h += `<div><span class="sw" style="background:#fff;outline:1px solid var(--border)"></span>Curb step ≥ 8 cm</div><div><span class="sw" style="background:rgb(${VERMILLION})"></span>Pothole</div>`;
-  if (S.ov.objects) h += `<div><span class="sw" style="background:transparent;outline:1.5px solid ${CLASS_HEX[7]}"></span>Object box (white: moving)</div>`;
+  if (S.ov.objects) h += `<div><span class="sw" style="background:transparent;outline:1.5px solid ${CLASS_HEX[7]}"></span>Object box (dashed: moving)</div>`;
   h += `<div><span class="sw" style="background:var(--unknown)"></span>Unknown</div>`;
   const t = S.M.summary.tiers;
   h += `<div class="sec num" style="grid-column:1/-1">${t.map(x => `${fmtCm(x.cell)} to ±${x.half} m`).join(" · ")}</div>`;
@@ -528,7 +531,9 @@ function drawMemory() {
 function drawLatency() {
   const f = S.M.frames[S.t], s = S.M.summary, tm = f.timing_ms;
   const W = 356, H = 106;
-  const total = f.total_ms, maxT = Math.max(...S.M.frames.map(x => x.total_ms)) * 1.05;
+  // the first WARM frames include start-up (e.g. compiling): the benchmark leaves them out, and so does the scale
+  const timed = S.M.frames.length > WARM ? S.M.frames.slice(WARM) : S.M.frames;
+  const total = f.total_ms, maxT = Math.max(...timed.map(x => x.total_ms)) * 1.05;
   let g = "", x = 0;
   const bw = W, sc = bw / Math.max(total, 1);
   STAGES.forEach(([k, name], i) => {
@@ -543,7 +548,7 @@ function drawLatency() {
     g += `<rect x="${col * 120}" y="${24 + row * 15}" width="8" height="8" fill="var(--accent)" fill-opacity="${op}"/>` + T(col * 120 + 12, 32 + row * 15, `${name} <tspan fill="var(--fg)" font-family="var(--font-num)">${tm[k].toFixed(0)}</tspan>`, { size: 10.5 });
   });
   // sparkline of total latency per frame
-  const y0 = 58, h = 34, N = S.M.frames.length, sx = i => i / (N - 1) * (W - 2) + 1, sy = v => y0 + h - v / maxT * h;
+  const y0 = 58, h = 34, N = S.M.frames.length, sx = i => i / (N - 1) * (W - 2) + 1, sy = v => y0 + h - Math.min(v, maxT) / maxT * h;
   const pts = S.M.frames.map((q, i) => `${sx(i).toFixed(1)},${sy(q.total_ms).toFixed(1)}`).join(" ");
   g += `<polygon points="1,${y0 + h} ${pts} ${W - 1},${y0 + h}" fill="var(--accent)" fill-opacity="0.12"/>`;
   g += `<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.3"/>`;
@@ -552,7 +557,7 @@ function drawLatency() {
   g += `<circle cx="${sx(S.t)}" cy="${sy(total)}" r="3.5" fill="var(--accent)" stroke="var(--panel)" stroke-width="1.5"/>`;
   g += T(0, H - 2, `total per frame, ${S.M.frames.length} frames`, { size: 10 });
   $("c-lat").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Latency by stage">${g}</svg>`;
-  $("lat-frame").textContent = `frame ${S.t}: ${total.toFixed(0)} ms`;
+  $("lat-frame").textContent = `frame ${S.t}: ${total.toFixed(0)} ms${S.t < WARM && S.M.frames.length > WARM ? " (warm-up, not counted)" : ""}`;
   $("lat-facts").innerHTML = `<dt>Foveated grid engine, mean</dt><dd>${s.grid_only_ms.toFixed(0)} ms</dd><dt>Same engine, uniform 5 cm grid</dt><dd>${Math.round(s.uniform5_grid_ms).toLocaleString("en-US")} ms</dd><dt style="grid-column:1/-1">Measured on a ${s.hardware.replace("cloud VM, ", "cloud VM with ")}</dt>`;
 }
 
