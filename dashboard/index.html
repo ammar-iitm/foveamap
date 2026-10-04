@@ -48,9 +48,9 @@ button, input, select { font: inherit; color: inherit; }
 .mapwrap { position: relative; background: var(--map-bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; min-height: 320px; }
 #map { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #map.drag { cursor: grabbing; }
-.maplabel { position: absolute; top: 10px; left: 12px; font-weight: 600; pointer-events: none; }
-.maplabel .sec { font-weight: 400; display: block; font-size: 12px; }
-.legend { position: absolute; left: 10px; bottom: 10px; background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; display: grid; grid-template-columns: auto auto; gap: 3px 14px; max-width: calc(100% - 20px); }
+.maplabel { position: absolute; top: 10px; left: 10px; font-weight: 600; pointer-events: none; background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; font-size: 13px; }
+.maplabel .sec { font-weight: 400; display: block; font-size: 11.5px; color: var(--fg2); }
+.legend { position: absolute; left: 10px; bottom: 10px; background: color-mix(in srgb, var(--panel) 90%, transparent); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 11.5px; grid-template-columns: auto auto; gap: 2px 12px; max-width: calc(100% - 20px); }
 .legend h4 { grid-column: 1 / -1; margin: 0 0 2px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg2); font-weight: 600; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 .ramp { grid-column: 1 / -1; height: 8px; border-radius: 2px; }
@@ -63,10 +63,11 @@ button, input, select { font: inherit; color: inherit; }
 
 /* rail */
 .rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+.rail.more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); }
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.tile { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; display: grid; gap: 2px; min-width: 0; }
+.tile { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; display: grid; gap: 1px; min-width: 0; }
 .tile .lab { font-size: 12px; color: var(--fg2); }
-.tile .val { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 600; line-height: 1.15; }
+.tile .val { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 24px; font-weight: 600; line-height: 1.12; }
 .tile .val small { font-size: 13px; font-weight: 400; color: var(--fg2); margin-left: 3px; }
 .tile .tgt { font-size: 11.5px; color: var(--fg2); display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
 .st { font-weight: 600; } .st.good { color: var(--good); } .st.warn { color: var(--warn); } .st.bad { color: var(--bad); }
@@ -84,7 +85,7 @@ button, input, select { font: inherit; color: inherit; }
 .group > .glab { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg2); font-weight: 600; margin-right: 2px; }
 .chip { border: 1px solid var(--border); background: transparent; border-radius: 999px; padding: 3px 10px; cursor: pointer; color: var(--fg2); font-size: 12px; }
 .chip[aria-pressed="true"] { color: var(--fg); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.chip kbd, .seg kbd { font-family: var(--font-num); font-size: 10.5px; color: var(--fg2); margin-left: 5px; }
+.chip kbd, .seg kbd, .btn kbd { font-family: var(--font-num); font-size: 10.5px; color: var(--fg2); margin-left: 5px; }
 .play { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 260px; }
 .btn { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 4px 10px; cursor: pointer; min-width: 34px; }
 #scrub { flex: 1; accent-color: var(--accent); min-width: 120px; }
@@ -99,9 +100,10 @@ button, input, select { font: inherit; color: inherit; }
   .mapwrap { height: 70vh; }
   .rail { overflow: visible; }
 }
-.legbtn { display: none; position: absolute; right: 10px; bottom: 10px; }
+.legbtn { position: absolute; right: 10px; bottom: 10px; font-size: 12px; }
+.legend { display: none; } .legend.open { display: grid; }
 .livetag { color: var(--good, #2e9d5b); font-weight: 600; }
-@media (max-width: 520px) { .legend { display: none; bottom: 48px; } .legend.open { display: grid; } .legbtn { display: inline-block; } .tiles { grid-template-columns: 1fr 1fr; } .tile .val { font-size: 21px; } .mapwrap { height: 60vh; } }
+@media (max-width: 520px) { .legend { bottom: 48px; } .tiles { grid-template-columns: 1fr 1fr; } .tile .val { font-size: 21px; } .mapwrap { height: 60vh; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -121,14 +123,14 @@ button, input, select { font: inherit; color: inherit; }
   <section class="main">
     <div class="mapwrap" id="mapwrap">
       <canvas id="map" aria-label="Live foveated 2.5D map, top-down, heading up"></canvas>
-      <div class="maplabel" id="maplabel">Live 2.5D map<span class="sec">top-down, heading up · drag to pan, scroll to zoom</span></div>
+      <div class="maplabel" id="maplabel">2.5D map<span class="sec">top-down, heading up · drag to pan, scroll to zoom</span></div>
       <div class="legend" id="legend"></div>
-      <button class="btn legbtn" id="legbtn" aria-expanded="false">Legend</button>
+      <button class="btn legbtn" id="legbtn" aria-expanded="false" title="Show or hide the legend (L)">Legend<kbd>L</kbd></button>
       <div class="inspector" id="insp" hidden></div>
       <div class="loading" id="loading">Loading frames…</div>
     </div>
 
-    <aside class="rail">
+    <aside class="rail" id="rail">
       <div class="tiles">
         <div class="tile"><div class="lab">Pipeline speed</div><div class="val" id="k-fps">—</div><div class="tgt"><span>target ≥ 20 FPS (GPU)</span><span class="st" id="k-fps-st"></span></div></div>
         <div class="tile"><div class="lab">p95 latency</div><div class="val" id="k-lat">—</div><div class="tgt"><span>target ≤ 50 ms (GPU)</span><span class="st" id="k-lat-st"></span></div></div>
@@ -236,6 +238,7 @@ async function liveState() {
 
 async function startLive(st) {
   S.live = true;
+  $("maplabel").firstChild.textContent = "Live 2.5D map";
   S.M = { summary: st.summary, frames: st.history || [] };
   for (const id of ["b-prev", "b-play", "b-next", "scrub"]) $(id).hidden = true;
   $("frameno").classList.add("livetag");
@@ -282,6 +285,7 @@ async function load() {
     if (st) return startLive(st);
   }
   const D = dataDir(list);
+  $("maplabel").firstChild.textContent = "Replay · 2.5D map";
   const M = await (await fetch(`${D}/metrics.json`)).json();
   S.M = M;
   const sum = M.summary;
@@ -480,7 +484,10 @@ function scene(rect, T, fovea, label) {
     const x = cx, y = cy - r * s;
     if (y < rect.y + 12 || y > rect.y + rect.h) continue;
     ctx.beginPath(); ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y); ctx.stroke();
-    ctx.textAlign = "left"; ctx.fillText(`${r} m`, x + 9, y + 4);
+    ctx.textAlign = "left";
+    ctx.save(); ctx.lineWidth = 3; ctx.strokeStyle = css("--map-bg"); ctx.lineJoin = "round";
+    ctx.strokeText(`${r} m`, x + 9, y + 4); ctx.restore();          // halo: readable over any tile
+    ctx.fillText(`${r} m`, x + 9, y + 4);
   }
   if (S.ov.points && S.pts) drawPoints(cx, cy, s);
   ctx.strokeStyle = isLight() ? "#0F1720" : "#FFFFFF"; ctx.lineWidth = 1.6;
@@ -612,7 +619,7 @@ function drawMemory() {
     ["Uniform 2.5D grid, 50 cm", m["uniform_50cm_2.5d"], 3],
   ];
   for (let i = rows.length - 1; i >= 0; i--) if (rows[i][1] == null) rows.splice(i, 1);    // not measured (live)
-  const W = 356, left = 140, right = 58, rowH = 21, top = 8, H = top + rows.length * rowH + 22;
+  const W = 356, left = 140, right = 58, rowH = 18, top = 8, H = top + rows.length * rowH + 22;
   const lo = 5, hi = 10, X = b => left + 6 + (Math.log10(b) - lo) / (hi - lo) * (W - left - right - 12);
   let g = "";
   for (let e = 5; e <= 10; e++) { const x = X(10 ** e); g += `<line x1="${x}" x2="${x}" y1="${top - 4}" y2="${H - 18}" stroke="var(--border)"/>`; if (e % 2 === 0) g += T(x, H - 5, ["", "1 MB", "", "100 MB", "", "10 GB"][e - 5], { anchor: "middle", size: 10 }); }
@@ -703,7 +710,7 @@ function setFrame(t) {
   const el = $("integrity");
   el.className = `pill ${ok ? "good" : "bad"}`;
   el.innerHTML = ok ? `✓ All <b class="num">${f.binned.toLocaleString("en-US")}</b> points binned` : `✕ <b class="num">${(f.in_window - f.binned).toLocaleString("en-US")}</b> points lost`;
-  drawLatency(); legend(); render(); updateInspector();
+  drawLatency(); legend(); render(); updateInspector(); railMore();
 }
 
 // ---------------------------------------------------------------- inspector
@@ -776,7 +783,14 @@ function setLayer(l) { S.layer = l; document.querySelectorAll("[data-layer]").fo
 function toggle(k) { S.ov[k] = !S.ov[k]; document.querySelector(`[data-ov="${k}"]`).setAttribute("aria-pressed", S.ov[k]); legend(); render(); }
 function setCompare(on) { S.compare = on; $("v-top").setAttribute("aria-pressed", !on); $("v-cmp").setAttribute("aria-pressed", on); render(); }
 $("v-top").onclick = () => setCompare(false);
-$("legbtn").onclick = () => { const o = $("legend").classList.toggle("open"); $("legbtn").setAttribute("aria-expanded", o); };
+function setLegend(open) { $("legend").classList.toggle("open", open); $("legbtn").setAttribute("aria-expanded", open); }
+$("legbtn").onclick = () => setLegend(!$("legend").classList.contains("open"));
+setLegend(window.innerWidth > 520);                // open where there is room for it
+// fade the rail's bottom edge while there is more of it below
+function railMore() { const r = $("rail"); r.classList.toggle("more", r.scrollTop + r.clientHeight < r.scrollHeight - 4); }
+$("rail").addEventListener("scroll", railMore, { passive: true });
+window.addEventListener("resize", railMore);
+new ResizeObserver(railMore).observe($("rail"));
 $("v-cmp").onclick = () => setCompare(true);
 $("b-prev").onclick = () => { pause(); setFrame(S.t - 1); };
 $("b-next").onclick = () => { pause(); setFrame(S.t + 1); };
@@ -801,6 +815,7 @@ document.addEventListener("keydown", e => {
   else if (k === "k") toggle("conf");
   else if (k === "g") toggle("grid");
   else if (k === "p") toggle("points");
+  else if (k === "l") setLegend(!$("legend").classList.contains("open"));
   else if (k === "0") { S.pan = [0, 0]; S.fitted = false; resize(); }
 });
 new ResizeObserver(resize).observe($("mapwrap"));
