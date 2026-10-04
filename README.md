@@ -177,9 +177,8 @@ Measured with the SemanticKITTI notebook on a T4 GPU (stride 10, 40 epochs, seed
 | Points lost at tier edges | 0 | 0 | pass |
 | Drivable IoU on grid, 0–10 m | 91.9% | ≥ 90% | pass |
 | Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 61.4% / 52.9% / 41.8% / 12.9% | ≥ 70% near | fail |
-| p50 / p95 latency, features + grid engine on the GPU, before objects and the pothole plane fit | 34.7 / 46.5 ms | ≤ 50 ms p95 | pass |
-| p50 / p95 latency with object extraction and the pothole plane fit (two runs) | 41.6 / 57.0 and 42.0 / 57.0 ms | ≤ 50 ms p95 | **fail** |
-| Throughput, latest runs | 22.2 FPS | ≥ 20 FPS | pass |
+| p50 / p95 latency, full pipeline with object extraction, on the GPU (two runs) | 33.7 / 43.7 and 33.2 / 43.8 ms | ≤ 50 ms p95 | pass |
+| Throughput, same runs | 28.4 / 28.3 FPS | ≥ 20 FPS | pass |
 
 KITTI scans average about 123,000 points, nearly 5 times as many as nuScenes keyframes (about 26,000), so every stage has more to do. The first run kept the point transforms on the CPU in float64 and missed the target. Moving them to the GPU fixed it (both columns use the 20-epoch model):
 
@@ -193,9 +192,26 @@ KITTI scans average about 123,000 points, nearly 5 times as many as nuScenes key
 | **p50 / p95 end to end** | **47 / 149** | **36 / 46** |
 | Throughput (FPS) | 16.9 | 26.2 |
 
-The p95 margin was thin before objects were added: 46 ms in both runs with GPU transforms, against 50 ms. Colab's shared vCPUs have busy spells that slow every stage at once for a few seconds: in two runs with the CPU transforms, the slow stretches fell in different places (frames 26–36 and 90–98, then 50–58) and those frames had normal point counts, so they come from the machine, not the data. The 40-epoch run is `seq08_metrics.json` / `benchmark_seq08.log`, the 20-epoch run with GPU transforms `*_epochs20*`, and the earlier one `*_cpu_transforms*`.
+Before objects were added the p95 margin was thin: 46 ms in both runs with GPU transforms, against 50 ms. Colab's shared vCPUs have busy spells that slow every stage at once for a few seconds: in two runs with the CPU transforms, the slow stretches fell in different places (frames 26–36 and 90–98, then 50–58) and those frames had normal point counts, so they come from the machine, not the data. The 40-epoch run is `seq08_metrics.json` / `benchmark_seq08.log`, the 20-epoch run with GPU transforms `*_epochs20*`, and the earlier one `*_cpu_transforms*`.
 
-Adding object extraction and the pothole plane fit (benchmark-only notebook, two runs at `569268b`: `seq08_objects_run1_metrics.json`, `seq08_objects_run2_metrics.json` and their logs) pushed p95 over the target. In the 50 fastest frames the map pipeline takes 36.1 ms (preprocess 11.6, network 4.2, projection 6.8, fusion 11.9, publish 1.6) and object extraction 4.4 ms on the host CPU, 40.5 ms in all. In the slowest 10 frames every stage slows by 25–70% at once, and those frames differ between the two runs, so the tail is again the shared vCPUs; it adds about 15 ms. Reaching 50 ms at p95 needs the typical frame nearer 35 ms with objects included.
+Adding object extraction and the pothole plane fit first pushed p95 to 57 ms (two runs at `569268b`, `seq08_objects_run*`). A `torch.profiler` run on the T4 (`scripts/profile_pipeline.py`, `profile_seq08_eager.txt`) showed why: the pipeline is CPU-bound, with about 17 ms of GPU kernels in a 33 ms map frame and the rest spent launching about 1,000 small operations, and the costliest single operation was a float64 matrix multiply in the sweep transforms (4.7 ms). Three changes brought it back under the target:
+
+| Typical frame (50 fastest of 98), T4, ms | Before (`569268b`) | After (`8d45de1`) |
+| --- | --- | --- |
+| Preprocess | 11.6 | 9.6 |
+| Network | 4.2 | 4.2 |
+| Projection | 6.8 | 5.5 |
+| Fusion + cost | 11.9 | 8.6 |
+| Publish | 1.6 | 1.6 |
+| Objects (host CPU) | 4.4 | 3.3 |
+| **Total** | **40.5** | **32.8** |
+| **p50 / p95, all frames** | **41.6 / 57.0** | **33.7 / 43.7** |
+
+- **Sweep transforms written per coordinate** instead of as float64 (N, 3) @ (3, 3) matmuls, which a T4 runs slowly (same result to 6e-14 m).
+- **The derive step (flags and cost) compiled with `torch.compile` on CUDA.** It is about 160 element-wise ops per tier with fixed shapes; compiled, it matches the eager version exactly. The first frame of a run includes compiling it (up to half a minute) and is not counted.
+- **Object extraction without full-tier temporaries,** and the pothole plane's constants built once per device.
+
+Blocks of 10–15 consecutive slower frames still appear at different places in each run (the shared vCPUs; unmounting Google Drive did not remove them), but they now peak at 41–48 ms. The runs are `seq08_compiled_run*` with `profile_seq08_compiled.txt`.
 
 | Objects within 25 m (40-epoch model, first 100 frames of sequence 08) | Precision | Recall |
 | --- | --- | --- |
@@ -222,7 +238,7 @@ These were measured with the Colab notebook on a T4 GPU. The model was fine-tune
 | Drivable IoU on grid, 0–10 m | 94.0% | ≥ 90% | pass |
 | Point mIoU, 0–10 m / 10–25 / 25–50 / 50–100 m | 44.8% / 43.5% / 30.8% / 15.4% | ≥ 70% near | fail |
 | Moving-object IoU | 37.5% | reported | — |
-| p50 / p95 latency, features + grid engine on the GPU | 30 / 31 ms | ≤ 50 ms p95 | pass |
+| p50 / p95 latency, features + grid engine on the GPU (measured before object extraction and the pothole plane fit were added) | 30 / 31 ms | ≤ 50 ms p95 | pass |
 | Throughput, same run | 33.4 FPS | ≥ 20 FPS | pass |
 
 All rows come from the run with features and grid engine on the GPU. [`results/nuscenes/`](results/nuscenes/) has its metrics and per-frame log (`scene-0103_metrics.json`, `benchmark_scene-0103.log`), next to the NumPy and concurrent-export runs from the same session (`*_numpy*`, `*_torch_async*`). The NumPy engine gives the same accuracy apart from the 50–100 m band (15.5% point mIoU), where rare tie pixels in the GPU range image change a few points.
@@ -250,5 +266,5 @@ All three columns come from one Colab session. The NumPy column exports concurre
 ## How the prototype differs from the full design
 
 - **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use.
-- **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. With `--grid torch`, the range-image features are also built on the GPU (`foveamap/features_torch.py`, also parity-tested; override with `--features numpy`). Dashboard PNG export is encoded after the timed loop by default and reported as `export_ms`, not counted in latency (`--export async` encodes on a background thread during the run instead, and `none` skips it).
+- **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. With `--grid torch`, the range-image features are also built on the GPU (`foveamap/features_torch.py`, also parity-tested; override with `--features numpy`). Dashboard PNG export is encoded after the timed loop by default and reported as `export_ms`, not counted in latency (`--export async` encodes on a background thread during the run instead, and `none` skips it). On CUDA the derive step (flags and traversability cost) runs through `torch.compile`; set `FOVEAMAP_COMPILE=0` to run it eagerly.
 - **Not built yet:** 3D view, object tracking across frames (so no object IDs or velocity arrows), free-space ray clearing, ROS 2 node, and TensorRT export.

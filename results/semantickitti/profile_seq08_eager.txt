@@ -1,0 +1,54 @@
+/usr/local/lib/python3.13/dist-packages/torch/profiler/profiler.py:224: UserWarning: Warning: Profiler clears events at the end of each cycle.Only events from the current cycle will be reported.To keep events across cycles, set acc_events=True.
+  _warn_once(
+
+20 frames on cuda (Tesla T4)
+stage       CPU ms/frame  GPU ms/frame
+features            0.00          9.86
+network             0.00          5.19
+binning             0.00          7.68
+fusion              0.00         24.66
+snapshot            0.00          1.03
+objects             4.08          0.00
+
+host waits per frame:
+  cudaStreamSynchronize          52.5  (0.85 ms CPU)
+  cudaDeviceSynchronize           4.1  (0.29 ms CPU)
+  cudaMemcpyAsync                60.5  (3.77 ms CPU)
+  aten::nonzero                  28.0  (3.51 ms CPU)
+  aten::_unique2                  2.0  (1.06 ms CPU)
+  aten::item                     10.0  (0.29 ms CPU)
+  aten::_local_scalar_dense      10.0  (0.27 ms CPU)
+
+by self_cuda_time_total:
+------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                            Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                    stage:fusion         0.00%       0.000us         0.00%       0.000us       0.000us     493.144ms       142.12%     493.144ms      24.657ms            20  
+                                  stage:features         0.00%       0.000us         0.00%       0.000us       0.000us     197.161ms        56.82%     197.161ms       9.858ms            20  
+                                   stage:binning         0.00%       0.000us         0.00%       0.000us       0.000us     153.530ms        44.25%     153.530ms       7.676ms            20  
+                                   stage:network         0.00%       0.000us         0.00%       0.000us       0.000us     103.860ms        29.93%     103.860ms       5.193ms            20  
+                                     aten::copy_         3.79%      43.931ms        16.13%     186.770ms      60.248us      66.496ms        19.16%      85.783ms      27.672us          3100  
+                         aten::cudnn_convolution         1.30%      15.067ms         1.88%      21.799ms      99.087us      40.994ms        11.81%      40.994ms     186.337us           220  
+                           aten::scatter_reduce_         0.38%       4.455ms         0.60%       6.940ms      28.918us      25.060ms         7.22%      25.060ms     104.418us           240  
+                                     aten::index         3.20%      37.092ms        10.25%     118.713ms      71.514us      24.586ms         7.09%      35.368ms      21.306us          1660  
+                                aten::index_add_         0.48%       5.549ms         0.77%       8.948ms      22.371us      23.556ms         6.79%      23.556ms      58.890us           400  
+                Memcpy HtoD (Pageable -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us      23.449ms         6.76%      23.449ms      73.279us           320  
+                                  stage:snapshot         0.00%       0.000us         0.00%       0.000us       0.000us      20.538ms         5.92%      20.538ms       1.027ms            20  
+                Memcpy DtoH (Device -> Pageable)         0.00%       0.000us         0.00%       0.000us       0.000us      19.607ms         5.65%      19.607ms     149.673us           131  
+void at::native::indexFuncLargeIndex<float, l...         0.00%       0.000us         0.00%       0.000us       0.000us      17.796ms         5.13%      17.796ms      63.557us           280  
+void at::native::_scatter_gather_elementwise_...         0.00%       0.000us         0.00%       0.000us       0.000us      15.973ms         4.60%      15.973ms     114.095us           140  
+void at::native::index_elementwise_kernel<128...         0.00%       0.000us         0.00%       0.000us       0.000us      14.950ms         4.31%      14.950ms      16.357us           914  
+                                  aten::_unique2         0.45%       5.154ms         1.83%      21.167ms     529.178us      14.133ms         4.07%      15.009ms     375.215us            40  
+                                   aten::nonzero         2.72%      31.470ms         6.06%      70.211ms     125.376us      13.328ms         3.84%      13.398ms      23.926us           560  
+                                     aten::where         2.89%      33.510ms        11.19%     129.601ms      42.914us      13.265ms         3.82%      24.648ms       8.162us          3020  
+                                       aten::mul         1.82%      21.027ms         2.90%      33.605ms      19.767us      12.813ms         3.69%      12.813ms       7.537us          1700  
+void at_cuda_detail::cub::detail::radix_sort:...         0.00%       0.000us         0.00%       0.000us       0.000us       9.772ms         2.82%       9.772ms      30.539us           320  
+void cudnn::engines_precompiled::nchwToNhwcKe...         0.00%       0.000us         0.00%       0.000us       0.000us       8.740ms         2.52%       8.740ms      23.000us           380  
+                                    aten::argmax         0.22%       2.597ms         0.32%       3.750ms      31.248us       8.728ms         2.52%       8.728ms      72.731us           120  
+void at::native::reduce_kernel<512, 1, at::na...         0.00%       0.000us         0.00%       0.000us       0.000us       8.728ms         2.52%       8.728ms      72.731us           120  
+void at::native::unrolled_elementwise_kernel<...         0.00%       0.000us         0.00%       0.000us       0.000us       8.636ms         2.49%       8.636ms      14.393us           600  
+                                       aten::add         0.84%       9.707ms         1.33%      15.456ms      20.887us       8.132ms         2.34%       8.132ms      10.989us           740  
+------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 1.158s
+Self CUDA time total: 346.994ms
+
