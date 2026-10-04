@@ -55,7 +55,7 @@
 | **NFR-01** | End-to-end P95 Latency $\le 50.0\text{ ms}$ on GPU | `foveamap/runtime/runtime.py` | `benchmarks/run_kaggle_1000_soak.py` | Remote NVIDIA Tesla T4 P95 = **34.51 ms** | **PASS** |
 | **NFR-02** | Sustained throughput $\ge 20.0\text{ FPS}$ on GPU | `foveamap/runtime/runtime.py` | `benchmarks/run_kaggle_1000_soak.py` | Remote NVIDIA Tesla T4 = **30.70 FPS** | **PASS** |
 | **NFR-03** | Memory footprint $\le 8.0\text{ MB}$ for grid structure | `foveamap/grid.py` | `tests/test_grid.py` | 16-byte packed layout = **5.12 MB** total | **PASS** |
-| **NFR-04** | Deterministic numerical stability & zero memory leak | `foveamap/runtime/runtime.py` | 1,000-frame remote soak | Zero NaN/Inf, VRAM drift < 2.9 MiB | **PASS** |
+| **NFR-04** | Deterministic numerical stability & bounded memory | `foveamap/runtime/runtime.py` | 1,000-frame remote soak | Zero NaN/Inf, measured VRAM drift < 2.9 MiB (stable PyTorch allocator caching) | **PASS** |
 | **NFR-05** | Secure defaults (`weights_only=True`, loopback binding) | `foveamap/runtime/perception.py`<br>`foveamap/sdk/http.py` | `tests/test_perception_runtime.py`<br>`tests/test_sdk.py` | Tamper rejection & external bind rejection | **PASS** |
 | **NFR-06** | Live physical sensor UDP packet streaming | `foveamap/data/source.py` | Live vehicle testbench | Requires physical LiDAR sensor | **BLOCKED_EXTERNAL** |
 | **NFR-07** | Live in-vehicle ROS 2 chassis communication | `foveamap_ros/node.py` | Vehicle test track run | Requires live vehicle ROS 2 bus | **BLOCKED_EXTERNAL** |
@@ -85,7 +85,7 @@
 - Static and dynamic observations strictly separated.
 - Spatial bucket hashing at $2.0\text{ m}$ scale with direct `{tid: track}` dictionary lookup.
 - Bounded track capacity (max 256 tracks) with monotonic age and track eviction.
-- Memory leak test over 1,000 frames demonstrated zero cumulative growth (< 2.9 MiB allocator cache drift).
+- Bounded memory test over 1,000 frames demonstrated no observed unbounded memory growth (< 2.9 MiB allocator cache drift).
 
 ### E. Pipeline Integration: PASS
 - Clean end-to-end traversal from raw `LiDARFrame` through `PerceptionResult` and `FoveatedGrid` to `MapSnapshot`.
@@ -102,7 +102,7 @@
 
 ### H. GPU / CUDA: PASS
 - Verified via Kaggle remote GPU infrastructure (Kernel `zesalamander/foveamap-1000-frame-soak-t4`, status `COMPLETE`).
-- Zero CUDA memory leaks, peak allocated VRAM = 79.84 MiB (< 0.6% of 16 GB T4 capacity).
+- No observed unbounded memory growth on GPU, peak allocated VRAM = 79.84 MiB (< 0.6% of 16 GB T4 capacity, measured drift < 2.9 MiB).
 
 ### I. Physical LiDAR: BLOCKED_EXTERNAL
 - Software ingestion path verified against recorded KITTI, nuScenes, and synthetic point clouds.
@@ -113,8 +113,11 @@
 - Execution on live in-vehicle DDS bus pending vehicle deployment.
 
 ### K. Deployment Package: PASS
-- `Dockerfile` verified: multi-stage build, non-root user `foveamap` (UID 10001), healthcheck configured, zero build artifacts.
-- Package builds cleanly via `pip install .` and exposes entrypoints `foveamap` and `foveamap-ros`.
+- Docker build verified live: `docker build -t foveamap:release .` (Exit 0).
+- Native Docker healthcheck verified live: `HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD curl -f http://localhost:8000/health || exit 1` reached `Status: healthy` (`FailingStreak: 0`, HTTP 200 `{"status": "healthy"}`).
+- Non-root execution verified live: `appuser` (UID 1000, GID 1000).
+- Checkpoint integrity verified live in container: `checkpoints/range_unet.pt` (SHA-256 `28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f`).
+- Diagnostics verified live in container: `docker run --rm foveamap:release info` executed successfully on CPU PyTorch.
 
 ### L. Security: PASS
 - Zero hardcoded credentials, API keys, or private URLs in the repository.
@@ -187,13 +190,17 @@
 ## 9. Deployment Packaging & Container Verification
 
 - **Dockerfile Security & Standards:**
-  - Multi-stage build based on `python:3.11-slim-bookworm`.
-  - Non-privileged execution: `USER foveamap` (UID 10001, GID 10001).
-  - Health check configured: `curl --fail http://127.0.0.1:8000/health || exit 1`.
+  - Base image: `python:3.11-slim` with minimal curl dependency.
+  - Non-privileged execution: `USER appuser` (UID 1000, GID 1000) verified via `id` inside container.
+  - Native Docker health check verified live: `HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD curl -f http://localhost:8000/health || exit 1` (inspected status: `healthy`, streak: 0).
   - Zero sensitive build arguments or stored build secrets.
+  - Live build verified: `docker build -t foveamap:release .` (Exit 0).
+  - Live execution verified: Container launched with `serve --host 0.0.0.0 --port 8000 --allow-insecure-remote`, successfully responding to `/health` (HTTP 200 `{"api_version": "1", "status": "healthy", "reasons": []}`) and `/status` (HTTP 200 `{"lifecycle": "ACTIVE", "healthy": true}`).
+  - Checkpoint integrity: `checkpoints/range_unet.pt` verified inside container with SHA-256 `28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f`.
 - **Python Packaging:**
-  - Setuptools build backend conforming to PEP 517 / PEP 621.
+  - Setuptools build backend conforming to PEP 517 / PEP 621 (`pyproject.toml`).
   - Portable dependency resolution without pinned local file URLs.
+  - CLI entrypoint `foveamap` verified functioning within container.
 
 ---
 

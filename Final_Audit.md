@@ -110,10 +110,8 @@
 
 - **Semantic Parity (FP32 vs FP16):** **99.9940%** (PASS)
 - **Peak VRAM Allocated:** **79.84 MiB** (< 0.6% of GPU memory)
-- **VRAM Drift:** < 2.9 MiB over 1,000 frames (stable allocator caching, zero memory leak)
+- **VRAM Drift:** < 2.9 MiB over 1,000 frames (stable PyTorch allocator caching, no observed unbounded memory growth)
 - **Integrity:** Zero NaN/Inf, zero uncaught exceptions, bit-exact checkpoint verification.
-
----
 
 ---
 
@@ -149,7 +147,7 @@ All software, mathematical, security, packaging, regression, and GPU performance
 | **H. GPU / CUDA** | Remote GPU execution on NVIDIA Tesla T4 | Kaggle CLI submission (Kernel `zesalamander/foveamap-1000-frame-soak-t4`) | **PASS** |
 | **I. Physical LiDAR** | Live physical sensor UDP packet streaming from vehicle-mounted LiDAR | Requires physical LiDAR sensor hardware | **BLOCKED_EXTERNAL** |
 | **J. Live ROS2** | Real-time DDS communication on physical vehicle compute node | Requires live vehicle ROS 2 bus | **BLOCKED_EXTERNAL** |
-| **K. Deployment Package** | Production Dockerfile, pyproject.toml, entrypoints, non-root execution, dependencies | Static packaging validation, Dockerfile audit, clean environment imports | **PASS** |
+| **K. Deployment Package** | Production Dockerfile, pyproject.toml, entrypoints, non-root execution, dependencies | Live container build (`docker build -t foveamap:release .`), healthy status via native HEALTHCHECK, non-root `appuser` (UID 1000) verification | **PASS** |
 | **L. Security** | Zero secrets, credentials, or private URLs in repo; safe checkpoint deserialization; strict loopback binding | Security scan, secret search, AST audit of deserializers | **PASS** |
 | **M. Documentation** | Consistency across architecture docs, README, reports, and code | Forensic doc audit, elimination of stale/contradictory claims | **PASS** |
 
@@ -171,6 +169,49 @@ All software, mathematical, security, packaging, regression, and GPU performance
                     FINAL PRE-DEPLOYMENT RELEASE GATE
 ================================================================================
   SOFTWARE READY FOR DEPLOYMENT : PASS
+  PHYSICAL LIDAR VALIDATION     : BLOCKED_EXTERNAL (Requires sensor hardware)
+  LIVE ROS 2 VEHICLE BUS        : BLOCKED_EXTERNAL (Requires in-vehicle chassis)
+================================================================================
+```
+
+---
+
+## 9. Independent Final Release Gate Verification
+
+### 9.1 Verification Parameters & Ancestry
+- **Current HEAD SHA:** Evaluated and confirmed in sync with `origin/dev`.
+- **Ancestry Verification (`624aba7` to HEAD):**
+  - Evaluated code baseline: `624aba768d794e18f0544051e26b687c489116f9`
+  - Diff between `624aba7` and HEAD contains strictly:
+    - `Dockerfile`: Added `HEALTHCHECK` directive (validated live via Docker).
+    - Documentation & Provenance: `FOVEAMAP_FINAL_DEPLOYMENT_READINESS_REPORT.md`, `Final_Audit.md`, `docs/ARCHITECTURE_DECISIONS.md`, `docs/DYNAMIC_WORLD_MODEL.md`, `provenance.json`.
+  - Core production code in `foveamap/` and `foveamap_ros/` is **100% bit-identical**.
+
+### 9.2 Evidence Validity & Test Reuse Rationale
+- **440 Local Unit & Integration Tests:** Validated and preserved. Zero algorithmic files changed.
+- **Kaggle T4 1,000-Frame Soak Benchmark:** Validated and preserved. Zero benchmark-sensitive dependencies changed.
+- **NFR-04 Claim Audit:** Refined from 'zero memory leak' to 'no observed unbounded memory growth during 1,000-frame soak with measured VRAM drift < 2.9 MiB (stable PyTorch allocator caching)'.
+- **Deployment Package Live Validation:**
+  - `docker build -t foveamap:release .` passed with exit code 0.
+  - Native Docker health check passed: container transitioned to `Status: healthy` with `FailingStreak: 0`.
+  - HTTP service responded to `/health` (HTTP 200 `{"api_version": "1", "status": "healthy"}`) and `/status` (HTTP 200 `{"lifecycle": "ACTIVE", "healthy": true}`).
+  - Checkpoint SHA-256 inside container verified: `28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f`.
+  - Non-root user verified: `appuser` (UID 1000, GID 1000).
+
+### 9.3 Final Defect Count
+- **P0:** 0
+- **P1:** 0
+- **P2:** 0
+- **P3:** 0
+
+### 9.4 Final Independent Sign-off
+
+```
+================================================================================
+                    FINAL PRE-DEPLOYMENT RELEASE GATE
+================================================================================
+  SOFTWARE READY FOR DEPLOYMENT : PASS
+  DOCKER RUNTIME DEPLOYMENT     : PASS (Verified live via Docker 29.1.3)
   PHYSICAL LIDAR VALIDATION     : BLOCKED_EXTERNAL (Requires sensor hardware)
   LIVE ROS 2 VEHICLE BUS        : BLOCKED_EXTERNAL (Requires in-vehicle chassis)
 ================================================================================
