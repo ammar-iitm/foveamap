@@ -100,16 +100,28 @@ def _depression_ties(t, s, eps=1e-6):
 
 
 def _state_mismatch(ref_s, got_s, f16_tol, ignore=None):
-    """Fraction of cells whose layers differ (f16 heights compared with a tolerance)."""
-    bad = np.zeros(ref_s.cls.shape, bool)
+    """Fraction and count of cells whose layers differ, and the differing cells per field.
+
+    f16_tol: tolerance for the float16 heights, or "ulp" to allow one float16 step: a float64
+    sum whose last bit depends on the order of additions (which differs between CPUs) can round
+    to the neighbouring float16."""
+    fields = {}
     for f in ("count", "cls", "conf", "flags", "clear", "cost", "age", "eff_cls"):
-        bad |= getattr(ref_s, f) != getattr(got_s, f)
+        fields[f] = getattr(ref_s, f) != getattr(got_s, f)
     for f in ("z_min", "z_max", "ground", "rough"):
         a, b = getattr(ref_s, f).astype(np.float64), getattr(got_s, f).astype(np.float64)
-        bad |= ~(np.isclose(a, b, rtol=f16_tol, atol=f16_tol, equal_nan=True))
-    if ignore is not None:
-        bad &= ~ignore
-    return bad.mean(), bad.sum()
+        if f16_tol == "ulp":
+            step = np.spacing(np.maximum(np.abs(a), np.abs(b)).astype(np.float16)).astype(np.float64)
+            same = (a == b) | (np.abs(a - b) <= step) | (np.isnan(a) & np.isnan(b))
+        else:
+            same = np.isclose(a, b, rtol=f16_tol, atol=f16_tol, equal_nan=True)
+        fields[f] = ~same
+    bad = np.zeros(ref_s.cls.shape, bool)
+    for f, m in fields.items():
+        if ignore is not None:
+            m &= ~ignore
+        bad |= m
+    return bad.mean(), bad.sum(), {f: int(m.sum()) for f, m in fields.items() if m.any()}
 
 
 def _run_parity(device, dtype, profile, fuse, max_frac, f16_tol, skip_ties=False):
@@ -121,8 +133,8 @@ def _run_parity(device, dtype, profile, fuse, max_frac, f16_tol, skip_ties=False
         assert all(np.array_equal(a, b) for a, b in zip(ref_g.origins, g.origins))
         for k, (rs, ts, rd, td) in enumerate(zip(ref_g.state, g.state, ref_dyn, dyn)):
             ties = _depression_ties(ref_g.tiers[k], rs) if skip_ties else None
-            frac, cnt = _state_mismatch(rs, ts.to_numpy(), f16_tol, ties)
-            assert frac <= max_frac, (k, frac, cnt)
+            frac, cnt, which = _state_mismatch(rs, ts.to_numpy(), f16_tol, ties)
+            assert frac <= max_frac, (k, frac, cnt, which)
             for key in ("i", "j", "cls"):
                 np.testing.assert_array_equal(rd[key], td[key].cpu().numpy())
     return ref_g, g
@@ -131,7 +143,8 @@ def _run_parity(device, dtype, profile, fuse, max_frac, f16_tol, skip_ties=False
 @pytest.mark.parametrize("profile", ["spec", "graded"])
 @pytest.mark.parametrize("fuse", [True, False])
 def test_update_parity_float64_exact(profile, fuse):
-    ref_g, _ = _run_parity("cpu", torch.float64, profile, fuse, max_frac=0.0, f16_tol=0.0, skip_ties=True)
+    # discrete layers exact; float16 heights within one float16 step (summation order differs between CPUs)
+    ref_g, _ = _run_parity("cpu", torch.float64, profile, fuse, max_frac=0.0, f16_tol="ulp", skip_ties=True)
     s0 = ref_g.state[0]         # the drive really exercises the derived layers
     assert all(((s0.flags & fl) > 0).sum() > 10 for fl in (1 << 1, 1 << 2))
     assert ((s0.flags & (1 << 3)) > 0).sum() > 0     # depressions (realistic potholes: test_grid.py)

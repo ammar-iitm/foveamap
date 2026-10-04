@@ -25,7 +25,7 @@ def test_pipeline_engines_agree(drive):
             np.testing.assert_array_equal(sa["key"], sb["key"])
             np.testing.assert_array_equal(sa["n_pts"], sb["n_pts"])
         for ra, rb in zip(ref.grid.snapshot(), tor.grid.snapshot()):
-            frac, _ = _state_mismatch(ra, rb, 2e-3)
+            frac, _, _ = _state_mismatch(ra, rb, 2e-3)
             assert frac <= 1e-4
 
 
