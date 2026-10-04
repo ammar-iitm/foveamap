@@ -436,6 +436,11 @@ class FoveaMapConfig:
     @classmethod
     def ros2(cls) -> FoveaMapConfig:
         """ROS 2 deployment profile: standardized automotive sensor bounds and real-time settings."""
+        try:
+            import torch
+            use_torch = torch.cuda.is_available()
+        except ImportError:
+            use_torch = False
         return cls(
             sensor=SensorConfig(
                 n_rows=64,
@@ -444,8 +449,8 @@ class FoveaMapConfig:
             ),
             runtime=RuntimeConfig(
                 device="auto",
-                grid_engine="numpy",
-                features_engine="numpy",
+                grid_engine="torch" if use_torch else "numpy",
+                features_engine="torch" if use_torch else "numpy",
                 enable_profiling=False,
             ),
             preprocess=PreprocessConfig(enabled=True, remove_invalid=True, remove_self_hits=True),

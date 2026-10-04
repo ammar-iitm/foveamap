@@ -258,3 +258,35 @@ class FoveaMapRosNode:
     def shutdown(self) -> None:
         self.core.shutdown()
         self.state = SHUTDOWN
+
+
+def main(args: list[str] | None = None) -> None:
+    """ROS 2 node entry point executable."""
+    try:
+        import rclpy
+    except ImportError as exc:
+        raise SystemExit(
+            "foveamap-ros requires rclpy and an active ROS 2 installation (e.g. Humble, Iron, Rolling)."
+        ) from exc
+
+    rclpy.init(args=args)
+    try:
+        node = FoveaMapRosNode()
+        node.configure()
+        node.activate()
+        rclpy.spin(node)
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        if "node" in locals():
+            try:
+                node.deactivate()
+                node.shutdown()
+            except Exception:
+                pass
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

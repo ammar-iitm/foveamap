@@ -32,6 +32,7 @@ dependencies = [
 
 [project.scripts]
 foveamap = "foveamap.cli:main"
+foveamap-ros = "foveamap_ros.node:main"
 
 [project.optional-dependencies]
 dev = [
