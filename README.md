@@ -10,16 +10,16 @@
 
 ## At a glance
 
-Real Lidar, SemanticKITTI sequence 08 (held out from training; model fine-tuned on every 5th scan of the other sequences), on a Colab Tesla T4, against the targets and hard limits in the [PRD](docs/FoveaMap_PRD.pdf). The PRD's reference GPU is an RTX 3060–4070; a T4 is slower.
+Real Lidar, SemanticKITTI sequence 08 (held out from training; the network, at twice the standard width, trained on every 5th scan of the other sequences), on a Colab Tesla T4, against the targets and hard limits in the [PRD](docs/FoveaMap_PRD.pdf). The PRD's reference GPU is an RTX 3060–4070; a T4 is slower.
 
 | Requirement (PRD) | Target / hard limit | Result | Status |
 | --- | --- | --- | --- |
-| NFR-1 · p95 latency, sweep in to map and objects out | ≤ 50 ms / ≤ 100 ms | 43.7–73.4 ms over four Colab sessions; median 30.6–35.2 ms | target in 2 of 4 sessions; hard limit always |
+| NFR-1 · p95 latency, sweep in to map and objects out | ≤ 50 ms / ≤ 100 ms | 43.7–73.4 ms over five Colab sessions; median 30.6–35.2 ms | target in 3 of 5 sessions; hard limit always |
 | NFR-2 · throughput | ≥ 20 / ≥ 10 FPS | 24.8–28.4 FPS | ✅ |
 | NFR-3 · map memory, ±100 m, all layers | ≤ 8 MB / ≤ 16 MB | 5.12 MB, measured bytes | ✅ |
 | NFR-4 · saving vs a uniform 5 cm 2.5D grid | ≥ 30× / ≥ 20× | 50× | ✅ |
-| NFR-6 · point mIoU, 0–10 m | ≥ 70% / ≥ 60% | 64.8% | hard limit met, target not yet |
-| NFR-7 · drivable IoU on the grid, 0–10 m | ≥ 90% / ≥ 85% | 93.3% | ✅ |
+| NFR-6 · point mIoU, 0–10 m | ≥ 70% / ≥ 60% | 67.0% | hard limit met, target not yet |
+| NFR-7 · drivable IoU on the grid, 0–10 m | ≥ 90% / ≥ 85% | 94.9% | ✅ |
 | NFR-8 · curb (≥ 8 cm) recall within 10 m | ≥ 90% / ≥ 80% | 98.9% on the simulator (the real datasets have no curb ground truth) | ✅ simulator |
 | Points lost where tiers meet | 0 | 0, checked every frame | ✅ |
 | NFR-5 · peak GPU memory | ≤ 4 GB / ≤ 6 GB | not measured yet | — |
@@ -35,7 +35,7 @@ sweep ──► features ──► range-image U-Net ──► foveated grid eng
                                                                                              moving)
 ```
 
-- **Perception.** A range-image U-Net (327k parameters) labels every point with one of 9 classes and a moving flag, using the two previous sweeps as a motion cue. It was trained on a simulator, then fine-tuned on SemanticKITTI and nuScenes.
+- **Perception.** A range-image U-Net labels every point with one of 9 classes and a moving flag, using the two previous sweeps as a motion cue. The standard network (327k parameters) was trained on a simulator, then fine-tuned on SemanticKITTI and nuScenes; the published SemanticKITTI model is twice as wide (1.3M parameters, `train.py --width 2`).
 - **Foveated grid.** Two tiers whose cells nest exactly, so no point is lost or counted twice where they meet. The windows scroll with the vehicle on a fixed world lattice, every cell takes 16 bytes, and observations are fused over time. NumPy and PyTorch engines give the same map, checked by parity tests.
 - **Terrain.** Ground height, roughness, curb steps, overhang clearance (can the vehicle drive under it), potholes (cells clearly below a local plane fit of the road) and a traversability cost per cell.
 - **Objects.** Vehicles, people and poles grouped into oriented boxes with a class, a moving flag and a height, scored against ground truth within 25 m.
@@ -126,7 +126,7 @@ On Colab, section 6 of the [benchmark-only notebook](https://colab.research.goog
 The problem statement names PointNet++ and sparse CNNs as examples ("e.g.") of a perception backbone. FoveaMap uses a range-image U-Net instead, the "low-power fallback" of Architecture section 4, for these reasons:
 
 - **It leaves room for the map in the latency budget.** On a T4 the network takes 4.2 ms of a typical 33 ms SemanticKITTI frame (FP16, 64 × 1024 input). Features, binning, fusion and object extraction take the rest, and the whole pipeline meets p95 ≤ 50 ms (43.7 ms on SemanticKITTI, 43.3 ms on nuScenes).
-- **It is small and needs nothing beyond stock PyTorch.** 327,434 parameters, a 1.3 MB checkpoint, plain 2-D convolutions: the same code runs on CUDA, Apple MPS and the CPU. Sparse 3-D convolutions need compiled libraries (spconv, TorchSparse or MinkowskiEngine) built for a particular CUDA version, and PointNet++ needs custom neighbour-search ops.
+- **It is small and needs nothing beyond stock PyTorch.** 327,434 parameters and a 1.3 MB checkpoint at standard width (1.3M parameters and 5.2 MB at twice the width), plain 2-D convolutions: the same code runs on CUDA, Apple MPS and the CPU. Sparse 3-D convolutions need compiled libraries (spconv, TorchSparse or MinkowskiEngine) built for a particular CUDA version, and PointNet++ needs custom neighbour-search ops.
 - **It matches the sensor.** A spinning Lidar produces a range image natively: rows are lasers, columns are azimuth. The input is a dense image with no voxelisation step, and the motion cue (range residuals against the two previous sweeps) is just two more image channels.
 - **Accuracy is in the same range as the alternatives.** On the SemanticKITTI single-scan test set (19 classes), published results are about 20% mIoU for PointNet++, 52% for RangeNet++ and 60% for SalsaNext (both range-image networks), and roughly 60–68% for sparse-voxel networks such as SPVNAS and Cylinder3D, depending on the paper and version. Range-image networks give up a few points against sparse convolutions for speed; PointNet++ is far behind on this data. Our 59.7% is on 9 merged classes, trained on every 10th scan, so it is not directly comparable to these numbers.
 - **It can be replaced.** The grid engine, fusion, object extraction and training loop only need per-point class probabilities and a moving probability, so a sparse-conv backbone could take its place without changing them.
@@ -142,7 +142,7 @@ The limits are known, and they explain the weakest results:
 - **Backbone.** The prototype uses the range-image network (the "low-power fallback" in Architecture section 4) instead of a sparse-conv U-Net. The training loop and the grid engine don't depend on which backbone you use. See [Why a range-image network](#why-a-range-image-network).
 - **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. With `--grid torch`, the range-image features are also built on the GPU (`foveamap/features_torch.py`, also parity-tested; override with `--features numpy`). Dashboard PNG export is encoded after the timed loop by default and reported as `export_ms`, not counted in latency (`--export async` encodes on a background thread during the run instead, and `none` skips it). On CUDA the derive step (flags and traversability cost) runs through `torch.compile`; set `FOVEAMAP_COMPILE=0` to run it eagerly.
 - **Not built yet:** 3D view, object tracking across frames (so no object IDs or velocity arrows), free-space ray clearing, ROS 2 node, and TensorRT export.
-- **Near-range accuracy** (64.8% against the 70% target). Doubling the training data (every 5th SemanticKITTI scan instead of every 10th) added only 0.6 points, so data is not the main limit; the network is small (327k parameters, a tenth or less of published range-image networks) and uses 4–5 ms of a 30 ms frame. A wider network (`train.py --width 2`) is the next step.
+- **Near-range accuracy** (67.0% against the 70% target). Doubling the training data (every 5th SemanticKITTI scan instead of every 10th) added only 0.6 points; doubling the network's width added 2.2 more (moving-object IoU +8.5), for 2.5 ms of extra network time. The wider network fits its training drives much more closely than it gains on the held-out one, so data augmentation (`--aug`) is the next step.
 - **Latency tail.** The median is steady at 33–35 ms, but p95 on Colab's shared machines ranged from 44 to 73 ms; the benchmark notebook now logs CPU steal time and the GPU's clock next to every frame to find out why.
 
 ## Design documents

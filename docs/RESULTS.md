@@ -84,7 +84,22 @@ Fine-tuning on every 5th scan instead of every 10th (3,834 frames, 40 epochs, 32
 | Pole / vehicle / person | 24.0% / 78.0% / 33.2% | 25.6% / 80.6% / 34.0% |
 | Moving-object IoU | 29.7% | **35.9%** |
 
-Twice the data bought 0.6 points of mIoU, near range included, and 6 points of moving-object IoU; terrain lost 4. So data is not what holds near-range accuracy at 64–65%. The likelier limit is the network: 327k parameters, against about 6.7M for SalsaNext and 50M for RangeNet++, and it uses only 4–5 ms of a 30 ms frame, so it can grow. The benchmark of this model (first 100 frames of every 5th scan of sequence 08, so 0.5 s apart) gave p50 / p95 30.6 / 61.3 ms, 27.8 FPS, drivable IoU 93.3%, pothole flag rate 0.056%, objects within 25 m vehicle 66.3% / 70.7%, person 12.7% / 26.6%, pole 23.7% / 57.8% precision / recall, and moving flags agreeing on 96.2% of matched objects. Files: `*stride5*`.
+Twice the data bought 0.6 points of mIoU, near range included, and 6 points of moving-object IoU; terrain lost 4. So data is not what holds near-range accuracy at 64–65%. The likelier limit is the network: 327k parameters, against about 6.7M for SalsaNext and 50M for RangeNet++, and it uses only 4–5 ms of a 30 ms frame, so it can grow. The benchmark of this model (first 100 frames of every 5th scan of sequence 08, so 0.5 s apart) gave p50 / p95 30.6 / 61.3 ms, 27.8 FPS, drivable IoU 93.3%, pothole flag rate 0.056%, objects within 25 m vehicle 66.3% / 70.7%, person 12.7% / 26.6%, pole 23.7% / 57.8% precision / recall, and moving flags agreeing on 96.2% of matched objects. Files: `*stride5*` (without `width2`).
+
+### A network twice as wide (the published model)
+
+The same stride-5 data and 40 epochs, with every channel width doubled (`train.py --width 2`: 1.3M parameters instead of 327k). A wider network cannot start from the simulator checkpoint, so it trained from scratch (46 minutes on a T4). Scored on the same frames as the stride-5 column above:
+
+| Sequence 08 | Standard width (327k) | **Twice the width (1.3M)** |
+| --- | --- | --- |
+| **mIoU** | 60.3% | **62.9%** |
+| mIoU 0–10 m / 10–25 / 25–50 / 50–100 m | 64.8% / 56.4% / 42.1% / 19.4% | **67.0%** / 60.4% / 45.5% / 17.7% |
+| Road / sidewalk / parking | 88.7% / 72.3% / 29.1% | 89.7% / 74.4% / 29.8% |
+| Terrain / vegetation / building | 66.0% / 79.5% / 67.2% | 66.6% / 81.0% / 71.0% |
+| Pole / vehicle / person | 25.6% / 80.6% / 34.0% | 30.1% / 82.3% / 41.5% |
+| Moving-object IoU | 35.9% | **44.4%** |
+
+Every class gained; only the 50–100 m band fell (1.7 points). Where twice the data bought 0.6 points, twice the width bought 2.6 overall and 2.2 at 0–10 m, so the network's size was the larger limit. Its training loss ended at about 0.06 against 0.10 for the standard network, a much larger gap than on the held-out drive: it is starting to fit its training drives, so augmentation (`--aug`) is the next thing to try. Its benchmark (same 100 frames) gave p50 / p95 33.3 / 45.6 ms, 27.7 FPS, with the network at 7.3 ms (4.8 ms at standard width); drivable IoU 94.9%, pothole flag rate 0.059%, objects within 25 m vehicle 69.1% / 71.8%, person 17.6% / 28.1%, pole 33.5% / 63.0% precision / recall, and moving flags agreeing on 95.1% of matched objects. Files: `*width2*`.
 - **Weak classes.** Most poles and people are found (recall 70% and 63%), but too many other points are labelled as them, so their IoU stays low (24.0% and 33.2%). Parking (27.9%) is flat ground that looks like road or sidewalk.
 - **Reproducible.** Two 20-epoch training runs with seed 0 gave identical scores, down to the per-class IoUs. (Scoring the same model in different Colab sessions can differ by a few dozen of about 52 million points, from GPU rounding.)
 
