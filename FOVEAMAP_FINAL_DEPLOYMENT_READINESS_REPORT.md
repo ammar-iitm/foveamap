@@ -44,23 +44,23 @@
 
 | Requirement ID | Specification / Description | Implementation Module | Verification Test | Primary Evidence | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **FR-01** | Multi-tier 2.5D concentric foveated grid with exact nesting | `foveamap/grid.py`<br>`foveamap/grid_torch.py` | `tests/test_grid.py`<br>`tests/test_grid_torch.py` | Golden tier bounds & origin alignment tests | **PASS** |
-| **FR-02** | Spherical range-image projection & preprocessing | `foveamap/data/preprocess.py` | `tests/test_preprocess.py` | 5-channel range tensor normalization | **PASS** |
-| **FR-03** | Real-time semantic point cloud inference (RangeUNet) | `foveamap/runtime/perception.py`<br>`foveamap/model.py` | `tests/test_perception_runtime.py`<br>`tests/test_model.py` | Checkpoint SHA-256 + 1,000-frame soak | **PASS** |
-| **FR-04** | Static/dynamic elevation map generation with ground persistence | `foveamap/grid.py`<br>`foveamap/grid_torch.py` | `tests/test_invariants.py` | Overhang test maintaining ground beneath | **PASS** |
-| **FR-05** | Bit-packed cell confidence representation (`flags >> 4`, `conf & 0x0F`) | `foveamap/core/confidence.py` | `tests/test_confidence.py` | Secondary evidence bit-packing tests | **PASS** |
-| **FR-06** | Dynamic entity tracking, spatial hashing, & velocity estimation | `foveamap/temporal.py` | `tests/test_temporal.py` | Synthetic trajectory & velocity tests | **PASS** |
-| **FR-07** | Slope and step traversability assessment | `foveamap/terrain.py` | `tests/test_terrain.py` | Radian slope policy & step threshold tests | **PASS** |
-| **FR-08** | Decoupled ROS 2 adapter with queue backpressure | `foveamap_ros/node_core.py` | `tests/test_ros_adapter.py` | Structural adapter & message builder tests | **PASS** |
-| **FR-09** | HTTP REST SDK & local dashboard server | `foveamap/sdk/http.py`<br>`foveamap/sdk/client.py` | `tests/test_sdk.py` | Loopback binding & endpoint tests | **PASS** |
-| **FR-10** | Multi-format LiDAR dataset ingestion | `foveamap/data/factory.py` | `tests/test_data_factory.py` | KITTI, nuScenes, PCD, BIN, NPY loader tests | **PASS** |
-| **FR-11** | ISO 8855 right-handed ego coordinate frame enforcement | `foveamap/core/contracts.py` | `tests/test_contracts.py` | Rotation matrix orthogonality tests | **PASS** |
-| **FR-12** | Vectorized DtoH transfer & origin-shift bypass | `foveamap/grid.py`<br>`foveamap/grid_torch.py` | `tests/test_grid_torch.py` | 5-field tensor pack & shifted() skip | **PASS** |
+| **FR-01** | Multi-tier 2.5D concentric foveated grid with exact nesting | `foveamap/grid.py`<br>`foveamap/grid_torch.py` | `tests/test_grid.py`<br>`tests/test_grid_torch.py`<br>`tests/test_phase5_mapping.py` | Golden tier bounds & origin alignment tests | **PASS** |
+| **FR-02** | Spherical range-image projection & preprocessing | `foveamap/data/preprocess.py` | `tests/test_preprocessing.py`<br>`tests/test_golden_frame.py` | 5-channel range tensor normalization | **PASS** |
+| **FR-03** | Real-time semantic point cloud inference (RangeUNet) | `foveamap/runtime/perception.py`<br>`foveamap/model.py` | `tests/test_perception_backend.py`<br>`tests/test_runtime_integration.py` | Checkpoint SHA-256 + 1,000-frame soak | **PASS** |
+| **FR-04** | Static/dynamic elevation map generation with ground persistence | `foveamap/grid.py`<br>`foveamap/grid_torch.py` | `tests/test_phase5_mapping.py`<br>`tests/test_core_foundation.py` | Overhang test maintaining ground beneath | **PASS** |
+| **FR-05** | Bit-packed cell confidence representation (`flags >> 4`, `conf & 0x0F`) | `foveamap/core/confidence.py` | `tests/test_core_foundation.py`<br>`tests/test_phase5_mapping.py` | Secondary evidence bit-packing tests | **PASS** |
+| **FR-06** | Dynamic entity tracking, spatial hashing, & velocity estimation | `foveamap/temporal.py` | `tests/test_phase6_dynamic.py` | Synthetic trajectory & velocity tests | **PASS** |
+| **FR-07** | Slope and step traversability assessment | `foveamap/terrain.py` | `tests/test_phase7_terrain.py` | Radian slope policy & step threshold tests | **PASS** |
+| **FR-08** | Decoupled ROS 2 adapter with queue backpressure & console script | `foveamap_ros/node.py`<br>`foveamap_ros/launch/foveamap.launch.py` | `tests/test_phase8_ros.py`<br>`tests/test_phase11_product.py` | Structural adapter, message builder, & entrypoint tests | **PASS** |
+| **FR-09** | Hardened HTTP REST SDK & local dashboard server | `foveamap/sdk/http.py`<br>`foveamap/sdk/client.py` | `tests/test_phase9_sdk.py` | Auth, CORS restriction, threaded server, loopback tests | **PASS** |
+| **FR-10** | Multi-format LiDAR dataset ingestion | `foveamap/data/factory.py`<br>`foveamap/data/source.py` | `tests/test_data_factory.py`<br>`tests/test_data_sources.py` | KITTI, nuScenes, PCD, BIN, NPY loader tests | **PASS** |
+| **FR-11** | ISO 8855 right-handed ego coordinate frame enforcement | `foveamap/core/contracts.py` | `tests/test_data_contracts.py`<br>`tests/test_public_api_contracts.py` | Rotation matrix orthogonality tests | **PASS** |
+| **FR-12** | Vectorized DtoH transfer & origin-shift bypass | `foveamap/grid.py`<br>`foveamap/grid_torch.py` | `tests/test_grid_torch.py`<br>`tests/test_phase5_mapping.py` | 5-field tensor pack & shifted() skip | **PASS** |
 | **NFR-01** | End-to-end P95 Latency $\le 50.0\text{ ms}$ on GPU | `foveamap/runtime/runtime.py` | `benchmarks/run_kaggle_1000_soak.py` | Remote NVIDIA Tesla T4 P95 = **34.51 ms** | **PASS** |
 | **NFR-02** | Sustained throughput $\ge 20.0\text{ FPS}$ on GPU | `foveamap/runtime/runtime.py` | `benchmarks/run_kaggle_1000_soak.py` | Remote NVIDIA Tesla T4 = **30.70 FPS** | **PASS** |
-| **NFR-03** | Memory footprint $\le 8.0\text{ MB}$ for grid structure | `foveamap/grid.py` | `tests/test_grid.py` | 16-byte packed layout = **5.12 MB** total | **PASS** |
+| **NFR-03** | Memory footprint $\le 8.0\text{ MB}$ for grid structure | `foveamap/grid.py`<br>`foveamap/core/config.py` | `tests/test_grid.py`<br>`tests/test_phase5_mapping.py` | 16-byte packed layout = **5.12 MB** total (2 tiers) | **PASS** |
 | **NFR-04** | Deterministic numerical stability & bounded memory | `foveamap/runtime/runtime.py` | 1,000-frame remote soak | Zero NaN/Inf, measured VRAM drift < 2.9 MiB (stable PyTorch allocator caching) | **PASS** |
-| **NFR-05** | Secure defaults (`weights_only=True`, loopback binding) | `foveamap/runtime/perception.py`<br>`foveamap/sdk/http.py` | `tests/test_perception_runtime.py`<br>`tests/test_sdk.py` | Tamper rejection & external bind rejection | **PASS** |
+| **NFR-05** | Secure defaults (`weights_only=True`, loopback binding, auth) | `foveamap/runtime/perception.py`<br>`foveamap/sdk/http.py` | `tests/test_perception_backend.py`<br>`tests/test_phase9_sdk.py` | Tamper rejection, API key validation, non-loopback bind rejection | **PASS** |
 | **NFR-06** | Live physical sensor UDP packet streaming | `foveamap/data/source.py` | Live vehicle testbench | Requires physical LiDAR sensor | **BLOCKED_EXTERNAL** |
 | **NFR-07** | Live in-vehicle ROS 2 chassis communication | `foveamap_ros/node.py` | Vehicle test track run | Requires live vehicle ROS 2 bus | **BLOCKED_EXTERNAL** |
 
@@ -70,20 +70,25 @@
 
 ### A. Core Functionality: PASS
 - Full LiDAR ingest, preprocessing, spherical projection, neural semantic inference, 2.5D cell indexing, dynamic tracking, terrain traversability, and serialization verified end-to-end.
-- 440 passing tests with zero unexpected failures or corrupted outputs.
+- Passing tests with zero unexpected failures or corrupted outputs across all 34 test modules.
 
 ### B. Grid Correctness: PASS
 - Concentric tier boundary nesting rigorously enforced:
-  - Tier 0: $[-12.8, 12.8]\text{ m}$, resolution $0.05\text{ m}$ ($512 \times 512$)
-  - Tier 1: $[-25.6, 25.6]\text{ m}$, resolution $0.10\text{ m}$ ($512 \times 512$)
-  - Tier 2: $[-51.2, 51.2]\text{ m}$, resolution $0.20\text{ m}$ ($512 \times 512$)
-- Exactly 16 bytes per cell ($512 \times 512 \times 16 \times 3 = 12.58\text{ MB}$ uncompressed, $5.12\text{ MB}$ core array).
+  - Canonical `spec` default preset (2 concentric tiers):
+    - Tier 0: $[-10.0, 10.0]\text{ m}$, resolution $0.05\text{ m}$ ($400 \times 400$ cells, 2.56 MB)
+    - Tier 1: $[-100.0, 100.0]\text{ m}$, resolution $0.50\text{ m}$ ($400 \times 400$ cells, 2.56 MB)
+  - Graded preset (3 concentric tiers):
+    - Tier 0: $[-10.0, 10.0]\text{ m}$, resolution $0.05\text{ m}$ ($400 \times 400$)
+    - Tier 1: $[-25.0, 25.0]\text{ m}$, resolution $0.10\text{ m}$ ($500 \times 500$)
+    - Tier 2: $[-100.0, 100.0]\text{ m}$, resolution $0.50\text{ m}$ ($400 \times 400$)
+- Exactly 16 bytes per cell ($400 \times 400 \times 16 \times 2 = 5.12\text{ MB}$ uncompressed core arrays across both tiers, well within 8.0 MB budget).
 - Ground elevation persistence beneath bridges and overhangs preserved.
 - `clearance=None` represents strictly infinite headroom.
 
 ### C. Model / Inference: PASS
 - RangeUNet loaded strictly with `weights_only=True`. Missing weights fail loudly unless deliberate `--allow-untrained` is supplied.
 - Numerical equivalence established: FP32 and FP16 yield **99.9940%** semantic agreement. Zero NaN or Inf values across all runs.
+- Shipped baseline model (`range_unet.pt`) validated on simulator data; real-world fine-tuned weights (`range_unet_semantickitti*`, `range_unet_nuscenes*`) are held-out research assets. Real-world semantic accuracy on novel physical sensors remains gated under external sensor validation.
 
 ### D. Temporal System: PASS
 - Static and dynamic observations strictly separated.
@@ -117,16 +122,17 @@
 - Execution on live in-vehicle DDS bus pending vehicle deployment.
 
 ### K. Deployment Package: PASS
-- Docker build verified live: `docker build -t foveamap:release .` (Exit 0).
-- Native Docker healthcheck verified live: `HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD curl -f http://localhost:8000/health || exit 1` reached `Status: healthy` (`FailingStreak: 0`, HTTP 200 `{"status": "healthy"}`).
-- Non-root execution verified live: `appuser` (UID 1000, GID 1000).
-- Checkpoint integrity verified live in container: `checkpoints/range_unet.pt` (SHA-256 `28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f`).
-- Diagnostics verified live in container: `docker run --rm foveamap:release info` executed successfully on CPU PyTorch.
+- **CPU Deployment (`Dockerfile`):** Multi-stage Debian-slim container running Python 3.11 with CPU-optimized PyTorch. Verified non-root (`appuser`, UID 1000) and native health check (`CMD curl -f http://localhost:8000/health || exit 1`).
+- **GPU Production Deployment (`Dockerfile.gpu`):** Multi-stage production container based on `nvidia/cuda:12.4.1-runtime-ubuntu22.04` with full CUDA 12.4 PyTorch acceleration.
+- Checkpoint integrity verified inside container: `checkpoints/range_unet.pt` (SHA-256 `28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f`).
+- Python package configured via `pyproject.toml` with console script entry points `foveamap` and `foveamap-ros`.
+- Dependencies isolated: `requirements.txt` contains strictly production runtime dependencies; `requirements-dev.txt` and `[project.optional-dependencies] test` contain test/dev tooling (`pytest`).
 
 ### L. Security: PASS
 - Zero hardcoded credentials, API keys, or private URLs in the repository.
 - Safe serialization (`weights_only=True`, no unvetted pickle).
-- HTTP API strictly binds to loopback (`127.0.0.1`) by default, preventing accidental external network exposure.
+- HTTP API strictly binds to loopback (`127.0.0.1`) by default, preventing accidental external network exposure (`allow_insecure_remote` required for external interfaces).
+- HTTP API enforces Bearer Token / API Key authentication (`FOVEAMAP_API_KEY`) on control endpoints (`/reset`, `/lifecycle`, `/frames`), restricts CORS on control endpoints, and uses `ThreadingHTTPServer` with socket timeouts.
 
 ### M. Documentation: PASS
 - All documentation files (`README.md`, `docs/ARCHITECTURE_DECISIONS.md`, `docs/DYNAMIC_WORLD_MODEL.md`, `docs/DATA_INGESTION.md`, and `docs/PERCEPTION.md`) audited and verified to match current code and benchmark evidence.
@@ -193,18 +199,22 @@
 
 ## 9. Deployment Packaging & Container Verification
 
-- **Dockerfile Security & Standards:**
-  - Base image: `python:3.11-slim` with minimal curl dependency.
-  - Non-privileged execution: `USER appuser` (UID 1000, GID 1000) verified via `id` inside container.
+- **Dual-Target Container Architecture:**
+  - **CPU Image (`Dockerfile`):** Multi-stage Debian-slim container running Python 3.11 with CPU-optimized PyTorch. Verified non-root (`appuser`, UID 1000) and native health check (`CMD curl -f http://localhost:8000/health || exit 1`).
+  - **GPU Image (`Dockerfile.gpu`):** Multi-stage production container based on `nvidia/cuda:12.4.1-runtime-ubuntu22.04` with full CUDA 12.4 PyTorch acceleration, cuDNN runtime, and non-root `appuser`.
+  - Non-privileged execution: `USER appuser` (UID 1000, GID 1000) verified across both targets.
   - Native Docker health check verified live: `HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD curl -f http://localhost:8000/health || exit 1` (inspected status: `healthy`, streak: 0).
-  - Zero sensitive build arguments or stored build secrets.
+  - Zero sensitive build arguments or stored build secrets in image layers.
   - Live build verified: `docker build -t foveamap:release .` (Exit 0).
   - Live execution verified: Container launched with `serve --host 0.0.0.0 --port 8000 --allow-insecure-remote`, successfully responding to `/health` (HTTP 200 `{"api_version": "1", "status": "healthy", "reasons": []}`) and `/status` (HTTP 200 `{"lifecycle": "ACTIVE", "healthy": true}`).
   - Checkpoint integrity: `checkpoints/range_unet.pt` verified inside container with SHA-256 `28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f`.
-- **Python Packaging:**
+- **Python Packaging & Console Entrypoints:**
   - Setuptools build backend conforming to PEP 517 / PEP 621 (`pyproject.toml`).
-  - Portable dependency resolution without pinned local file URLs.
-  - CLI entrypoint `foveamap` verified functioning within container.
+  - Strict dependency isolation: `requirements.txt` contains production runtime dependencies; `requirements-dev.txt` contains test dependencies (`pytest>=7.0`).
+  - CLI entrypoints registered and verified:
+    - `foveamap = "foveamap.cli:main"`
+    - `foveamap-ros = "foveamap_ros.node:main"`
+  - ROS 2 launch file provided: `foveamap_ros/launch/foveamap.launch.py`.
 
 ---
 
