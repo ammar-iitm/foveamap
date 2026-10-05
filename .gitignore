@@ -30,3 +30,5 @@ scratch/
 # local benchmark dumps and soak outputs
 t4_1000_*_frames.json
 foveamap_t4_1000_frame_soak.json
+kaggle_output/
+kaggle_run/

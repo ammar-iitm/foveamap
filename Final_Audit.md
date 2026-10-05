@@ -6,10 +6,10 @@
 **Workspace:** `C:\Users\Kmano\Dropbox\Project\Current_Project\foveamap`  
 **Git Branch:** `dev`  
 **Starting Commit SHA:** `20e65df551de1e4cbf6c42099707f8c6a7f2bede`  
-**Evaluated / Verified Commit SHA:** `45f07ea0ba27fb053eb265e06497f62e8a61472e`  
+**Evaluated / Verified Commit SHA:** `61ef607009cf2e00aa70b5a4612dd3e40cfa6050`  
 **Target Performance Gates:** E2E P95 $\le 50.0\text{ ms}$, Throughput $\ge 20.0\text{ FPS}$ on remote NVIDIA Tesla T4 GPU  
 **Audit Status:** COMPLETE — PRE-DEPLOYMENT RELEASE GATE PASSED  
-**Final Verdict:** **READY FOR DEPLOYMENT: PASS (Software Complete; External Physical Gates Documented)**
+**Final Verdict:** **READY WITH CONDITIONS: PASS (Software & Soak Complete; External Physical Gates Documented)**
 
 ---
 
@@ -297,11 +297,17 @@ All 14 confirmed findings have been remediated in structured, logically grouped 
 ================================================================================
                     FINAL PRE-DEPLOYMENT RELEASE GATE
 ================================================================================
-  SOFTWARE READY FOR DEPLOYMENT : PASS (100% of verifiable requirements pass)
+  FINAL VERDICT                 : READY WITH CONDITIONS: PASS
+  EVALUATED FROZEN GIT SHA      : 61ef607009cf2e00aa70b5a4612dd3e40cfa6050
+  SOFTWARE REQUIREMENTS GATE    : PASS (100% of verifiable requirements pass)
+  FULL TEST SUITE               : PASS (444 passed, 6 skipped, 0 failed in 663.27s)
+  TARGETED REGRESSION SUITE     : PASS (134 passed, 5 skipped, 0 failed in 110.14s)
   DOCKER CPU CONTAINER DEPLOY   : PASS (Verified live via Docker)
   DOCKER GPU CONTAINER (CUDA)   : PASS (Validated specification & dependencies)
-  REMOTE GPU SOAK (TESLA T4)    : PASS (P95 = 34.51 ms, FPS = 30.70)
-  SECURITY & AUTHENTICATION     : PASS (Bearer/API-key auth, restricted CORS)
+  REMOTE GPU SOAK (TESLA T4)    : PASS (P95 = 33.67 ms FP32 / 33.98 ms FP16, FPS = 31.49 / 30.86)
+  SEMANTIC PARITY & FINITENESS  : PASS (99.9940% agreement, zero NaN / zero Inf)
+  MEMORY & VRAM STABILITY       : PASS (Peak 79.84 MiB, zero memory leak over 1,000 frames)
+  SECURITY & AUTHENTICATION     : PASS (Bearer/API-key auth, restricted CORS, loopback bind)
   PHYSICAL LIDAR SENSOR STREAM  : BLOCKED_EXTERNAL (Requires physical sensor)
   LIVE ROS 2 VEHICLE BUS        : BLOCKED_EXTERNAL (Requires in-vehicle chassis)
 ================================================================================

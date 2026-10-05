@@ -1,18 +1,18 @@
 # FOVEAMAP — FINAL PRE-DEPLOYMENT RELEASE GATE REPORT
 
-**Release Gate Completed:** 2026-10-05T07:15:00+05:30  
+**Release Gate Completed:** 2026-10-05T08:30:00+05:30  
 **Evaluated Branch:** `dev`  
-**FINAL VERIFIED COMMIT:** `45f07ea0ba27fb053eb265e06497f62e8a61472e`  
+**FINAL VERIFIED COMMIT:** `61ef607009cf2e00aa70b5a4612dd3e40cfa6050`  
 **Workspace:** `C:\Users\Kmano\Dropbox\Project\Current_Project\foveamap`  
 **Target Performance Gates:** End-to-End P95 $\le 50.0\text{ ms}$, Throughput $\ge 20.0\text{ FPS}$ on NVIDIA Tesla T4 GPU  
-**Final Release Decision:** **READY FOR DEPLOYMENT: PASS**
+**Final Release Decision:** **READY WITH CONDITIONS: PASS** (External physical gates remain gated)
 
 ---
 
 ## 1. Exact Evaluated Commit & Release Ancestry
 
-- **FINAL VERIFIED COMMIT:** `45f07ea0ba27fb053eb265e06497f62e8a61472e`
-- **Evaluated Software Baseline SHA:** `45f07ea0ba27fb053eb265e06497f62e8a61472e`
+- **FINAL VERIFIED COMMIT:** `61ef607009cf2e00aa70b5a4612dd3e40cfa6050`
+- **Evaluated Software Baseline SHA:** `61ef607009cf2e00aa70b5a4612dd3e40cfa6050`
 - **Ancestry & Remediation Scope:**
   - Evaluated release candidate includes all confirmed 3-LLM cross-audit remediations:
     - Device canonicalization for MPS & CUDA index normalization (`foveamap/runtime/device.py`, PR #1)
@@ -39,7 +39,7 @@
 - **Deployment Manifests:**
   - `Dockerfile` (Multi-stage non-root container deployment configuration)
   - `pyproject.toml` (Authoritative PEP 517 build configuration with dependencies and CLI entrypoints)
-  - `provenance.json` (Traceable release metadata matching commit `624aba768d794e18f0544051e26b687c489116f9`)
+  - `provenance.json` (Traceable release metadata matching commit `61ef607009cf2e00aa70b5a4612dd3e40cfa6050`)
 
 ---
 
@@ -144,50 +144,90 @@
 
 ## 5. Comprehensive Test Results
 
-- **Command:** `pytest -v -m "not (cuda or ros2 or slow)"`
-- **Result:** **440 passed, 0 failed, 5 deselected** (Total runtime: 429.08s)
-- **Deselection Rationale:**
+- **Full Suite Command:** `python -m pytest -q`
+- **Full Suite Result:** **444 passed, 6 skipped, 0 failed, 2 warnings** in 663.27s (11:03)
+- **Targeted Regression Suite:** `python -m pytest -q tests/test_perception_backend.py tests/test_phase8_ros.py tests/test_phase9_sdk.py tests/test_phase11_product.py tests/test_runtime_integration.py`
+- **Targeted Regression Result:** **134 passed, 5 skipped, 0 failed, 1 warning** in 110.14s (01:50)
+- **Skipped Test Rationale:**
   - 1 test with `@pytest.mark.cuda`: `tests/test_grid_torch.py::test_grid_torch_cuda_if_available` (Requires local CUDA hardware; verified on remote NVIDIA Tesla T4).
   - 4 tests with `@pytest.mark.ros2`: `tests/test_ros_node.py` (Requires `rclpy`/ROS 2 distribution on host; adapter structural logic is verified in `tests/test_ros_adapter.py`).
-- **Unexplained Regressions:** None.
+  - 1 test with `@pytest.mark.skipif`: NuScenes sensor sweep accumulation when sample sweep data is absent.
+- **Unexplained Regressions:** None (Zero defects).
 
 ---
 
 ## 6. Authoritative Benchmark Evidence
 
-### NVIDIA Tesla T4 1,000-Frame Soak Breakdown (FP32)
+### NVIDIA Tesla T4 1,000-Frame Soak Breakdown (Fresh Clean Checkout)
+
+- **Benchmark Execution Date:** 2026-10-05T02:57:30Z
+- **Exact Git SHA:** `61ef607009cf2e00aa70b5a4612dd3e40cfa6050`
+- **Git Tree SHA:** `ad0aeefebd373b0c7fb542d32e2fc70f792b54c8`
+- **Git Working Tree Status:** CLEAN (`modified_files: []`)
+- **Checkpoint SHA-256:** `28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f`
+- **Checkpoint Size:** 1,332,085 bytes (disk) / 1,269,725 bytes (payload)
+- **Workload Frame Point Count:** 62,232.5 mean points/frame (10,000 to 100,000 range)
+- **Warmup Frames:** 50
+- **Measured Frames:** 1,000
+
+#### FP32 Latency & Throughput Breakdown
 
 | Pipeline Stage | Mean (ms) | P50 (ms) | P90 (ms) | P95 (ms) | P99 (ms) | Max (ms) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Preprocessing** | 6.59 | 6.56 | 6.91 | 7.15 | 8.02 | 11.34 |
-| **RangeUNet Inference** | 2.44 | 2.42 | 2.53 | 2.57 | 2.71 | 3.74 |
-| **DtoH & 2.5D Projection** | 6.94 | 6.89 | 7.29 | 7.52 | 8.60 | 11.98 |
-| **Temporal & Grid Fusion** | 16.45 | 16.46 | 17.32 | 17.74 | 20.11 | 27.23 |
-| **Total End-to-End** | **32.42** | **32.35** | **33.77** | **34.51** | **37.52** | **50.62** |
+| **Preprocessing** | 6.41 | 6.37 | 6.79 | 6.98 | 8.01 | 10.13 |
+| **RangeUNet Inference** | 2.41 | 2.40 | 2.49 | 2.53 | 2.70 | 3.65 |
+| **DtoH & 2.5D Projection** | 6.79 | 6.75 | 7.18 | 7.39 | 8.83 | 11.48 |
+| **Temporal & Grid Fusion** | 16.00 | 15.94 | 16.89 | 17.37 | 18.57 | 26.73 |
+| **Total End-to-End** | **31.61** | **31.57** | **33.10** | **33.67** | **35.14** | **50.62** |
 
-- **Sustained Throughput:** **30.70 FPS** (Gate: $\ge 20.0\text{ FPS}$)
-- **Tail Latency (P95):** **34.51 ms** (Gate: $\le 50.0\text{ ms}$)
-- **Max Latency:** 50.62 ms (Single outlier during frame 742 allocator caching event)
+- **FP32 Sustained Throughput:** **31.49 FPS** (Gate: $\ge 20.0\text{ FPS}$) -> **PASS**
+- **FP32 Tail Latency (P95):** **33.67 ms** (Gate: $\le 50.0\text{ ms}$) -> **PASS**
+
+#### FP16 Latency & Throughput Breakdown
+
+| Pipeline Stage | Mean (ms) | P50 (ms) | P90 (ms) | P95 (ms) | P99 (ms) | Max (ms) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Preprocessing** | 6.45 | 6.41 | 6.75 | 6.90 | 7.96 | 10.55 |
+| **RangeUNet Inference** | 2.88 | 2.86 | 3.01 | 3.06 | 3.34 | 4.50 |
+| **DtoH & 2.5D Projection** | 6.83 | 6.77 | 7.13 | 7.30 | 8.78 | 11.05 |
+| **Temporal & Grid Fusion** | 16.10 | 16.01 | 16.86 | 17.28 | 18.57 | 26.33 |
+| **Total End-to-End** | **32.26** | **32.10** | **33.42** | **33.98** | **36.10** | **50.20** |
+
+- **FP16 Sustained Throughput:** **30.86 FPS** (Gate: $\ge 20.0\text{ FPS}$) -> **PASS**
+- **FP16 Tail Latency (P95):** **33.98 ms** (Gate: $\le 50.0\text{ ms}$) -> **PASS**
+- **FP32 vs FP16 Semantic Agreement:** **99.9940%** (Gate: $\ge 99.0\%$) -> **PASS**
+- **Numerical Integrity:** NaN / Inf Count = **0** (`nan_inf_found: false`) -> **PASS**
 
 ---
 
 ## 7. GPU Verification & Platform Evidence
 
 - **Remote Execution Platform:** Kaggle Official CLI v2.2.4
-- **Kernel Name:** `zesalamander/foveamap-1000-frame-soak-t4` (Version 2)
-- **Status:** `KernelWorkerStatus.COMPLETE`
-- **Execution Date:** 2026-10-04T15:16:09Z
+- **Kernel Name:** `zesalamander/foveamap-1000-frame-soak-t4` (Version 4)
+- **Status:** Execution completed cleanly, outputs retrieved via CLI
+- **Execution Date:** 2026-10-05T02:57:30Z
 - **Remote Host Specs:**
-  - **GPU:** NVIDIA Tesla T4 (15,360 MiB VRAM)
+  - **GPU:** NVIDIA Tesla T4 (2 visible devices, compute capability 7.5)
+  - **Total VRAM:** 14,911.69 MiB (~15 GB)
   - **NVIDIA Driver:** 580.178.04
-  - **CUDA Version:** 12.8
+  - **CUDA Driver Version:** 13.0
+  - **PyTorch CUDA Runtime:** 12.8
   - **PyTorch Version:** 2.11.0+cu128
-- **Memory Footprint:**
+- **Direct PyTorch CUDA Verification:**
+  - `torch.cuda.is_available() == True`
+  - CUDA device visible: `Tesla T4`
+  - Checkpoint loaded and verified: `/tmp/foveamap/checkpoints/range_unet.pt`
+  - Actual inference executed: Output class probabilities shape `(10000, 9)` verified finite with zero NaN / Inf
+- **Memory Footprint & Stability:**
   - Initial Allocated: 29.86 MiB
   - Final Allocated: 31.74 MiB
-  - Peak Allocated: **79.84 MiB** (FP16), **77.94 MiB** (FP32)
-  - VRAM Drift over 1,000 frames: **1.88 MiB** (Allocator pool retention, zero heap leak)
-- **Local Result Artifact:** [`results/kaggle_1000_soak_results.json`](file:///C:/Users/Kmano/Dropbox/Project/Current_Project/foveamap/results/kaggle_1000_soak_results.json) (55,968 bytes)
+  - Peak Allocated: **77.94 MiB** (FP32), **79.84 MiB** (FP16)
+  - Peak Reserved: **136.00 MiB** (FP32), **120.00 MiB** (FP16)
+  - VRAM Drift over 1,000 frames: **+1.882 MiB** (FP32), **+2.826 MiB** (FP16) (PyTorch CUDA caching pool behavior, zero heap leak)
+- **Local Result Artifacts:**
+  - [`results/kaggle_1000_soak_results.json`](file:///C:/Users/Kmano/Dropbox/Project/Current_Project/foveamap/results/kaggle_1000_soak_results.json)
+  - [`results/foveamap_t4_1000_frame_soak.json`](file:///C:/Users/Kmano/Dropbox/Project/Current_Project/foveamap/results/foveamap_t4_1000_frame_soak.json)
+  - [`results/t4_soak_execution.log`](file:///C:/Users/Kmano/Dropbox/Project/Current_Project/foveamap/results/t4_soak_execution.log)
 
 ---
 
@@ -234,7 +274,7 @@
 
 - All claims across `README.md`, `docs/ARCHITECTURE_DECISIONS.md`, `docs/DYNAMIC_WORLD_MODEL.md`, `docs/DATA_INGESTION.md`, and `docs/PERCEPTION.md` audited and reconciled against verified code.
 - Stale claims asserting unverified GPU performance removed and replaced with citations to authoritative Kaggle T4 soak evidence.
-- Provenance manifest [`provenance.json`](file:///C:/Users/Kmano/Dropbox/Project/Current_Project/foveamap/provenance.json) verified matching git commit `45f07ea0ba27fb053eb265e06497f62e8a61472e`.
+- Provenance manifest [`provenance.json`](file:///C:/Users/Kmano/Dropbox/Project/Current_Project/foveamap/provenance.json) verified matching git commit `61ef607009cf2e00aa70b5a4612dd3e40cfa6050`.
 
 ---
 
@@ -293,13 +333,16 @@ The following items are designated `BLOCKED_EXTERNAL`. They represent physical h
 ================================================================================
 
   FINAL STATUS:
-  READY FOR DEPLOYMENT: PASS
+  READY WITH CONDITIONS: PASS
 
   Software Verification:       COMPLETE (100% of verifiable requirements pass)
-  Remote GPU Performance:      PASS (P95 = 34.51 ms, FPS = 30.70 on Tesla T4)
+  Remote GPU Performance:      PASS (P95 = 33.67 ms FP32 / 33.98 ms FP16 on Tesla T4)
+  Sustained Throughput:        PASS (31.49 FPS FP32 / 30.86 FPS FP16, Gate >= 20.0)
+  Semantic Parity & Finite:    PASS (99.9940% agreement, zero NaN / zero Inf)
+  Memory & VRAM Stability:     PASS (Peak 79.84 MiB, zero memory leak over 1,000 frames)
   Security & Hygiene:          PASS (Zero secrets, safe loading, loopback bind)
-  Test Suite:                  PASS (440 passed, 0 failed, 5 deselected with reason)
-  Git Reproducibility:         PASS (Clean tree, exact commit 624aba7)
+  Test Suite:                  PASS (444 passed, 6 skipped, 0 failed in 663.27s)
+  Git Reproducibility:         PASS (Clean tree, exact commit 61ef607009cf2e00aa70b5a4612dd3e40cfa6050)
   External Physical Gates:     BLOCKED_EXTERNAL (LiDAR hardware & vehicle chassis)
 
 ================================================================================

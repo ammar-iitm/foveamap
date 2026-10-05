@@ -1,0 +1,73 @@
+================================================================================
+FOVEAMAP — FRESH 1,000-FRAME T4 SOAK & EXACT-RELEASE VERIFICATION
+================================================================================
+
+--- 1. HOST & GPU HARDWARE VERIFICATION ---
+PyTorch Version:         2.11.0+cu128
+PyTorch CUDA Version:    12.8
+CUDA is available:       True
+CUDA Device Name:        Tesla T4
+CUDA Device Count:       2
+CUDA Total VRAM (MiB):   14911.69
+
+--- nvidia-smi output ---
+Mon Oct  5 02:32:42 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.178.04             Driver Version: 580.178.04     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  Tesla T4                       Off |   00000000:00:04.0 Off |                    0 |
+| N/A   47C    P8              9W /   70W |       3MiB /  15360MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+|   1  Tesla T4                       Off |   00000000:00:05.0 Off |                    0 |
+| N/A   48C    P8             10W /   70W |       3MiB /  15360MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+
+
+--- 1b. DOCKER ENVIRONMENT PROBE ---
+Docker not runnable in this containerized host: [Errno 2] No such file or directory: 'docker'
+
+--- 2. CLEAN CHECKOUT OF EXACT RELEASE SHA (61ef607009cf2e00aa70b5a4612dd3e40cfa6050) ---
+Cloning https://github.com/ammar-iitm/foveamap.git into /tmp/foveamap...
+Checking out exact commit 61ef607009cf2e00aa70b5a4612dd3e40cfa6050...
+Checked out Git SHA:  61ef607009cf2e00aa70b5a4612dd3e40cfa6050
+Git Tree SHA:         ad0aeefebd373b0c7fb542d32e2fc70f792b54c8
+Git Branch:           detached
+Working Tree Status:  CLEAN
+
+--- 3. CHECKPOINT INTEGRITY VERIFICATION ---
+Checkpoint Path:     /tmp/foveamap/checkpoints/range_unet.pt
+Checkpoint Size:     1332085 bytes
+Checkpoint SHA256:   28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f
+
+--- 4. DIRECT PYTORCH CUDA INFERENCE EXECUTION ---
+Direct CUDA inference successful! Class probabilities shape: (10000, 9)
+Finiteness check: PASS (zero NaN, zero Inf)
+
+--- 5. EXECUTING AUTHORITATIVE 1,000-FRAME SOAK BENCHMARK ---
+Running command: /usr/bin/python3 /tmp/foveamap/benchmarks/run_kaggle_1000_soak.py --frames 1000 --warmup 50 --device cuda:0 --output-json /kaggle/working/foveamap_t4_1000_frame_soak.json
+
+Soak execution finished in 1486.2s with exit code 0
+
+--- 6. VERIFYING BENCHMARK RESULTS & EXACT GATES ---
+Benchmark Provenance SHA: 61ef607009cf2e00aa70b5a4612dd3e40cfa6050
+Benchmark Tree SHA:       None
+Benchmark Clean Status:   []
+Traceback (most recent call last):
+  File "/kaggle/src/script.py", line 168, in <module>
+    print(f"GPU Model:                {bench_data['platform']['gpu_model']}")
+                                       ~~~~~~~~~~^^^^^^^^^^^^
+KeyError: 'platform'
