@@ -403,7 +403,7 @@ def save_sequence(path: str, seq: dict):
 
 
 def load_sequence(path: str):
-    z = np.load(path)
+    z = np.load(path, allow_pickle=False)
     return {k: z[k] for k in z.files}
 
 

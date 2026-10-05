@@ -11,6 +11,7 @@ import http.client
 import io
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -18,11 +19,19 @@ import zipfile
 RETRYABLE = (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException)
 
 
+def _http_url(url):
+    """Only http(s) URLs with a host: urllib would also open file:// and ftp:// URLs."""
+    parsed = urllib.parse.urlparse(str(url))
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError(f"not an http(s) URL: {url!r}")
+    return str(url)
+
+
 class HTTPRangeFile(io.RawIOBase):
     """Seekable, read-only view of a URL (the server must honour Range requests)."""
 
     def __init__(self, url, block=1 << 20, timeout=60, retries=6, backoff=2.0):
-        self.url, self.block, self.timeout = url, block, timeout
+        self.url, self.block, self.timeout = _http_url(url), block, timeout
         self.retries, self.backoff = retries, backoff
         self.pos = 0
         size = self._retry(lambda: self._open("bytes=0-0").headers["Content-Range"])

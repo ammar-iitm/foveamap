@@ -174,7 +174,7 @@ def main():
     model = RangeUNet(widths_for(args.width))
     print(f"network widths {widths_for(args.width)}, {sum(p.numel() for p in model.parameters()):,} parameters")
     if args.init:
-        state = torch.load(args.init, map_location="cpu")
+        state = torch.load(args.init, map_location="cpu", weights_only=True)
         if widths_of(state) == widths_for(args.width):
             model.load_state_dict(state)
             print("initialised from", args.init)

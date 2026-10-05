@@ -89,3 +89,11 @@ def test_standard_checkpoint_keeps_its_shape():
     from foveamap.model import load_model, widths_of, BASE_WIDTHS
     ckpt = os.path.join(os.path.dirname(__file__), "..", "checkpoints", "range_unet.pt")
     assert widths_of(load_model(ckpt, torch.device("cpu")).state_dict()) == BASE_WIDTHS
+
+
+def test_checkpoints_load_as_tensors_only(tmp_path):
+    from foveamap.model import load_model
+    path = tmp_path / "not_weights.pt"
+    torch.save({"e1.0.weight": torch.zeros(1), "hook": print}, path)   # pickled code, not a tensor
+    with pytest.raises(Exception):
+        load_model(str(path), torch.device("cpu"))

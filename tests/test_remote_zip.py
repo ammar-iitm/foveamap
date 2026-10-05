@@ -50,3 +50,9 @@ def test_client_errors_are_not_retried():
     err = urllib.error.HTTPError("http://example.invalid/x.zip", 404, "Not Found", {}, None)
     with pytest.raises(urllib.error.HTTPError):
         FlakyRangeFile(make_zip(), fail=1, error=err, retries=5)
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/a.zip", "http:///no-host.zip"])
+def test_only_http_urls_are_opened(url):
+    with pytest.raises(ValueError):
+        HTTPRangeFile(url)
