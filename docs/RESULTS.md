@@ -59,6 +59,14 @@ Blocks of 10–15 consecutive slower frames still appear at different places in 
 
 A third session (`seq08_session3_run*`, `profile_seq08_session3.txt`) followed two more fixes: fusion finds its observed cells once instead of indexing with boolean masks, which cuts the host's waits for the GPU (stream synchronisations from 52 to 25 per frame, host-to-device copies from 60 to 35), and the previous sweeps are uploaded as float32. The typical frame got faster, 31.9–32.6 ms, the best so far, but that machine had the most stalls yet (frames of 77–118 ms scattered through the first run), and p95 came to 73.4 and 54.1 ms. The median is steady at 33–35 ms across all three sessions; the 95th percentile is set by Colab's shared machine, and on a busy one it misses 50 ms. The benchmark notebook now logs CPU steal time and the GPU's clock and power every 0.5 s next to each frame, to tell which it is.
 
+A fourth session (`seq08_session4_run*`, `monitor_seq08_session4_run*.csv`, `profile_seq08_session4.txt`) benchmarked the published model, twice as wide and trained on every 5th scan, with the benchmark notebook's machine monitor running: p50 / p95 33.8 / 46.0 ms and 33.6 / 48.0 ms, 27.5 and 27.1 FPS, the network at 7.4 ms. Both runs met the target. The monitor (CPU steal and busy time from `/proc/stat`, GPU clock, power and utilisation from `nvidia-smi` every 0.5 s) explains the tail:
+
+- **No CPU was stolen by the host**: steal was 0.0% in every sample of both runs.
+- **The GPU was not the cause**: its SM clock stayed at 585 MHz throughout and it was busy about 9% of the time, the same for slow and fast frames.
+- **The slow frames are CPU-bound**: frames over 45 ms (7 and 11 of 98) came while the VM's two vCPUs were 85–89% busy, against 56% for the 50 fastest frames, which is about what the pipeline itself uses. Their extra time is spread over every stage that launches GPU work (preprocessing, projection and fusion each 3–15 ms over their medians), not one stage. The profiler agrees: 2.1 s of CPU time against 0.38 s of GPU time.
+
+So the pipeline is limited by launching GPU work from one CPU thread, and on two shared vCPUs any other load on the machine delays it. More cores, or fewer and larger kernels per frame, would shrink the tail; the GPU has room to spare.
+
 | Objects within 25 m (40-epoch model, first 100 frames of sequence 08) | Precision | Recall |
 | --- | --- | --- |
 | Vehicle (at least 1 m²) | 64.7% | 69.8% |

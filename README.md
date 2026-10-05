@@ -14,7 +14,7 @@ Real Lidar, SemanticKITTI sequence 08 (held out from training; the network, at t
 
 | Requirement (PRD) | Target / hard limit | Result | Status |
 | --- | --- | --- | --- |
-| NFR-1 · p95 latency, sweep in to map and objects out | ≤ 50 ms / ≤ 100 ms | 43.7–73.4 ms over five Colab sessions; median 30.6–35.2 ms | target in 3 of 5 sessions; hard limit always |
+| NFR-1 · p95 latency, sweep in to map and objects out | ≤ 50 ms / ≤ 100 ms | 43.7–73.4 ms over six Colab sessions; median 30.6–35.2 ms | target in 4 of 6 sessions; hard limit always |
 | NFR-2 · throughput | ≥ 20 / ≥ 10 FPS | 24.8–28.4 FPS | ✅ |
 | NFR-3 · map memory, ±100 m, all layers | ≤ 8 MB / ≤ 16 MB | 5.12 MB, measured bytes | ✅ |
 | NFR-4 · saving vs a uniform 5 cm 2.5D grid | ≥ 30× / ≥ 20× | 50× | ✅ |
@@ -125,7 +125,7 @@ On Colab, section 6 of the [benchmark-only notebook](https://colab.research.goog
 
 The problem statement names PointNet++ and sparse CNNs as examples ("e.g.") of a perception backbone. FoveaMap uses a range-image U-Net instead, the "low-power fallback" of Architecture section 4, for these reasons:
 
-- **It leaves room for the map in the latency budget.** On a T4 the network takes 4.2 ms of a typical 33 ms SemanticKITTI frame (FP16, 64 × 1024 input). Features, binning, fusion and object extraction take the rest, and the whole pipeline meets p95 ≤ 50 ms (43.7 ms on SemanticKITTI, 43.3 ms on nuScenes).
+- **It leaves room for the map in the latency budget.** On a T4 the network takes 4.2 ms of a typical 33 ms SemanticKITTI frame at standard width, 7.3 ms at twice the width (FP16, 64 × 1024 input). Features, binning, fusion and object extraction take the rest, and the whole pipeline meets p95 ≤ 50 ms (43.7 ms on SemanticKITTI at standard width, 46.0–48.0 ms at twice the width, 43.3 ms on nuScenes).
 - **It is small and needs nothing beyond stock PyTorch.** 327,434 parameters and a 1.3 MB checkpoint at standard width (1.3M parameters and 5.2 MB at twice the width), plain 2-D convolutions: the same code runs on CUDA, Apple MPS and the CPU. Sparse 3-D convolutions need compiled libraries (spconv, TorchSparse or MinkowskiEngine) built for a particular CUDA version, and PointNet++ needs custom neighbour-search ops.
 - **It matches the sensor.** A spinning Lidar produces a range image natively: rows are lasers, columns are azimuth. The input is a dense image with no voxelisation step, and the motion cue (range residuals against the two previous sweeps) is just two more image channels.
 - **Accuracy is in the same range as the alternatives.** On the SemanticKITTI single-scan test set (19 classes), published results are about 20% mIoU for PointNet++, 52% for RangeNet++ and 60% for SalsaNext (both range-image networks), and roughly 60–68% for sparse-voxel networks such as SPVNAS and Cylinder3D, depending on the paper and version. Range-image networks give up a few points against sparse convolutions for speed; PointNet++ is far behind on this data. Our 59.7% is on 9 merged classes, trained on every 10th scan, so it is not directly comparable to these numbers.
@@ -143,7 +143,7 @@ The limits are known, and they explain the weakest results:
 - **Grid engine.** The grid engine runs in NumPy or PyTorch (`--grid torch`). The PyTorch engine is parity-tested against NumPy and runs on the GPU. With `--grid torch`, the range-image features are also built on the GPU (`foveamap/features_torch.py`, also parity-tested; override with `--features numpy`). Dashboard PNG export is encoded after the timed loop by default and reported as `export_ms`, not counted in latency (`--export async` encodes on a background thread during the run instead, and `none` skips it). On CUDA the derive step (flags and traversability cost) runs through `torch.compile`; set `FOVEAMAP_COMPILE=0` to run it eagerly.
 - **Not built yet:** 3D view, object tracking across frames (so no object IDs or velocity arrows), free-space ray clearing, ROS 2 node, and TensorRT export.
 - **Near-range accuracy** (67.0% against the 70% target). Doubling the training data (every 5th SemanticKITTI scan instead of every 10th) added only 0.6 points; doubling the network's width added 2.2 more (moving-object IoU +8.5), for 2.5 ms of extra network time. The wider network fits its training drives much more closely than it gains on the held-out one, so data augmentation (`--aug`) is the next step.
-- **Latency tail.** The median is steady at 33–35 ms, but p95 on Colab's shared machines ranged from 44 to 73 ms; the benchmark notebook now logs CPU steal time and the GPU's clock next to every frame to find out why.
+- **Latency tail.** The median is steady at 31–35 ms, but p95 on Colab's shared machines ranged from 44 to 73 ms. Logging the machine next to every frame showed why: the slow frames come when the VM's two vCPUs are nearly full (85–89% busy, against 56% for the fastest frames), with no CPU stolen by the host and the GPU's clock steady. The pipeline launches its GPU work from one CPU thread, so on two shared vCPUs any other load delays it; a machine with more cores, or fewer kernel launches per frame, would shrink the tail.
 
 ## Design documents
 
