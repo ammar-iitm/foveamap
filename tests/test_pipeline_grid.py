@@ -87,3 +87,16 @@ def test_benchmark_writes_metrics_without_export(drive, tmp_path):
     run_benchmark(frames, SIM_INFO, CKPT, str(tmp_path), truth=truth, n_uniform=1,
                   device="cpu", grid="torch", export="none")
     assert (tmp_path / "metrics.json").exists()
+
+
+@pytest.mark.parametrize("grid", ["numpy", "torch"])
+def test_an_empty_sweep_does_not_stop_the_pipeline(drive, grid):
+    frames, _ = drive
+    pipe = FoveaMapPipeline(CKPT, SIM_INFO, device="cpu", grid=grid)
+    pipe.step(frames[0])
+    n = len(frames[1]["pts"])
+    empty = {k: (v[:0] if isinstance(v, np.ndarray) and k != "sensor" and len(v) == n else v)
+             for k, v in frames[1].items()}
+    out = pipe.step(empty)                       # a blocked or dropped sweep
+    assert len(to_host(out["cls_pts"])) == 0
+    pipe.step(frames[2])                         # and the next one maps as usual

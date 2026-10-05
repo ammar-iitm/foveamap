@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from .frames import DatasetInfo
+from .frames import DatasetInfo, IN_CH
 
 
 def _t(a, device, dtype=None):
@@ -93,6 +93,9 @@ def make_features(frame, info: DatasetInfo, prev_ego=None, device="cpu"):
     H, W = info.n_rows, info.n_cols
     pts = _t(frame["pts"], dev, torch.float32)
     sensor = _t(frame["sensor"], dev, torch.float32)
+    if len(pts) == 0:                           # an empty sweep (sensor blocked, packets lost): all pixels empty
+        none = torch.empty(0, dtype=torch.long, device=dev)
+        return torch.zeros((IN_CH, H, W), device=dev), torch.full((H, W), -1, dtype=torch.long, device=dev), none, none
     rimg, idx, row, col = range_image(pts, _t(frame["ring"], dev), sensor, H, W)
     valid = idx >= 0
     sel = idx.clamp(min=0)

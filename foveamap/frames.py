@@ -111,6 +111,8 @@ def make_features(frame, info: DatasetInfo, prev_ego=None):
     H, W = info.n_rows, info.n_cols
     pts, sensor = frame["pts"], frame["sensor"]
     rimg, idx, row, col = range_image(pts, frame["ring"], sensor, H, W)
+    if len(pts) == 0:                           # an empty sweep (sensor blocked, packets lost): all pixels empty
+        return np.zeros((IN_CH, H, W), np.float32), idx, row, col
     valid = idx >= 0
     sel = np.where(valid, idx, 0)
     xyz = np.where(valid[..., None], pts[sel], 0.0)
