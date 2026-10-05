@@ -1,8 +1,8 @@
 # FOVEAMAP — FINAL PRE-DEPLOYMENT RELEASE GATE REPORT
 
-**Release Gate Completed:** 2026-10-04T21:49:00+05:30  
+**Release Gate Completed:** 2026-10-05T07:15:00+05:30  
 **Evaluated Branch:** `dev`  
-**FINAL VERIFIED COMMIT:** `22177217cd25ddc624a3231acf34907d2900270b`  
+**FINAL VERIFIED COMMIT:** `45f07ea0ba27fb053eb265e06497f62e8a61472e`  
 **Workspace:** `C:\Users\Kmano\Dropbox\Project\Current_Project\foveamap`  
 **Target Performance Gates:** End-to-End P95 $\le 50.0\text{ ms}$, Throughput $\ge 20.0\text{ FPS}$ on NVIDIA Tesla T4 GPU  
 **Final Release Decision:** **READY FOR DEPLOYMENT: PASS**
@@ -11,8 +11,8 @@
 
 ## 1. Exact Evaluated Commit & Release Ancestry
 
-- **FINAL VERIFIED COMMIT:** `22177217cd25ddc624a3231acf34907d2900270b`
-- **Evaluated Software Baseline SHA:** `624aba768d794e18f0544051e26b687c489116f9`
+- **FINAL VERIFIED COMMIT:** `45f07ea0ba27fb053eb265e06497f62e8a61472e`
+- **Evaluated Software Baseline SHA:** `45f07ea0ba27fb053eb265e06497f62e8a61472e`
 - **Ancestry Equivalence Proof:**
   - `git diff 624aba7..HEAD` contains strictly:
     - `Dockerfile`: Added native `HEALTHCHECK` directive (validated live via Docker).
@@ -231,7 +231,7 @@
 
 - All claims across `README.md`, `docs/ARCHITECTURE_DECISIONS.md`, `docs/DYNAMIC_WORLD_MODEL.md`, `docs/DATA_INGESTION.md`, and `docs/PERCEPTION.md` audited and reconciled against verified code.
 - Stale claims asserting unverified GPU performance removed and replaced with citations to authoritative Kaggle T4 soak evidence.
-- Provenance manifest [`provenance.json`](file:///C:/Users/Kmano/Dropbox/Project/Current_Project/foveamap/provenance.json) verified matching git commit `624aba768d794e18f0544051e26b687c489116f9`.
+- Provenance manifest [`provenance.json`](file:///C:/Users/Kmano/Dropbox/Project/Current_Project/foveamap/provenance.json) verified matching git commit `45f07ea0ba27fb053eb265e06497f62e8a61472e`.
 
 ---
 
