@@ -43,7 +43,8 @@ from google.colab import drive
 drive.mount('/content/drive')
 DATA = '/content/drive/MyDrive/foveamap_data'
 if DATASET == 'semantickitti':
-    STRIDE, EPOCHS, FLAGS = 10, 40, ''                  # which saved cache and model: the main notebook's settings
+    STRIDE, EPOCHS, FLAGS = 5, 40, '--width 2'          # which saved cache and model: the main notebook's settings
+                                                        # (this is the published model; 10, 40, '' is the earlier one)
     SCENE, FRAMES = '08', 100                           # the first 100 frames of sequence 08
     DRIVE_CACHE = f'{DATA}/semantickitti_cache_stride{STRIDE}'
     DRIVE_CKPT = f'{DATA}/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" ", "")}'
