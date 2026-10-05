@@ -97,6 +97,12 @@ button, input, select { font: inherit; color: inherit; }
 .steps { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0; padding: 0; list-style: none; }
 .steps li + li::before { content: "→"; color: var(--muted); margin-right: 6px; }
 @media (max-width: 720px) { .steps { display: none; } }
+.howbtn { font-size: 12px; padding: 2px 9px; margin-left: auto; }
+.how { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin: 4px 0 2px; padding: 0; list-style: none; counter-reset: how; }
+.how[hidden] { display: none; }
+.how li { counter-increment: how; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); line-height: 1.45; }
+.how li::before { content: counter(how) " · "; color: var(--accent); font-family: var(--font-num); }
+.how li b { color: var(--fg); }
 .frameno { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--fg2); white-space: nowrap; }
 
 @media (max-width: 1100px) {
@@ -130,6 +136,16 @@ button, input, select { font: inherit; color: inherit; }
       <span class="why">5 cm cells to ±100 m would take 16M cells (256 MB); FoveaMap keeps 5 cm only within ±10 m and 50 cm beyond: <b>320k cells, 5.12 MB, 50× less</b></span>
       <ol class="steps" aria-label="Pipeline">
         <li>Lidar sweep</li><li>network: 9 classes + motion</li><li>5 cm / 50 cm binning</li><li>fusion</li><li>2.5D map + objects</li>
+      </ol>
+      <button class="btn howbtn" id="howbtn" aria-expanded="false" aria-controls="how" title="How each step works (H)">How it works<kbd>H</kbd></button>
+      <ol class="how" id="how" hidden>
+        <li><b>Sweep.</b> One Lidar sweep, moved into the vehicle's frame with its pose, plus the two sweeps before it.</li>
+        <li><b>Range image.</b> The points are unrolled into an image with one row per laser beam and 1024 columns: range, x, y, z, intensity, a valid mask, and two motion channels from the earlier sweeps.</li>
+        <li><b>Network.</b> A small U-Net labels every point with one of 9 classes (road, sidewalk, parking, terrain, vegetation, building, pole, vehicle, person) and whether it is moving. FP16 on the GPU.</li>
+        <li><b>Binning.</b> Each point lands in a 5 cm cell within ±10 m and a 50 cm cell out to ±100 m, 400 × 400 cells each. A cell is 16 bytes: count, lowest and highest point, ground height, roughness, class, confidence, flags, clearance, cost, age.</li>
+        <li><b>Fusion.</b> Each cell blends its class with what earlier sweeps saw, weighted by confidence. Points marked as moving are flagged, not written into the static map.</li>
+        <li><b>Hazards and cost.</b> A step of 8 cm or more is a curb; a cell at least 5 cm (and 3σ) below the local ground plane is a pothole; an overhang with 2.5 m of clearance can be driven under. Every cell gets a cost from 0 (road) to 254 (blocked).</li>
+        <li><b>Objects.</b> Touching cells of the same class become an object with a box and a label, dashed when it is moving.</li>
       </ol>
     </div>
   </header>
@@ -797,6 +813,8 @@ function setLayer(l) { S.layer = l; document.querySelectorAll("[data-layer]").fo
 function toggle(k) { S.ov[k] = !S.ov[k]; document.querySelector(`[data-ov="${k}"]`).setAttribute("aria-pressed", S.ov[k]); legend(); render(); }
 function setCompare(on) { S.compare = on; $("v-top").setAttribute("aria-pressed", !on); $("v-cmp").setAttribute("aria-pressed", on); render(); }
 $("v-top").onclick = () => setCompare(false);
+function setHow(open) { $("how").hidden = !open; $("howbtn").setAttribute("aria-expanded", open); }
+$("howbtn").onclick = () => setHow($("how").hidden);
 function setLegend(open) { $("legend").classList.toggle("open", open); $("legbtn").setAttribute("aria-expanded", open); }
 $("legbtn").onclick = () => setLegend(!$("legend").classList.contains("open"));
 setLegend(window.innerWidth > 520);                // open where there is room for it
@@ -830,6 +848,7 @@ document.addEventListener("keydown", e => {
   else if (k === "g") toggle("grid");
   else if (k === "p") toggle("points");
   else if (k === "l") setLegend(!$("legend").classList.contains("open"));
+  else if (k === "h") setHow($("how").hidden);
   else if (k === "0") { S.pan = [0, 0]; S.fitted = false; resize(); }
 });
 new ResizeObserver(resize).observe($("mapwrap"));
