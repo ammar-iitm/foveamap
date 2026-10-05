@@ -35,6 +35,7 @@ def test_benchmark_runs_with_torch_grid(drive, tmp_path):
                                  device="cpu", grid="torch", export="async")
     assert s["grid_engine"] == "torch" and s["points_lost"] == 0 and s["nesting_ok"]
     assert s["export_mode"] == "async"
+    assert s["gpu_memory"] is None                          # measured on CUDA only (NFR-5)
     assert all(f["png_bytes"] > 0 and f["export_ms"] > 0 for f in per_frame)
     assert len(os.listdir(tmp_path / "frames")) == len(frames)
     assert "export" not in per_frame[0]["timing_ms"]          # background export is not latency
@@ -100,3 +101,13 @@ def test_an_empty_sweep_does_not_stop_the_pipeline(drive, grid):
     out = pipe.step(empty)                       # a blocked or dropped sweep
     assert len(to_host(out["cls_pts"])) == 0
     pipe.step(frames[2])                         # and the next one maps as usual
+
+
+def test_gpu_memory_is_read_from_cuda(monkeypatch):
+    from foveamap import pipeline
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda d: (6 * 2**30, 15 * 2**30))
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda d: 300 * 2**20)
+    monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda d: 512 * 2**20)
+    g = pipeline._gpu_memory(torch.device("cuda", 0))
+    assert g == dict(peak_allocated_mb=300, peak_reserved_mb=512, device_used_mb=9 * 1024, device_total_mb=15 * 1024)
+    assert pipeline._gpu_memory(torch.device("cpu")) is None

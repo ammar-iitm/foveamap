@@ -183,6 +183,10 @@ rows += [('Moving-object IoU', pct(zero_shot['moving_iou']), pct(ft['moving_iou'
 display(pd.DataFrame(rows, columns=['Sequence 08', 'Simulator model', 'Fine-tuned']))
 print(f"Pipeline on the GPU: p50 / p95 {S['latency_ms']['p50']:.0f} / {S['latency_ms']['p95']:.0f} ms, "
       f"{S['fps']:.1f} FPS, points lost {S['points_lost']}, drivable IoU 0-10 m {pct(S['drivable_iou_grid_0_10'])}")
+if S.get('gpu_memory'):
+    G = S['gpu_memory']
+    print(f"Peak GPU memory: {G['peak_reserved_mb']:.0f} MB held by PyTorch ({G['peak_allocated_mb']:.0f} MB in tensors), "
+          f"whole GPU {G['device_used_mb']:.0f} MB with the CUDA context")
 """)
 
 md("""

@@ -219,6 +219,11 @@ for n in range(1, RUNS + 1):
     print(f"points lost {S['points_lost']}, drivable IoU 0-10 m {pct(S['drivable_iou_grid_0_10'])}, "
           f"pothole flag rate {100 * S['pothole_flag_rate_drivable_10m']:.3f}%")
     print('point mIoU by band:', [pct(v) for v in S['point_miou_by_band']])
+    G = S.get('gpu_memory')
+    if G:
+        print(f"peak GPU memory (NFR-5, target <= 4 GB): {G['peak_reserved_mb']:.0f} MB held by PyTorch "
+              f"({G['peak_allocated_mb']:.0f} MB in tensors); whole GPU in use {G['device_used_mb']:.0f} MB "
+              f"of {G['device_total_mb']:.0f} MB, CUDA context included")
 
 O = S['objects_within_25m']
 display(pd.DataFrame([(c, pct(v['precision']), pct(v['recall']), v['tp'], v['fp'], v['fn']) for c, v in O.items()],

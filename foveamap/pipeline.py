@@ -39,6 +39,18 @@ def hardware_label(device, grid="numpy"):
     return f"{os.cpu_count()} vCPU, no GPU (CPU PyTorch, {engine} grid engine)"
 
 
+def _gpu_memory(device):
+    """Peak CUDA memory since the last reset (PRD NFR-5), or None off CUDA. allocated = tensors;
+    reserved = what PyTorch's allocator holds; device_used = the whole GPU's used memory now,
+    which also counts the CUDA context and any other process."""
+    if device.type != "cuda":
+        return None
+    free, total = torch.cuda.mem_get_info(device)
+    return dict(peak_allocated_mb=torch.cuda.max_memory_allocated(device) / 2**20,
+                peak_reserved_mb=torch.cuda.max_memory_reserved(device) / 2**20,
+                device_used_mb=(total - free) / 2**20, device_total_mb=total / 2**20)
+
+
 def _sync(device):
     if device.type == "cuda":
         torch.cuda.synchronize(device)
@@ -269,6 +281,8 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
     elif export_mode == "after":
         export_queue = []
 
+    if pipe.device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(pipe.device)   # the model is loaded already, so it counts
     for t, fr in enumerate(frames):
         wall = time.time()                     # when the frame started, to line up with machine monitors
         r = pipe.step(fr)
@@ -398,6 +412,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
             f["export_ms"], f["png_bytes"] = 0.0, 0
 
     # ------------------------------------------------------------------ summary
+    gpu_memory = _gpu_memory(pipe.device)      # before anything below allocates
     warm = per_frame[2:] if T > 3 else per_frame
     totals = np.array([f["total_ms"] for f in warm])
     stages = {k: float(np.mean([f["timing_ms"][k] for f in warm])) for k in per_frame[0]["timing_ms"]}
@@ -443,6 +458,7 @@ def run_benchmark(frames, info: DatasetInfo, ckpt, out_dir, truth=None, profile=
         stages_ms=stages,
         export_ms=float(np.mean([f["export_ms"] for f in warm])),     # background thread, not in latency
         memory_bytes=mem,
+        gpu_memory=gpu_memory,
         memory_saving_vs_uniform5=mem["uniform_5cm_2.5d"] / mem["foveated_spec"],
         cells=dict(foveated_spec=pipe.grid.n_cells, uniform_5cm=16_000_000),
         tiers=[dict(cell=tr.cell, half=tr.half, n=tr.n) for tr in pipe.grid.tiers],
