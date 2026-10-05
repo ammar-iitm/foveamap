@@ -89,6 +89,14 @@ button, input, select { font: inherit; color: inherit; }
 .play { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 260px; }
 .btn { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 4px 10px; cursor: pointer; min-width: 34px; }
 #scrub { flex: 1; accent-color: var(--accent); min-width: 120px; }
+/* one-line explainer under the top bar */
+.intro { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; color: var(--fg2); font-size: 12.5px;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+.intro b { color: var(--fg); font-weight: 600; }
+.intro .why { flex: 1 1 380px; min-width: 0; }
+.steps { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0; padding: 0; list-style: none; }
+.steps li + li::before { content: "→"; color: var(--muted); margin-right: 6px; }
+@media (max-width: 720px) { .steps { display: none; } }
 .frameno { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--fg2); white-space: nowrap; }
 
 @media (max-width: 1100px) {
@@ -118,6 +126,12 @@ button, input, select { font: inherit; color: inherit; }
     </div>
     <div class="spacer"></div>
     <div class="pill good" id="integrity" title="Points in the ±100 m window vs points binned into the grid">Integrity: <b>—</b></div>
+    <div class="intro">
+      <span class="why">5 cm cells to ±100 m would take 16M cells (256 MB); FoveaMap keeps 5 cm only within ±10 m and 50 cm beyond: <b>320k cells, 5.12 MB, 50× less</b></span>
+      <ol class="steps" aria-label="Pipeline">
+        <li>Lidar sweep</li><li>network: 9 classes + motion</li><li>5 cm / 50 cm binning</li><li>fusion</li><li>2.5D map + objects</li>
+      </ol>
+    </div>
   </header>
 
   <section class="main">
