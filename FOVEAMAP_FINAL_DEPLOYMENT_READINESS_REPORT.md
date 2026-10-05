@@ -13,11 +13,14 @@
 
 - **FINAL VERIFIED COMMIT:** `45f07ea0ba27fb053eb265e06497f62e8a61472e`
 - **Evaluated Software Baseline SHA:** `45f07ea0ba27fb053eb265e06497f62e8a61472e`
-- **Ancestry Equivalence Proof:**
-  - `git diff 624aba7..HEAD` contains strictly:
-    - `Dockerfile`: Added native `HEALTHCHECK` directive (validated live via Docker).
-    - Documentation & Provenance: `FOVEAMAP_FINAL_DEPLOYMENT_READINESS_REPORT.md`, `Final_Audit.md`, `docs/ARCHITECTURE_DECISIONS.md`, `docs/DYNAMIC_WORLD_MODEL.md`, `provenance.json`.
-  - Core production code in `foveamap/` and `foveamap_ros/` is **100% bit-identical**.
+- **Ancestry & Remediation Scope:**
+  - Evaluated release candidate includes all confirmed 3-LLM cross-audit remediations:
+    - Device canonicalization for MPS & CUDA index normalization (`foveamap/runtime/device.py`, PR #1)
+    - Fused on-device finiteness check & heuristic confidence cap (`foveamap/runtime/perception.py`)
+    - Hardened HTTP server with bearer auth, restricted CORS, and threaded server (`foveamap/sdk/http.py`)
+    - ROS 2 console script entry point, launch file, and CUDA profile (`pyproject.toml`, `foveamap_ros/`)
+    - Dedicated CUDA GPU container (`Dockerfile.gpu`) and isolated test dependencies (`requirements-dev.txt`)
+    - Automated release provenance consistency check (`tests/test_phase11_product.py`)
 - **Checkpoint SHA-256:** `28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f` (`checkpoints/range_unet.pt`, 1,269,725 bytes).
 - **Tree Status:** Clean, reproducible, synchronized with `origin/dev`.
 
