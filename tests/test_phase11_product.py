@@ -355,3 +355,22 @@ def test_packaging_and_docker_integrity():
     launch_file = root / "foveamap_ros" / "launch" / "foveamap.launch.py"
     assert launch_file.is_file()
 
+
+def test_release_provenance_and_manifest_consistency():
+    """Verify provenance manifest matches readiness report and points to valid SHA."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+
+    prov_file = root / "provenance.json"
+    assert prov_file.is_file()
+    prov_data = json.loads(prov_file.read_text(encoding="utf-8"))
+    assert "git_commit" in prov_data
+    assert "checkpoint_sha256" in prov_data
+    assert prov_data["checkpoint_sha256"] == "28d99c86fa862fe01ad5517ad7d988563d218814e9d462c946d2059171c7320f"
+
+    report_file = root / "FOVEAMAP_FINAL_DEPLOYMENT_READINESS_REPORT.md"
+    assert report_file.is_file()
+    report_text = report_file.read_text(encoding="utf-8")
+    assert prov_data["git_commit"] in report_text
+
+
