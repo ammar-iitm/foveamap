@@ -24,12 +24,12 @@ md("""
 nuScenes-mini has only 8 training scenes, far too few to learn real-world classes. SemanticKITTI has 19,130 labelled training scans from a 64-beam HDL-64E, the sensor the simulator models, and its classes map onto all 9 FoveaMap classes (including poles, parking and moving cars and people).
 
 This notebook:
-1. Fetches every 10th scan of the training sequences (00–07, 09, 10) and of the validation sequence 08, plus the two scans before each (the motion cue). It pulls only those scans out of the 85 GB KITTI zip, about 14 GB in total, and builds the frame cache from them. The cache is saved to your Google Drive, so later sessions copy it back instead of downloading and rebuilding.
+1. Fetches every 5th scan (`STRIDE`) of the training sequences (00–07, 09, 10) and of the validation sequence 08, plus the two scans before each (the motion cue). It pulls only those scans out of the 85 GB KITTI zip, about 26 GB in total (14 GB at `STRIDE = 10`), and builds the frame cache from them. The cache is saved to your Google Drive, so later sessions copy it back instead of downloading and rebuilding.
 2. Measures the **simulator-trained** model on sequence 08 before fine-tuning.
-3. **Fine-tunes** it on the training sequences.
+3. **Trains** the network on the training sequences. The default settings (`STRIDE = 5`, `EPOCHS = 40`, `FLAGS = '--width 2'`) reproduce the published model: twice the standard width, trained from scratch. With `FLAGS = ''` it fine-tunes the standard-width simulator model instead.
 4. Scores sequence 08 again (mIoU by distance band and per class), and runs the pipeline benchmark on it.
 
-**Before you start:** use *Runtime → Change runtime type → T4 GPU*. The first run takes roughly 40–60 minutes, about half of it data preparation; later runs copy the prepared data from Drive in about 5 minutes.
+**Before you start:** use *Runtime → Change runtime type → T4 GPU*, and check the settings at the top of the setup cell (`STRIDE`, `EPOCHS`, `FLAGS`, `RETRAIN`): they are the only things to change. The first run at stride 5 takes roughly 1.5–2 hours, most of it data preparation; later runs copy the prepared data from Drive in about 10 minutes.
 
 **Terms:** KITTI is licensed [CC BY-NC-SA 3.0](http://www.cvlibs.net/datasets/kitti/) and SemanticKITTI [CC BY-NC-SA 4.0](http://www.semantic-kitti.org/) (non-commercial). Register at [cvlibs.net](http://www.cvlibs.net/datasets/kitti/user_register.php) and accept the KITTI terms before downloading.
 """)
@@ -46,6 +46,12 @@ The raw KITTI files go to this runtime's local disk, which is much faster than D
 This cell also clones the latest `main` from [GitHub](https://github.com/ammar-iitm/foveamap), replacing any older copy of the code. Run again, it keeps this session's checkpoints, results and logs.
 """)
 code("""
+# ---- the settings for this run, all here ----
+STRIDE = 5            # every 5th scan, as the published model; 10 = half the data, quicker to prepare
+EPOCHS = 40
+FLAGS = '--width 2'   # the published model; add ' --aug' for augmentation; '' = standard width, fine-tuned
+RETRAIN = False       # True: train even if a model with these settings is already in Drive
+
 import os, sys, shutil, importlib
 REPO = 'https://github.com/ammar-iitm/foveamap.git'
 USE_DRIVE = True
@@ -78,6 +84,13 @@ importlib.invalidate_caches()
 %cd /content/foveamap
 !pip -q install -r requirements.txt
 !git log --oneline -1
+import torch
+if not torch.cuda.is_available():
+    raise RuntimeError('This runtime has no GPU, so training and the benchmark would run on the CPU. Choose '
+                       'Runtime > Change runtime type > T4 GPU (if Colab offers none, the free GPU time '
+                       'may be used up for now) and run all again.')
+print('GPU:', torch.cuda.get_device_name(0))
+print(f"Settings: every {STRIDE}th scan, {EPOCHS} epochs, flags {FLAGS or '(none)'}, retrain {RETRAIN}")
 """)
 
 md("""
@@ -87,10 +100,10 @@ md("""
 
 **Otherwise** (first time, about 20–30 minutes): downloads the SemanticKITTI labels (179 MB, includes poses) and the KITTI calibration, fetches only the scans that are used from the KITTI velodyne zip (progress every 30 s), builds the frame cache, then saves it to Drive (about 14 GB) for next time.
 
-**`STRIDE = 5`** uses every 5th scan: twice the training data (about 3,800 frames), about 26 GB of scans and 28 GB of cache, and roughly twice as long to prepare and train. It fits a standard 12.7 GB runtime: the cache is written and read 100 frames at a time, and training keeps its arrays in files on the runtime's disk (`--arrays`) instead of RAM.
+**`STRIDE = 5`** (the default) uses every 5th scan: twice the training data of `STRIDE = 10` (about 3,800 frames), about 26 GB of scans and 28 GB of cache, and roughly twice as long to prepare and train. It fits a standard 12.7 GB runtime: the cache is written and read 100 frames at a time, and training keeps its arrays in files on the runtime's disk (`--arrays`) instead of RAM.
 """)
 code("""
-STRIDE = 10     # every 10th scan: ~1,900 training and ~400 validation frames; 5 doubles both (see above)
+# STRIDE is set in the setup cell: 5 gives ~3,800 training and ~800 validation frames, 10 half as many
 DRIVE_CACHE = f'/content/drive/MyDrive/foveamap_data/semantickitti_cache_stride{STRIDE}'
 if USE_DRIVE:
     drive.mount('/content/drive')
@@ -129,17 +142,14 @@ for n, v in zero_shot['iou_by_class'].items():
 """)
 
 md("""
-## 4. Fine-tune on the training sequences (about 15 minutes on a T4 for 40 epochs, plus a few to prepare the frames)
+## 4. Train on the training sequences (about 45 minutes on a T4 at the default settings, 15 at stride 10 and standard width, plus a few to prepare the frames)
 
 Starts from the simulator checkpoint. It first prepares the training frames (progress every 250 frames, a few minutes), then prints progress every 250 steps. The model and log are copied to Drive afterwards. `FLAGS` takes the recipe options from `scripts/train.py` (`--reset-head`, `--balance`, `--aug`, and `--width 2` for a network twice as wide, which trains from scratch since the simulator checkpoint has the standard width).
 
 **If a model with these settings is already in Drive** (same `STRIDE`, `EPOCHS` and `FLAGS`), it is copied back instead of training again, which takes seconds. Set `RETRAIN = True` to train anyway.
 """)
 code("""
-import json
-EPOCHS = 40
-FLAGS = ''
-RETRAIN = False
+import json                       # STRIDE, EPOCHS, FLAGS and RETRAIN are set in the setup cell
 ARRAYS = '--arrays /content/train_arrays' if STRIDE < 10 else ''     # below stride 10 the arrays don't fit in RAM
 DRIVE_CKPT = f'/content/drive/MyDrive/foveamap_data/checkpoints_stride{STRIDE}_epochs{EPOCHS}{FLAGS.replace(" ", "")}'
 if USE_DRIVE:
@@ -149,8 +159,9 @@ if USE_DRIVE and not RETRAIN and all(os.path.exists(f) for f in saved):
     for f in saved:
         shutil.copy(f, 'checkpoints/' if f.endswith(('.pt', '.json')) else '.')
     v = json.load(open('checkpoints/range_unet_semantickitti_val.json'))
-    print(f"Model with these settings found in Drive and copied back (val mIoU {100 * v['miou']:.1f}%). "
-          'Set RETRAIN = True to train again.')
+    print(f"NOT TRAINING: a model with these settings (every {STRIDE}th scan, {EPOCHS} epochs, flags "
+          f"{FLAGS or '(none)'}) is already in Drive and was copied back (val mIoU {100 * v['miou']:.1f}%). "
+          'Set RETRAIN = True in the setup cell to train again.')
 else:
     !python scripts/train.py --dataset semantickitti --cache $CACHE --init checkpoints/range_unet.pt \\
         --out checkpoints/range_unet_semantickitti.pt --epochs $EPOCHS $FLAGS $ARRAYS 2>&1 | tee train_semantickitti.log | awk '!/^step/ || (++n % 10 == 0)'
@@ -162,7 +173,7 @@ else:
 md("""
 ## 5. Results on sequence 08, and the pipeline benchmark
 
-The benchmark runs the first 100 frames of sequence 08 (every 10th scan, so 1 s apart) with the features and grid engine on the GPU.
+The benchmark runs the first 100 frames of sequence 08 (every `STRIDE`th scan: 0.5 s apart at stride 5) with the features and grid engine on the GPU.
 """)
 code("""
 !python scripts/run_benchmark.py --dataset semantickitti --cache $CACHE --scene 08 --max-frames 100 \\
