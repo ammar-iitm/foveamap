@@ -108,6 +108,25 @@ The same stride-5 data and 40 epochs, with every channel width doubled (`train.p
 | Moving-object IoU | 35.9% | **44.4%** |
 
 Every class gained; only the 50–100 m band fell (1.7 points). Where twice the data bought 0.6 points, twice the width bought 2.6 overall and 2.2 at 0–10 m, so the network's size was the larger limit. Its training loss ended at about 0.06 against 0.10 for the standard network, a much larger gap than on the held-out drive: it is starting to fit its training drives, so augmentation (`--aug`) is the next thing to try. Its benchmark (same 100 frames) gave p50 / p95 33.3 / 45.6 ms, 27.7 FPS, with the network at 7.3 ms (4.8 ms at standard width); drivable IoU 94.9%, pothole flag rate 0.059%, objects within 25 m vehicle 69.1% / 71.8%, person 17.6% / 28.1%, pole 33.5% / 63.0% precision / recall, and moving flags agreeing on 95.1% of matched objects. Files: `*width2*`.
+
+### Twice the width with augmentation, at stride 10
+
+A run meant to add augmentation (`--aug`: each training sweep's range and x, y, z scaled by a random ±5%, intensity by ±20%) to the published recipe ran with the notebook's default stride of 10 instead of 5, so it trained on 1,922 frames and was scored on every 10th scan of sequence 08. It is not a clean test of augmentation, since the data halved at the same time, but it is informative:
+
+| Sequence 08 | Standard width, stride 10 | Twice the width, stride 5 (published) | Twice the width + augmentation, stride 10 |
+| --- | --- | --- | --- |
+| **mIoU** | 59.7% | 62.9% | 62.8% |
+| mIoU 0–10 m / 10–25 / 25–50 / 50–100 m | 64.2% / 55.8% / 41.6% / 17.9% | 67.0% / 60.4% / 45.5% / 17.7% | **67.2%** / 59.2% / 45.1% / **20.3%** |
+| Road / sidewalk / parking | 88.6% / 71.2% / 27.9% | 89.7% / 74.4% / 29.8% | 90.9% / 74.1% / 30.3% |
+| Terrain / vegetation / building | 70.0% / 77.4% / 67.5% | 66.6% / 81.0% / 71.0% | 68.4% / 78.8% / 71.7% |
+| Pole / vehicle / person | 24.0% / 78.0% / 33.2% | 30.1% / 82.3% / 41.5% | 29.2% / 81.0% / 40.5% |
+| Moving-object IoU | 29.7% | **44.4%** | 39.8% |
+
+The columns are scored on different frames of the same held-out drive (every 10th, every 5th and every 10th scan), so differences of a point or less are within that. With half the data, augmentation brought the wide network to the published model's accuracy near range (67.2% against 67.0%) and beyond it at 50–100 m, but not for moving objects. Its training loss ended at 0.083 against 0.061 without augmentation, so it fits its training drives less closely, as intended. The run that answers whether augmentation adds to twice the data is the same recipe at stride 5. Its benchmark (first 100 frames of every 10th scan) gave p50 / p95 33.4 / 46.8 ms, 27.4 FPS, network 7.4 ms, drivable IoU 93.1%, pothole flag rate 0.061%, objects within 25 m vehicle 68.3% / 71.8%, person 15.5% / 26.6%, pole 30.8% / 64.1% precision / recall. Files: `*width2_aug*`.
+
+### Peak GPU memory (NFR-5)
+
+Measured in the same benchmark, with the twice-as-wide model loaded before the counters were reset: PyTorch's allocator held at most 138 MB (104 MB of it in tensors), and the whole GPU had 451 MB in use, including the CUDA context, of the T4's 14.9 GB. The PRD's target is at most 4 GB, so the pipeline uses about a ninth of it. The map's own layers are 5.12 MB of that.
 - **Weak classes.** Most poles and people are found (recall 70% and 63%), but too many other points are labelled as them, so their IoU stays low (24.0% and 33.2%). Parking (27.9%) is flat ground that looks like road or sidewalk.
 - **Reproducible.** Two 20-epoch training runs with seed 0 gave identical scores, down to the per-class IoUs. (Scoring the same model in different Colab sessions can differ by a few dozen of about 52 million points, from GPU rounding.)
 

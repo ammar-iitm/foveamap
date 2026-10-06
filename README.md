@@ -14,7 +14,7 @@ Real Lidar, SemanticKITTI sequence 08 (held out from training; the network, at t
 
 | Requirement (PRD) | Target / hard limit | Result | Status |
 | --- | --- | --- | --- |
-| NFR-1 · p95 latency, sweep in to map and objects out | ≤ 50 ms / ≤ 100 ms | 43.7–73.4 ms over six Colab sessions; median 30.6–35.2 ms | target in 4 of 6 sessions; hard limit always |
+| NFR-1 · p95 latency, sweep in to map and objects out | ≤ 50 ms / ≤ 100 ms | 43.7–73.4 ms over seven Colab sessions; median 30.6–35.2 ms | target in 5 of 7 sessions; hard limit always |
 | NFR-2 · throughput | ≥ 20 / ≥ 10 FPS | 24.8–28.4 FPS | ✅ |
 | NFR-3 · map memory, ±100 m, all layers | ≤ 8 MB / ≤ 16 MB | 5.12 MB, measured bytes | ✅ |
 | NFR-4 · saving vs a uniform 5 cm 2.5D grid | ≥ 30× / ≥ 20× | 50× | ✅ |
@@ -22,7 +22,7 @@ Real Lidar, SemanticKITTI sequence 08 (held out from training; the network, at t
 | NFR-7 · drivable IoU on the grid, 0–10 m | ≥ 90% / ≥ 85% | 94.9% | ✅ |
 | NFR-8 · curb (≥ 8 cm) recall within 10 m | ≥ 90% / ≥ 80% | 98.9% on the simulator (the real datasets have no curb ground truth) | ✅ simulator |
 | Points lost where tiers meet | 0 | 0, checked every frame | ✅ |
-| NFR-5 · peak GPU memory | ≤ 4 GB / ≤ 6 GB | not measured yet | — |
+| NFR-5 · peak GPU memory | ≤ 4 GB / ≤ 6 GB | 451 MB for the whole GPU, CUDA context included (138 MB held by PyTorch) | ✅ |
 
 nuScenes-mini (a 32-beam sensor, only 8 training scenes) passes the same speed and memory checks (p95 43.3 ms, 31 FPS) at 44% near-range mIoU: with so little training data, accuracy is limited by data. Every run, including the ones that missed and what was changed: [docs/RESULTS.md](docs/RESULTS.md).
 
