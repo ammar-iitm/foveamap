@@ -35,6 +35,15 @@ code("""
 !nvidia-smi --query-gpu=name,memory.total --format=csv || echo "No GPU: Runtime > Change runtime type > T4 GPU"
 """)
 code("""
+import torch                # preinstalled on Colab, so the GPU is checked before anything else runs
+if torch.cuda.is_available():
+    print(f'GPU connected: {torch.cuda.get_device_name(0)}')
+else:
+    print('GPU NOT connected: this runtime has only a CPU.')
+    raise RuntimeError('No GPU, so the run would measure the CPU instead. Choose Runtime > Change runtime '
+                       'type > T4 GPU (if Colab offers none, the free GPU time may be used up for now) '
+                       'and run all again.')
+
 DATASET = 'semantickitti'   # or 'nuscenes'
 RUNS = 2                    # benchmark runs, to tell the code from the machine's busy spells
 
@@ -67,12 +76,6 @@ importlib.invalidate_caches()
 %cd /content/foveamap
 !pip -q install -r requirements.txt
 !git log --oneline -1
-import torch
-if not torch.cuda.is_available():
-    raise RuntimeError('This runtime has no GPU, so the benchmark would measure the CPU instead. Choose '
-                       'Runtime > Change runtime type > T4 GPU (if Colab offers none, the free GPU time '
-                       'may be used up for now) and run all again.')
-print('GPU:', torch.cuda.get_device_name(0))
 """)
 
 md("""

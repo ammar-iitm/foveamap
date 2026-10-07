@@ -46,6 +46,15 @@ The raw KITTI files go to this runtime's local disk, which is much faster than D
 This cell also clones the latest `main` from [GitHub](https://github.com/ammar-iitm/foveamap), replacing any older copy of the code. Run again, it keeps this session's checkpoints, results and logs.
 """)
 code("""
+import torch                # preinstalled on Colab, so the GPU is checked before anything else runs
+if torch.cuda.is_available():
+    print(f'GPU connected: {torch.cuda.get_device_name(0)}')
+else:
+    print('GPU NOT connected: this runtime has only a CPU.')
+    raise RuntimeError('No GPU, so the run would measure the CPU instead. Choose Runtime > Change runtime '
+                       'type > T4 GPU (if Colab offers none, the free GPU time may be used up for now) '
+                       'and run all again.')
+
 # ---- the settings for this run, all here ----
 STRIDE = 5            # every 5th scan, as the published model; 10 = half the data, quicker to prepare
 EPOCHS = 40
@@ -84,12 +93,6 @@ importlib.invalidate_caches()
 %cd /content/foveamap
 !pip -q install -r requirements.txt
 !git log --oneline -1
-import torch
-if not torch.cuda.is_available():
-    raise RuntimeError('This runtime has no GPU, so training and the benchmark would run on the CPU. Choose '
-                       'Runtime > Change runtime type > T4 GPU (if Colab offers none, the free GPU time '
-                       'may be used up for now) and run all again.')
-print('GPU:', torch.cuda.get_device_name(0))
 print(f"Settings: every {STRIDE}th scan, {EPOCHS} epochs, flags {FLAGS or '(none)'}, retrain {RETRAIN}")
 """)
 
